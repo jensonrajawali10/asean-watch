@@ -47,6 +47,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   gas: 'Gas',
   deformation: 'Deformation',
   ash: 'Ash',
+  seismic: 'Seismic',
   report: 'Report',
 };
 

@@ -100,3 +100,18 @@ Decision (Jenson, 2026-10-13): the product exists to make people aware of potent
 - Types: `OfficialWarning`, `OfficialWarningArea`, `WarningFeedStatus`, `WarningHazard` in `src/types.ts`. `authority: "aggregator"` (e.g. GDACS) is an impact estimate and is never styled or worded as a warning.
 - Adapter: `src/lib/warnings.ts`, `loadOfficialWarnings()` (never throws; per-feed live, cache, backoff, then bundled snapshot) and `warningsNear()`. v1 feeds: BMKG InaTEWS and BMKG earthquakes, JMA tsunami and volcano, GeoNet volcanic alert levels, NWS Pacific tsunami, GDACS, plus a recorded MAGMA Indonesia level notice for Merapi (historical; MAGMA's API is token-only). Source research: `docs/research/APIS_GEOPHYSICAL.md`.
 - A real official level shown next to a simulated scenario sits in a separate panel and style, so the two can never be confused.
+
+## Real data only (decision 2026-10-13)
+
+Jenson: "make it all real data". Simulated fixtures are retired. Everything shown comes from a named real source with its real timestamps.
+
+- **Watch areas replace scenarios.** `data/watches.json` lists real places: volcanoes by Smithsonian GVP number and coordinates, and haze regions by bounding box. These were Merapi plus Riau, and v1 adds the Indonesian volcanoes MAGMA listed at Level III (Siaga) on 2026-10-13: Semeru, Anak Krakatau, Sinabung.
+- **Observations come from adapters.**
+  - NASA FIRMS VIIRS/MODIS active-fire CSVs (open, no key, no CORS) give `thermal`.
+  - USGS and BMKG earthquakes within a stated radius give `seismic`.
+  - There is no open numeric SO2 feed, so `gas` is empty and links out to MOUNTS. It is never filled with modelled values.
+  - Modelled data (Open-Meteo/CAMS) is context only, labelled MODELLED, and never evidence.
+- **Anomalies come from stated watch rules,** e.g. "FIRMS detection, confidence nominal or high, within 5 km of the summit". The rule text travels with each record (`anomalyReason`) and appears in "Why this state?". These rules are illustrative workflow rules, not official thresholds.
+- **Replay steps through the real last 7 days,** one step per UTC day, oldest first, so the demo flow keeps working on real data. The state at each step is whatever the real data gives. Nothing is staged.
+- **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. Browser-callable feeds (NEA, BMKG, JMA, GeoNet, USGS, NWS, GDACS, Open-Meteo) also refresh live in the app when online.
+- **Banner:** "DEMO REPLAY" becomes a data-recency banner, e.g. "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".

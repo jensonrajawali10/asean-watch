@@ -1,7 +1,7 @@
 // Shared data contract for ASEAN Watch. Every module builds against these types.
 // Changing a type here is a contract change: update docs/CONTRACT.md in the same commit.
 
-export const CATEGORIES = ['thermal', 'gas', 'deformation', 'ash', 'report'] as const;
+export const CATEGORIES = ['thermal', 'gas', 'deformation', 'ash', 'seismic', 'report'] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 export const DATA_MODES = ['simulated', 'historical', 'live'] as const;
@@ -81,9 +81,9 @@ export interface Observation {
   qualityNote: string;
   /** One-line human description of the record. */
   summary: string;
-  /** Configured in the fixture, never computed. Illustrative only. */
+  /** Set by a stated watch rule in the adapter (e.g. "VIIRS detection within 5 km of the summit"). Illustrative, never official. */
   anomaly: boolean;
-  /** Why the fixture marks this record anomalous; null when anomaly is false. */
+  /** The watch rule that flagged this record, in plain words; null when anomaly is false. */
   anomalyReason: string | null;
   /** Visible once the replay index reaches this step. Static incidents use 0. */
   replayStep: number;
