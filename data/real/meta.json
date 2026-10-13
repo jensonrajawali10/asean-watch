@@ -1,0 +1,155 @@
+{
+  "about": "ASEAN Watch real-data snapshot written by scripts/refresh-data.mjs. Records are real; nothing is simulated. Anomalies are decided by the stated watch rules in src/lib/watchRules.ts, not here.",
+  "schema": 1,
+  "retrievedAt": "2026-10-13T07:26:44Z",
+  "window": {
+    "start": "2026-10-07T00:00:00Z",
+    "end": "2026-10-13T07:26:44Z",
+    "days": 7
+  },
+  "collection": {
+    "thermalRadiusKm": 10,
+    "seismicRadiusKm": 50,
+    "note": "Rows were kept within these distances of each volcano summit point, or inside each haze box, and inside the window. The watch rules use smaller radii and drop the rest."
+  },
+  "sources": [
+    {
+      "id": "firms-viirs-snpp",
+      "name": "NASA FIRMS VIIRS 375 m NRT (Suomi NPP), South East Asia, last 7 days (CSV)",
+      "provider": "NASA FIRMS (LANCE)",
+      "url": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/suomi-npp-viirs-c2/csv/SUOMI_VIIRS_C2_SouthEast_Asia_7d.csv",
+      "productUrl": "https://www.earthdata.nasa.gov/data/instruments/viirs/viirs-i-band-375-m-active-fire-data",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T06:50:48Z",
+      "bytes": 7802753,
+      "rowsRead": 95339,
+      "rowsInvalid": 0,
+      "rowsKept": 239,
+      "satelliteCodes": [
+        "N"
+      ],
+      "attribution": "NASA FIRMS, LANCE. We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS) (https://earthdata.nasa.gov/firms), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) (https://earthdata.nasa.gov/lance) and NASA's Earth Science Data and Information System (ESDIS).",
+      "licence": "NASA open data (full and open sharing); FIRMS asks redistributors to use the acknowledgement above."
+    },
+    {
+      "id": "firms-viirs-noaa20",
+      "name": "NASA FIRMS VIIRS 375 m NRT (NOAA-20), South East Asia, last 7 days (CSV)",
+      "provider": "NASA FIRMS (LANCE)",
+      "url": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_SouthEast_Asia_7d.csv",
+      "productUrl": "https://www.earthdata.nasa.gov/data/instruments/viirs/viirs-i-band-375-m-active-fire-data",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T06:43:17Z",
+      "bytes": 8069376,
+      "rowsRead": 96437,
+      "rowsInvalid": 0,
+      "rowsKept": 70,
+      "satelliteCodes": [
+        "N20"
+      ],
+      "attribution": "NASA FIRMS, LANCE. We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS) (https://earthdata.nasa.gov/firms), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) (https://earthdata.nasa.gov/lance) and NASA's Earth Science Data and Information System (ESDIS).",
+      "licence": "NASA open data (full and open sharing); FIRMS asks redistributors to use the acknowledgement above."
+    },
+    {
+      "id": "firms-viirs-noaa21",
+      "name": "NASA FIRMS VIIRS 375 m NRT (NOAA-21), South East Asia, last 7 days (CSV)",
+      "provider": "NASA FIRMS (LANCE)",
+      "url": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-21-viirs-c2/csv/J2_VIIRS_C2_SouthEast_Asia_7d.csv",
+      "productUrl": "https://www.earthdata.nasa.gov/data/instruments/viirs/viirs-i-band-375-m-active-fire-data",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T06:46:03Z",
+      "bytes": 8352804,
+      "rowsRead": 99667,
+      "rowsInvalid": 0,
+      "rowsKept": 78,
+      "satelliteCodes": [
+        "N21"
+      ],
+      "attribution": "NASA FIRMS, LANCE. We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS) (https://earthdata.nasa.gov/firms), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) (https://earthdata.nasa.gov/lance) and NASA's Earth Science Data and Information System (ESDIS).",
+      "licence": "NASA open data (full and open sharing); FIRMS asks redistributors to use the acknowledgement above."
+    },
+    {
+      "id": "firms-modis",
+      "name": "NASA FIRMS MODIS C6.1 1 km NRT (Terra and Aqua), South East Asia, last 7 days (CSV)",
+      "provider": "NASA FIRMS (LANCE)",
+      "url": "https://firms.modaps.eosdis.nasa.gov/data/active_fire/modis-c6.1/csv/MODIS_C6_1_SouthEast_Asia_7d.csv",
+      "productUrl": "https://www.earthdata.nasa.gov/data/tools/firms/active-fire-data-attributes-modis-viirs",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T06:48:07Z",
+      "bytes": 1378547,
+      "rowsRead": 17857,
+      "rowsInvalid": 0,
+      "rowsKept": 22,
+      "satelliteCodes": [
+        "A",
+        "T"
+      ],
+      "attribution": "NASA FIRMS, LANCE. We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS) (https://earthdata.nasa.gov/firms), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) (https://earthdata.nasa.gov/lance) and NASA's Earth Science Data and Information System (ESDIS).",
+      "licence": "NASA open data (full and open sharing); FIRMS asks redistributors to use the acknowledgement above."
+    },
+    {
+      "id": "usgs-fdsn",
+      "name": "USGS earthquake catalog (ComCat), FDSN event query for the watch-area box",
+      "provider": "U.S. Geological Survey",
+      "url": "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=2026-10-07T00%3A00%3A00&endtime=2026-10-13T07%3A26%3A44&minlatitude=-8.57&maxlatitude=3.63&minlongitude=97.93&maxlongitude=113.39&orderby=time-asc&limit=20000",
+      "productUrl": "https://earthquake.usgs.gov/fdsnws/event/1/",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T07:26:45Z",
+      "rowsRead": 4,
+      "rowsKept": 0,
+      "attribution": "U.S. Geological Survey, Earthquake Hazards Program (ComCat via the FDSN event web service).",
+      "licence": "Public domain (U.S. Government work)."
+    },
+    {
+      "id": "bmkg-gempaterkini",
+      "name": "BMKG Data Terbuka gempaterkini.json (latest 15 earthquakes M 5.0+)",
+      "provider": "BMKG (Badan Meteorologi, Klimatologi, dan Geofisika)",
+      "url": "https://data.bmkg.go.id/DataMKG/TEWS/gempaterkini.json",
+      "productUrl": "https://data.bmkg.go.id/gempabumi/",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T07:27:02Z",
+      "rowsRead": 15,
+      "rowsKept": 0,
+      "coversFrom": "2026-09-17T06:20:53Z",
+      "coversTo": "2026-10-11T21:34:53Z",
+      "attribution": "Sumber data: BMKG (Badan Meteorologi, Klimatologi, dan Geofisika).",
+      "licence": "BMKG Data Terbuka terms (https://data.bmkg.go.id/gempabumi/): BMKG must be credited as the data source and shown in the app; access limit 60 requests per minute per IP."
+    },
+    {
+      "id": "bmkg-gempadirasakan",
+      "name": "BMKG Data Terbuka gempadirasakan.json (latest 15 felt earthquakes)",
+      "provider": "BMKG (Badan Meteorologi, Klimatologi, dan Geofisika)",
+      "url": "https://data.bmkg.go.id/DataMKG/TEWS/gempadirasakan.json",
+      "productUrl": "https://data.bmkg.go.id/gempabumi/",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T07:27:02Z",
+      "rowsRead": 15,
+      "rowsKept": 0,
+      "coversFrom": "2026-10-09T05:11:04Z",
+      "coversTo": "2026-10-13T06:42:28Z",
+      "attribution": "Sumber data: BMKG (Badan Meteorologi, Klimatologi, dan Geofisika).",
+      "licence": "BMKG Data Terbuka terms (https://data.bmkg.go.id/gempabumi/): BMKG must be credited as the data source and shown in the app; access limit 60 requests per minute per IP."
+    },
+    {
+      "id": "bmkg-live30event",
+      "name": "BMKG InaTEWS live30event.xml (latest located earthquakes, all magnitudes)",
+      "provider": "BMKG (Badan Meteorologi, Klimatologi, dan Geofisika)",
+      "url": "https://bmkg-content-inatews.storage.googleapis.com/live30event.xml",
+      "productUrl": "https://inatews.bmkg.go.id/",
+      "retrievedAt": "2026-10-13T07:26:44Z",
+      "lastModified": "2026-10-13T06:48:29Z",
+      "rowsRead": 199,
+      "rowsKept": 0,
+      "coversFrom": "2026-10-08T20:34:04Z",
+      "coversTo": "2026-10-13T06:42:29Z",
+      "attribution": "Sumber data: BMKG (Badan Meteorologi, Klimatologi, dan Geofisika).",
+      "licence": "BMKG Data Terbuka terms (https://data.bmkg.go.id/gempabumi/): BMKG must be credited as the data source and shown in the app; access limit 60 requests per minute per IP."
+    }
+  ],
+  "checks": {
+    "live30eventTimesAreUtc": {
+      "feltEventsInPeriod": 15,
+      "matchedWithin10sAnd100km": 14,
+      "note": "BMKG gempadirasakan DateTime is ISO UTC. Each felt event in the live30event period should match a live30event entry when live30event waktu is read as UTC."
+    }
+  }
+}

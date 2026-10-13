@@ -1,85 +1,231 @@
-// Loads the local fixtures and validates them. Owned by the logic builder.
+// Loads the real-data snapshot and turns it into incidents, replay days and validated observations.
+// Owned by the real-data builder. Nothing here is simulated: watch areas come from data/watches.json,
+// raw rows from data/real/*.json (written by scripts/refresh-data.mjs), and anomalies from the stated
+// rules in ./watchRules. No runtime network call.
 import volcanoesRaw from '../../data/volcanoes.json';
-import incidentsRaw from '../../data/incidents.json';
-import demoEventsRaw from '../../data/demo-events.json';
-import type { DemoScenario, Incident, Observation, ReplayStep, ValidationIssue, Volcano } from '../types';
-import { validateObservations } from './reviewRules';
+import watchesRaw from '../../data/watches.json';
+import firmsRaw from '../../data/real/firms.json';
+import quakesRaw from '../../data/real/quakes.json';
+import metaRaw from '../../data/real/meta.json';
+import { DATA_MODES } from '../types';
+import type { DemoScenario, Incident, Observation, ReplayStep, SourceRef, ValidationIssue, Volcano } from '../types';
+import { parseUtcTimestamp, validateObservations } from './reviewRules';
+import {
+  WATCH_HAZARDS,
+  buildReplayDays,
+  isWatchArea,
+  observationsForWatch,
+  ruleContext,
+  rulesForWatch,
+} from './watchRules';
+import type { FirmsRow, QuakeRow, Watch } from './watchRules';
 
+/** The shape the UI has always used. Unchanged so the UI keeps compiling. */
 export interface Fixtures {
   volcanoes: Volcano[];
   incidents: Incident[];
+  /**
+   * Compatibility for the current UI, which replays one incident: `incidentId` is the first watch and
+   * `replaySteps` are the shared snapshot days. Every watch replays over the same days; prefer
+   * `replaySteps` / `replayStepsFor`.
+   */
   scenario: DemoScenario;
   observations: Observation[];
   issues: ValidationIssue[];
   duplicatesIgnored: number;
 }
 
+/** One downloaded source, from data/real/meta.json. */
+export interface SnapshotSource {
+  /** e.g. "firms-viirs-noaa20", "usgs-fdsn", "bmkg-live30event". */
+  id: string;
+  name: string;
+  provider: string;
+  /** The exact file or query URL that was downloaded. */
+  url: string;
+  /** Public page describing the product. */
+  productUrl: string;
+  /** ISO 8601 UTC. */
+  retrievedAt: string;
+  /** The response's Last-Modified header as ISO 8601 UTC, when sent. */
+  lastModified: string | null;
+  rowsRead: number;
+  rowsKept: number;
+  attribution: string;
+  licence: string;
+}
+
+export interface SnapshotInfo {
+  /** ISO 8601 UTC time the snapshot was downloaded: "Data as of <time> UTC". */
+  retrievedAt: string;
+  /** Newest FIRMS file Last-Modified (ISO 8601 UTC): the satellite data time for the banner. Null if unknown. */
+  satelliteAsOf: string | null;
+  /** The last 7 UTC days, start at 00:00Z of the first day, end at retrievedAt. */
+  window: { start: string; end: string };
+  sources: SnapshotSource[];
+  /** One attribution line per provider (FIRMS, USGS, BMKG), for the footer and the brief. */
+  attributions: string[];
+}
+
+/** What loadFixtures returns: the unchanged Fixtures plus the real-data fields. */
+export interface RealFixtures extends Fixtures {
+  /** The watch areas (Incident-shaped, with area, key and references). Same objects as `incidents`. */
+  watches: Watch[];
+  /** One step per UTC day of the snapshot, oldest first. Every watch replays over these. */
+  replaySteps: ReplayStep[];
+  snapshot: SnapshotInfo;
+  /** Plain-language watch rules by watch id (thermal first, then seismic). */
+  rulesByWatch: Record<string, string[]>;
+}
+
+// ---------------------------------------------------------------------------
+// Raw input checks (data files are trusted to be ours, but a hand edit must fail loudly, not silently)
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isReplayStep(value: unknown): value is ReplayStep {
-  return (
-    isRecord(value) &&
-    typeof value.index === 'number' &&
-    Number.isInteger(value.index) &&
-    value.index >= 0 &&
-    typeof value.label === 'string' &&
-    typeof value.clock === 'string'
-  );
+function isSourceRef(value: unknown): value is SourceRef {
+  return isRecord(value) && typeof value.name === 'string' && typeof value.url === 'string' && /^https?:\/\//.test(value.url);
 }
 
-/**
- * Normalise the raw scenario block. A missing or empty `replaySteps` (or one with no usable step)
- * falls back to a single Baseline step clocked at the scenario incident's window start.
- */
-export function normalizeScenario(raw: unknown, incidents: Incident[]): DemoScenario {
-  const obj = isRecord(raw) ? raw : {};
-  const incidentId =
-    typeof obj.incidentId === 'string' && obj.incidentId !== ''
-      ? obj.incidentId
-      : (incidents.find((i) => i.replayable)?.id ?? '');
-  const steps = (Array.isArray(obj.replaySteps) ? obj.replaySteps : [])
-    .filter(isReplayStep)
-    .map((s) => ({
-      index: s.index,
-      label: s.label,
-      description: typeof s.description === 'string' ? s.description : '',
-      clock: s.clock,
-    }))
-    .sort((a, b) => a.index - b.index);
-  if (steps.length > 0) return { incidentId, replaySteps: steps };
-
-  const incident = incidents.find((i) => i.id === incidentId);
-  return {
-    incidentId,
-    replaySteps: [
-      {
-        index: 0,
-        label: 'Baseline',
-        description: 'Baseline observations. No replay steps were configured for this scenario.',
-        clock: incident?.scenarioWindow?.start ?? 'not set',
-      },
-    ],
-  };
+function readWatches(raw: unknown, issues: ValidationIssue[]): Watch[] {
+  if (!Array.isArray(raw)) {
+    issues.push({ recordId: null, index: -1, message: 'data/watches.json skipped: expected a list of watch areas.' });
+    return [];
+  }
+  const out: Watch[] = [];
+  raw.forEach((w: unknown, index) => {
+    const problems: string[] = [];
+    if (!isRecord(w)) {
+      issues.push({ recordId: null, index, message: `Watch at position ${index} skipped: not a record.` });
+      return;
+    }
+    for (const f of ['id', 'key', 'title', 'locationName', 'country', 'summary'] as const) {
+      if (typeof w[f] !== 'string' || (w[f] as string).trim() === '') problems.push(`${f} is missing`);
+    }
+    if (!WATCH_HAZARDS.includes(w.hazard as Watch['hazard'])) problems.push(`hazard ${JSON.stringify(w.hazard)} is not known`);
+    if (!(w.volcanoId === null || typeof w.volcanoId === 'string')) problems.push('volcanoId must be text or null');
+    if (typeof w.lat !== 'number' || typeof w.lon !== 'number') problems.push('lat/lon must be numbers');
+    if (!DATA_MODES.includes(w.dataMode as Watch['dataMode'])) problems.push(`dataMode ${JSON.stringify(w.dataMode)} is not known`);
+    if (!isWatchArea(w.area)) problems.push('area must be {"kind":"summit"} or a valid bbox');
+    if (typeof w.replayable !== 'boolean') problems.push('replayable must be true or false');
+    if (!Array.isArray(w.references) || !w.references.every(isSourceRef)) problems.push('references must be a list of {name, url}');
+    const win = w.scenarioWindow;
+    if (!isRecord(win) || parseUtcTimestamp(win.start) === null || parseUtcTimestamp(win.end) === null) {
+      problems.push('scenarioWindow must have UTC start and end');
+    }
+    if (problems.length > 0) {
+      issues.push({ recordId: typeof w.id === 'string' ? w.id : null, index, message: `Watch ${JSON.stringify(w.id)} skipped: ${problems.join('; ')}.` });
+      return;
+    }
+    out.push(w as unknown as Watch);
+  });
+  return out;
 }
 
-export function loadFixtures(): Fixtures {
-  const incidents = (Array.isArray(incidentsRaw) ? incidentsRaw : []) as unknown as Incident[];
-  const volcanoes = (Array.isArray(volcanoesRaw) ? volcanoesRaw : []) as unknown as Volcano[];
-  const events: Record<string, unknown> = isRecord(demoEventsRaw) ? demoEventsRaw : {};
-  const { valid, issues, duplicatesIgnored } = validateObservations(
-    events.observations,
-    new Set(incidents.map((i) => i.id)),
+function rowsOf(raw: unknown): unknown[] {
+  return isRecord(raw) && Array.isArray(raw.rows) ? raw.rows : [];
+}
+
+interface MetaShape {
+  retrievedAt: string;
+  window: { start: string; end: string };
+  sources: SnapshotSource[];
+}
+
+function readMeta(raw: unknown, issues: ValidationIssue[]): MetaShape | null {
+  if (
+    !isRecord(raw) ||
+    parseUtcTimestamp(raw.retrievedAt) === null ||
+    !isRecord(raw.window) ||
+    parseUtcTimestamp(raw.window.start) === null ||
+    parseUtcTimestamp(raw.window.end) === null ||
+    !Array.isArray(raw.sources)
+  ) {
+    issues.push({
+      recordId: null,
+      index: -1,
+      message: 'data/real/meta.json is missing or malformed, so no snapshot records were loaded. Run npm run refresh:data.',
+    });
+    return null;
+  }
+  const sources = raw.sources.filter(
+    (s): s is SnapshotSource => isRecord(s) && typeof s.id === 'string' && typeof s.name === 'string',
   );
+  return { retrievedAt: raw.retrievedAt as string, window: raw.window as MetaShape['window'], sources };
+}
+
+// ---------------------------------------------------------------------------
+
+/** Build the fixtures from raw inputs. Pure, so tests can feed synthetic snapshots. */
+export function buildFixtures(raw: {
+  volcanoes: unknown;
+  watches: unknown;
+  firms: unknown;
+  quakes: unknown;
+  meta: unknown;
+}): RealFixtures {
+  const issues: ValidationIssue[] = [];
+  const volcanoes = (Array.isArray(raw.volcanoes) ? raw.volcanoes : []) as Volcano[];
+  const watches = readWatches(raw.watches, issues);
+  const meta = readMeta(raw.meta, issues);
+
+  const replaySteps = meta ? buildReplayDays(meta.window) : [];
+  const generated: Observation[] = [];
+  if (meta) {
+    const ctx = ruleContext(meta);
+    const firms = rowsOf(raw.firms) as FirmsRow[];
+    const quakes = rowsOf(raw.quakes) as QuakeRow[];
+    const reported = new Set<string>();
+    for (const watch of watches) {
+      const result = observationsForWatch(watch, { firms, quakes }, ctx);
+      generated.push(...result.observations);
+      // A bad raw row is reported once, not once per watch.
+      for (const [file, list] of [
+        ['data/real/firms.json', result.firmsProblems],
+        ['data/real/quakes.json', result.quakeProblems],
+      ] as const) {
+        for (const p of list) {
+          const key = `${file}#${p.index}`;
+          if (reported.has(key)) continue;
+          reported.add(key);
+          issues.push({ recordId: null, index: p.index, message: `Snapshot row ${p.index} in ${file} skipped: ${p.message}.` });
+        }
+      }
+    }
+  }
+
+  const validation = validateObservations(generated, new Set(watches.map((w) => w.id)));
+  const firmsTimes = (meta?.sources ?? [])
+    .filter((s) => s.id.startsWith('firms-') && typeof s.lastModified === 'string')
+    .map((s) => s.lastModified as string)
+    .sort();
+  const providers = new Map<string, string>();
+  for (const s of meta?.sources ?? []) if (typeof s.attribution === 'string' && !providers.has(s.provider)) providers.set(s.provider, s.attribution);
+
   return {
     volcanoes,
-    incidents,
-    scenario: normalizeScenario(events.scenario, incidents),
-    observations: valid,
-    issues,
-    duplicatesIgnored,
+    incidents: watches,
+    watches,
+    scenario: { incidentId: watches.find((w) => w.replayable)?.id ?? '', replaySteps },
+    replaySteps,
+    observations: validation.valid,
+    issues: [...issues, ...validation.issues],
+    duplicatesIgnored: validation.duplicatesIgnored,
+    snapshot: {
+      retrievedAt: meta?.retrievedAt ?? '',
+      satelliteAsOf: firmsTimes.length > 0 ? firmsTimes[firmsTimes.length - 1] : null,
+      window: meta ? { start: meta.window.start, end: meta.window.end } : { start: '', end: '' },
+      sources: meta?.sources ?? [],
+      attributions: [...providers.values()],
+    },
+    rulesByWatch: Object.fromEntries(watches.map((w) => [w.id, rulesForWatch(w)])),
   };
+}
+
+export function loadFixtures(): RealFixtures {
+  return buildFixtures({ volcanoes: volcanoesRaw, watches: watchesRaw, firms: firmsRaw, quakes: quakesRaw, meta: metaRaw });
 }
 
 /** The volcano with this id, or null (also null for a null/undefined id). */
@@ -88,12 +234,12 @@ export function findVolcano(volcanoes: Volcano[], id: string | null | undefined)
   return volcanoes.find((v) => v.id === id) ?? null;
 }
 
-/** Replay steps for an incident, oldest first. Empty for non-replayable or unknown incidents. */
-export function replayStepsFor(
-  fixtures: Pick<Fixtures, 'incidents' | 'scenario'>,
-  incidentId: string,
-): ReplayStep[] {
+/**
+ * Replay steps for an incident, oldest first: the shared snapshot days for every replayable watch.
+ * Empty for unknown or non-replayable incidents.
+ */
+export function replayStepsFor(fixtures: Pick<Fixtures, 'incidents' | 'scenario'>, incidentId: string): ReplayStep[] {
   const incident = fixtures.incidents.find((i) => i.id === incidentId);
-  if (!incident || !incident.replayable || fixtures.scenario.incidentId !== incidentId) return [];
+  if (!incident || !incident.replayable) return [];
   return fixtures.scenario.replaySteps;
 }

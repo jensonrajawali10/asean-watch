@@ -12,5 +12,47 @@
       "name": "Smithsonian Institution Global Volcanism Program, Volcanoes of the World: Merapi (263250)",
       "url": "https://volcano.si.edu/volcano.cfm?vn=263250"
     }
+  },
+  {
+    "id": "gvp-263300",
+    "gvpNumber": "263300",
+    "name": "Semeru",
+    "country": "Indonesia",
+    "region": "Sunda Volcanic Arc (Sunda-Banda Volcanic Regions)",
+    "lat": -8.108,
+    "lon": 112.922,
+    "elevationM": 3657,
+    "catalogSource": {
+      "name": "Smithsonian Institution Global Volcanism Program, Volcanoes of the World: Semeru (263300)",
+      "url": "https://volcano.si.edu/volcano.cfm?vn=263300"
+    }
+  },
+  {
+    "id": "gvp-262000",
+    "gvpNumber": "262000",
+    "name": "Krakatau",
+    "country": "Indonesia",
+    "region": "Sunda Volcanic Arc (Sunda-Banda Volcanic Regions)",
+    "lat": -6.1009,
+    "lon": 105.4233,
+    "elevationM": 285,
+    "catalogSource": {
+      "name": "Smithsonian Institution Global Volcanism Program, Volcanoes of the World: Krakatau (262000)",
+      "url": "https://volcano.si.edu/volcano.cfm?vn=262000"
+    }
+  },
+  {
+    "id": "gvp-261080",
+    "gvpNumber": "261080",
+    "name": "Sinabung",
+    "country": "Indonesia",
+    "region": "Sunda Volcanic Arc (Sunda-Banda Volcanic Regions)",
+    "lat": 3.17,
+    "lon": 98.392,
+    "elevationM": 2460,
+    "catalogSource": {
+      "name": "Smithsonian Institution Global Volcanism Program, Volcanoes of the World: Sinabung (261080)",
+      "url": "https://volcano.si.edu/volcano.cfm?vn=261080"
+    }
   }
 ]

@@ -1,0 +1,157 @@
+[
+  {
+    "id": "watch-merapi",
+    "key": "merapi",
+    "title": "Merapi",
+    "hazard": "volcano",
+    "volcanoId": "gvp-263250",
+    "locationName": "North of Yogyakarta, Central Java, Indonesia",
+    "country": "Indonesia",
+    "lat": -7.54,
+    "lon": 110.446,
+    "area": {
+      "kind": "summit"
+    },
+    "dataMode": "historical",
+    "scenarioWindow": {
+      "start": "2026-10-07T00:00:00Z",
+      "end": "2026-10-13T07:26:44Z"
+    },
+    "replayable": true,
+    "summary": "Watch area around Merapi's summit (Smithsonian GVP 263250). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
+    "references": [
+      {
+        "name": "PVMBG / MAGMA Indonesia volcano activity levels (official)",
+        "url": "https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas"
+      },
+      {
+        "name": "MOUNTS satellite monitoring: SO2, thermal and deformation (independent research, not official)",
+        "url": "http://www.mounts-project.com/timeseries/263250"
+      }
+    ]
+  },
+  {
+    "id": "watch-semeru",
+    "key": "semeru",
+    "title": "Semeru",
+    "hazard": "volcano",
+    "volcanoId": "gvp-263300",
+    "locationName": "East Java, Indonesia",
+    "country": "Indonesia",
+    "lat": -8.108,
+    "lon": 112.922,
+    "area": {
+      "kind": "summit"
+    },
+    "dataMode": "historical",
+    "scenarioWindow": {
+      "start": "2026-10-07T00:00:00Z",
+      "end": "2026-10-13T07:26:44Z"
+    },
+    "replayable": true,
+    "summary": "Watch area around Semeru's summit (Smithsonian GVP 263300). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
+    "references": [
+      {
+        "name": "PVMBG / MAGMA Indonesia volcano activity levels (official)",
+        "url": "https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas"
+      },
+      {
+        "name": "MOUNTS satellite monitoring: SO2, thermal and deformation (independent research, not official)",
+        "url": "http://www.mounts-project.com/timeseries/263300"
+      }
+    ]
+  },
+  {
+    "id": "watch-anak-krakatau",
+    "key": "anak-krakatau",
+    "title": "Anak Krakatau",
+    "hazard": "volcano",
+    "volcanoId": "gvp-262000",
+    "locationName": "Krakatau caldera, Sunda Strait, Indonesia",
+    "country": "Indonesia",
+    "lat": -6.1009,
+    "lon": 105.4233,
+    "area": {
+      "kind": "summit"
+    },
+    "dataMode": "historical",
+    "scenarioWindow": {
+      "start": "2026-10-07T00:00:00Z",
+      "end": "2026-10-13T07:26:44Z"
+    },
+    "replayable": true,
+    "summary": "Watch area around Anak Krakatau, the active cone inside the Krakatau caldera. The Smithsonian GVP catalogues it under Krakatau (262000); the watch is centred on the GVP point for Krakatau. Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
+    "references": [
+      {
+        "name": "PVMBG / MAGMA Indonesia volcano activity levels (official)",
+        "url": "https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas"
+      },
+      {
+        "name": "MOUNTS satellite monitoring: SO2, thermal and deformation (independent research, not official)",
+        "url": "http://www.mounts-project.com/timeseries/262000"
+      }
+    ]
+  },
+  {
+    "id": "watch-sinabung",
+    "key": "sinabung",
+    "title": "Sinabung",
+    "hazard": "volcano",
+    "volcanoId": "gvp-261080",
+    "locationName": "Karo Plateau, North Sumatra, Indonesia",
+    "country": "Indonesia",
+    "lat": 3.17,
+    "lon": 98.392,
+    "area": {
+      "kind": "summit"
+    },
+    "dataMode": "historical",
+    "scenarioWindow": {
+      "start": "2026-10-07T00:00:00Z",
+      "end": "2026-10-13T07:26:44Z"
+    },
+    "replayable": true,
+    "summary": "Watch area around Sinabung's summit (Smithsonian GVP 261080). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
+    "references": [
+      {
+        "name": "PVMBG / MAGMA Indonesia volcano activity levels (official)",
+        "url": "https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas"
+      },
+      {
+        "name": "MOUNTS satellite monitoring: SO2, thermal and deformation (independent research, not official)",
+        "url": "http://www.mounts-project.com/timeseries/261080"
+      }
+    ]
+  },
+  {
+    "id": "watch-riau-haze",
+    "key": "riau",
+    "title": "Riau peatland hotspots",
+    "hazard": "wildfire",
+    "volcanoId": null,
+    "locationName": "Riau mainland peatlands, Sumatra, Indonesia",
+    "country": "Indonesia",
+    "lat": 0.5,
+    "lon": 102.55,
+    "area": {
+      "kind": "bbox",
+      "minLat": -0.5,
+      "maxLat": 1.6,
+      "minLon": 101,
+      "maxLon": 103.2
+    },
+    "dataMode": "historical",
+    "scenarioWindow": {
+      "start": "2026-10-07T00:00:00Z",
+      "end": "2026-10-13T07:26:44Z"
+    },
+    "replayable": true,
+    "summary": "Haze watch box over the Riau mainland peatlands, latitude -0.5 to 1.6 and longitude 101.0 to 103.2 (the marker is the Siak-Kampar peatlands). Shows real NASA FIRMS satellite hotspots as one daily total per sensor, from the data snapshot, one replay step per UTC day. The box stops short of the Malaysian and Singapore coasts so their heat sources are not counted. A hotspot can be a fire, a flare or other hot ground and needs contextual review.",
+    "references": [
+      {
+        "name": "ASEAN Specialised Meteorological Centre (ASMC): regional hotspot and haze information",
+        "url": "https://asmc.asean.org/"
+      }
+    ]
+  }
+]
