@@ -25,3 +25,6 @@ dist-ssr
 
 # Vercel CLI link
 .vercel
+
+# Demo video build (large binaries)
+demo-video/
