@@ -97,23 +97,6 @@ Decision (Jenson, 2026-10-13): the product exists to make people aware of potent
 - Issuer levels are never restyled into our review states, re-scored, merged, or paraphrased into stronger or weaker language. Our own corroboration states (Monitoring / Check observation / Review needed) stay analyst prompts and never say "evacuate".
 - **Absence is not safety.** If a feed is unreachable, stale, or returns nothing, the UI says "Official feed unavailable: check <issuer> directly", never "no warnings" or "all clear". Expired warnings are labelled EXPIRED with their expiry time.
 - Mode labels apply: LIVE for messages fetched this session; HISTORICAL for bundled examples, with their original times. A bundled example must never look current.
-- Planned type (added when the first feed is integrated):
-
-```ts
-interface OfficialWarning {
-  id: string;                    // issuer's message id when provided
-  issuer: string;                // e.g. "Pacific Tsunami Warning Center"
-  issuerUrl: string;             // official public page to follow
-  hazard: 'tsunami' | 'volcano' | 'earthquake' | 'flood' | 'haze' | 'weather' | 'other';
-  level: string;                 // verbatim, e.g. "WARNING", "Level III (Siaga)"
-  headline: string;              // verbatim
-  areaDescription: string;       // verbatim
-  location: { lat: number; lon: number } | null;
-  issuedAt: string;              // ISO 8601 UTC
-  expiresAt: string | null;      // ISO 8601 UTC
-  instruction: string | null;    // verbatim evacuation or safety instruction, if the issuer gave one
-  sourceUrl: string;             // the feed or message URL
-  dataMode: 'live' | 'historical';
-  retrievedAt: string;           // ISO 8601 UTC
-}
-```
+- Types: `OfficialWarning`, `OfficialWarningArea`, `WarningFeedStatus`, `WarningHazard` in `src/types.ts`. `authority: "aggregator"` (e.g. GDACS) is an impact estimate and is never styled or worded as a warning.
+- Adapter: `src/lib/warnings.ts`, `loadOfficialWarnings()` (never throws; per-feed live, cache, backoff, then bundled snapshot) and `warningsNear()`. v1 feeds: BMKG InaTEWS and BMKG earthquakes, JMA tsunami and volcano, GeoNet volcanic alert levels, NWS Pacific tsunami, GDACS, plus a recorded MAGMA Indonesia level notice for Merapi (historical; MAGMA's API is token-only). Source research: `docs/research/APIS_GEOPHYSICAL.md`.
+- A real official level shown next to a simulated scenario sits in a separate panel and style, so the two can never be confused.
