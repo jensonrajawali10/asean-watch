@@ -17,7 +17,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactElement,
 } from 'react';
-import { geoBounds, geoGraticule, geoMercator, geoPath } from 'd3-geo';
+import { geoBounds, geoCircle, geoGraticule, geoMercator, geoPath } from 'd3-geo';
 import type { GeoProjection } from 'd3-geo';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import regionRaw from '../../data/region.geojson?raw';
@@ -66,7 +66,30 @@ export interface RegionMapProps {
   gauges?: GaugeReading[] | null;
   /** Clears the selection; the map's All APAC control calls it and returns to the regional view. */
   onClearSelection?: () => void;
+  /** Modelled wind arrows and illustrative haze paths (Open-Meteo); null hides the layer. */
+  transport?: HazeTransportView | null;
 }
+
+/** Modelled wind and illustrative 48 h haze paths, already computed by the shell. Not a dispersion model. */
+export interface HazeTransportView {
+  /** ISO 8601 UTC grid time the arrows show and the paths start from. */
+  time: string;
+  /** e.g. "10 m". */
+  level: string;
+  dataMode: 'live' | 'historical';
+  retrievedAt: string;
+  /** Wind toward (u east, v north, m/s) on the model grid. */
+  arrows: { lat: number; lon: number; u: number; v: number }[];
+  paths: { id: string; label: string; points: { lat: number; lon: number; time: string }[]; reaches: boolean }[];
+  /** Summary of the path that comes closest to Singapore. */
+  summary: string | null;
+}
+
+/** Reference distances from a volcano's GVP summit point (km). Not a hazard zone. */
+const RING_KM = [3, 5, 10, 15];
+const MAGMA_URL = 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas';
+/** Wind arrows: at least this far apart on screen (px). */
+const ARROW_SPACING_PX = 44;
 
 // ---------------------------------------------------------------------------------------------
 // Free zoom and pan. The view is a transform in viewBox units: base point (bx, by) is drawn at
@@ -1088,6 +1111,7 @@ export default function RegionMap({
   onSelectWarning,
   gauges = null,
   onClearSelection,
+  transport = null,
 }: RegionMapProps) {
   const basemap = useMemo(() => getBasemap(), []);
   const [view, setView] = useState<View>(HOME_VIEW);
@@ -1099,7 +1123,7 @@ export default function RegionMap({
   const toView = useCallback((p: Point): Point => [view.x + view.k * p[0], view.y + view.k * p[1]], [view]);
   const calloutId = useId();
   const layersTitleId = useId();
-  const [layers, setLayers] = useState({ watch: true, warnings: true, nea: true });
+  const [layers, setLayers] = useState({ watch: true, warnings: true, nea: true, transport: true, rings: true });
   const [geom, setGeom] = useState<StageGeom | null>(null);
   /** Roving tabindex for the official/gauge markers: index of the one tab stop. */
   const [officialActive, setOfficialActive] = useState(0);
@@ -1113,6 +1137,7 @@ export default function RegionMap({
   const calloutRef = useRef<HTMLDivElement>(null);
   const attributionRef = useRef<HTMLParagraphElement>(null);
   const zoomRef = useRef<HTMLDivElement>(null);
+  const captionRef = useRef<HTMLDivElement>(null);
 
   /** Read the stage and the chrome cards; store only when something moved by half a pixel or more. */
   const measure = useCallback(() => {
@@ -1127,7 +1152,7 @@ export default function RegionMap({
       return b.width > 0 && b.height > 0 ? { x: b.left - s.left, y: b.top - s.top, w: b.width, h: b.height } : null;
     };
     const r = root.getBoundingClientRect();
-    const chrome = [legendRef.current, compactRef.current, sideRef.current, attributionRef.current, zoomRef.current]
+    const chrome = [legendRef.current, compactRef.current, sideRef.current, attributionRef.current, zoomRef.current, captionRef.current]
       .map(rel)
       .filter((x): x is Rect => x !== null);
     const next: StageGeom = {
@@ -1599,6 +1624,71 @@ export default function RegionMap({
     return () => observer.disconnect();
   }, [measure, selectedId, neaActive, insetAtBottom, narrow]);
 
+  // Modelled wind arrows (thinned to ARROW_SPACING_PX on screen) and haze paths with 12 h dots.
+  // Positions follow the zoom; lengths are in screen pixels, so arrows keep their size.
+  const transportDrawing = useMemo(() => {
+    if (!transport || !layers.transport) return null;
+    try {
+      const unit = px > 0 ? px : FALLBACK_PX;
+      const degPx = view.k * ((basemap.projection.scale() * Math.PI) / 180) * unit;
+      const stride = Math.max(1, Math.ceil(ARROW_SPACING_PX / Math.max(degPx, 1e-6)));
+      const fx0 = frame.x / unit;
+      const fy0 = frame.y / unit;
+      const fx1 = (frame.x + frame.w) / unit;
+      const fy1 = (frame.y + frame.h) / unit;
+      const arrows = transport.arrows
+        .filter((a) => Math.round(a.lat) % stride === 0 && Math.round(a.lon) % stride === 0)
+        .map((a) => {
+          const [x, y] = toView(project(basemap.projection, [a.lon, a.lat]));
+          const speed = Math.hypot(a.u, a.v);
+          if (!(speed > 0.05) || x < fx0 || x > fx1 || y < fy0 || y > fy1) return null;
+          const len = (10 + Math.min(speed, 15) * 1.4) / unit;
+          const ux = a.u / speed;
+          const uy = -a.v / speed;
+          const x1 = x - (ux * len) / 2;
+          const y1 = y - (uy * len) / 2;
+          const x2 = x + (ux * len) / 2;
+          const y2 = y + (uy * len) / 2;
+          const h = 5 / unit;
+          const f = (n: number) => n.toFixed(2);
+          const tip = `M${f(x2 + ux * h)} ${f(y2 + uy * h)} L${f(x2 - uy * h * 0.6)} ${f(y2 + ux * h * 0.6)} L${f(x2 + uy * h * 0.6)} ${f(y2 - ux * h * 0.6)} Z`;
+          return { key: `${a.lat},${a.lon}`, x1, y1, x2, y2, tip };
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+      const paths = transport.paths
+        .filter((t) => t.points.length > 1)
+        .map((t) => {
+          const t0 = Date.parse(t.points[0].time);
+          const pts = t.points.map((q) => toView(project(basemap.projection, [q.lon, q.lat])));
+          const ticks = t.points
+            .map((q, i) => ({ h: (Date.parse(q.time) - t0) / 3_600_000, p: pts[i] }))
+            .filter((q) => q.h > 0 && Math.abs(q.h / 12 - Math.round(q.h / 12)) < 1e-6)
+            .map((q) => q.p);
+          return {
+            id: t.id,
+            reaches: t.reaches,
+            points: pts.map((q) => `${q[0].toFixed(2)},${q[1].toFixed(2)}`).join(' '),
+            ticks,
+          };
+        });
+      return { arrows, paths };
+    } catch (err) {
+      console.error('Haze transport could not be drawn:', err);
+      return null;
+    }
+  }, [transport, layers.transport, px, view.k, basemap, frame, toView]);
+
+  // Reference distance rings around the selected volcano's summit point (geodesic circles, base units).
+  const ringIncident = selected?.incident ?? null;
+  const ringDrawing = useMemo(() => {
+    if (!ringIncident || ringIncident.hazard !== 'volcano' || !layers.rings || !layers.watch) return null;
+    const path = geoPath(basemap.projection);
+    return RING_KM.map((km) => {
+      const d = path(geoCircle().center([ringIncident.lon, ringIncident.lat]).radius(km / 111.2).precision(2)()) ?? '';
+      return { km, d, label: toView(project(basemap.projection, [ringIncident.lon, ringIncident.lat + km / 111.2])) };
+    }).filter((r) => r.d !== '');
+  }, [ringIncident, layers.rings, layers.watch, basemap, toView]);
+
   const chipText = neaShown && nea ? psiChipText(nea) : null;
   const windVariable = Boolean(nea && nea.wind.consistency < 0.5);
   const downwindKnown = neaDrawing?.cone != null;
@@ -1735,6 +1825,20 @@ export default function RegionMap({
           <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
           <span>NEA wind and haze</span>
         </label>
+        {transport && (
+          <label className="region-map__layer">
+            <input
+              type="checkbox"
+              checked={layers.transport}
+              onChange={(e) => toggleLayer('transport', e.currentTarget.checked)}
+            />
+            <span>Haze transport (modelled)</span>
+          </label>
+        )}
+        <label className="region-map__layer">
+          <input type="checkbox" checked={layers.rings} onChange={(e) => toggleLayer('rings', e.currentTarget.checked)} />
+          <span>Distance rings</span>
+        </label>
       </div>
     </>
   );
@@ -1814,7 +1918,47 @@ export default function RegionMap({
                 </g>
               );
             })}
+          {ringDrawing && (
+            <g
+              className="region-map__rings"
+              aria-hidden="true"
+              transform={`translate(${view.x} ${view.y}) scale(${view.k})`}
+            >
+              {ringDrawing.map((r) => (
+                <path key={r.km} d={r.d} />
+              ))}
+            </g>
+          )}
+          {transportDrawing && (
+            <g className="region-map__transport" aria-hidden="true">
+              {transportDrawing.arrows.map((a) => (
+                <g key={a.key} className="region-map__warrow">
+                  <line x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2} />
+                  <path d={a.tip} />
+                </g>
+              ))}
+              {transportDrawing.paths.map((t) => (
+                <g key={t.id} className={`region-map__tpath${t.reaches ? ' is-reaching' : ''}`}>
+                  <polyline points={t.points} />
+                  {t.ticks.map((d, i) => (
+                    <circle key={i} cx={d[0]} cy={d[1]} r={2.6 / px} />
+                  ))}
+                </g>
+              ))}
+            </g>
+          )}
         </svg>
+        {ringDrawing &&
+          ringDrawing.map((r) => (
+            <span
+              key={r.km}
+              className="region-map__ring-label"
+              style={{ left: pct(r.label[0], VIEW_W), top: pct(r.label[1], VIEW_H) }}
+              aria-hidden="true"
+            >
+              {r.km} km
+            </span>
+          ))}
 
         {layout.labels.map((l) => (
           <span
@@ -2097,6 +2241,34 @@ export default function RegionMap({
           All APAC
         </button>
       </div>
+
+      {(transportDrawing || ringDrawing) && (
+        <div ref={captionRef} className="region-map__caption" data-no-pan>
+          {ringDrawing && (
+            <p>
+              <span className="region-map__caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}
+              <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
+                Official danger zone and recommendations: PVMBG / MAGMA <span aria-hidden="true">↗</span>
+                <span className="visually-hidden"> (opens in a new tab)</span>
+              </a>
+            </p>
+          )}
+          {transportDrawing && transport && (
+            <>
+              <p>
+                <span className="region-map__caption-key">
+                  MODELLED wind (Open-Meteo, {transport.level}) · illustrative haze paths, not a dispersion model
+                </span>{' '}
+                <span className="region-map__caption-meta">
+                  {transport.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · from{' '}
+                  <time dateTime={transport.time}>{formatUtc(transport.time)}</time>, dots every 12 h
+                </span>
+              </p>
+              {transport.summary && <p className="region-map__caption-summary">{transport.summary}</p>}
+            </>
+          )}
+        </div>
+      )}
 
       <p ref={attributionRef} className="region-map__attribution" title={REGION.attribution}>
         Boundaries: Natural Earth (public domain)

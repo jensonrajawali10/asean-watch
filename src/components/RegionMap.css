@@ -1170,3 +1170,115 @@
     transform: scale(1.15);
   }
 }
+
+/* Haze transport (MODELLED, Open-Meteo): light violet, the modelled family colour, so it never
+   competes with markers or the reserved official red. Arrows and paths take no pointer events. */
+.region-map__transport {
+  pointer-events: none;
+}
+
+.region-map__warrow line {
+  stroke: var(--mode-modelled-fg);
+  stroke-opacity: 0.45;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.region-map__warrow path {
+  fill: var(--mode-modelled-fg);
+  fill-opacity: 0.45;
+}
+
+.region-map__tpath polyline {
+  fill: none;
+  stroke: var(--mode-modelled-fg);
+  stroke-opacity: 0.6;
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.region-map__tpath circle {
+  fill: var(--panel);
+  stroke: var(--mode-modelled-fg);
+  stroke-opacity: 0.8;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Reference distance rings: thin neutral dashes, no fill. Not a hazard zone. */
+.region-map__rings {
+  pointer-events: none;
+}
+
+.region-map__rings path {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-opacity: 0.75;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.region-map__ring-label {
+  position: absolute;
+  z-index: 1;
+  transform: translate(-50%, -100%);
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  background: var(--rm-overlay-bg);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Map caption (bottom-right, above the attribution): what the drawn reference layers are. */
+.region-map__caption {
+  position: absolute;
+  right: 6px;
+  bottom: 28px;
+  z-index: 6;
+  display: grid;
+  gap: 3px;
+  max-width: min(420px, 56%);
+  padding: 5px 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--rm-overlay-bg);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: default;
+}
+
+.region-map__caption-key {
+  font-weight: 600;
+}
+
+.region-map__caption-meta,
+.region-map__caption-summary {
+  color: var(--text-muted);
+}
+
+.region-map__caption a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+@container region-map (max-width: 520px) {
+  .region-map__caption {
+    left: 92px;
+    max-width: none;
+    font-size: 12px;
+  }
+
+  .region-map__caption-summary {
+    display: none;
+  }
+}

@@ -15,7 +15,10 @@ import type { NeaLoadResult } from './lib/nea';
 import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
 import type { OfficialWarningsResult } from './lib/warnings';
 import RegionMap from './components/RegionMap';
-import type { RegionMapProps } from './components/RegionMap';
+import type { HazeTransportView, RegionMapProps } from './components/RegionMap';
+import { loadWindField } from './lib/windField';
+import type { WindLoadResult } from './lib/windField';
+import { computeTrajectories, hazeSourcesFromFixtures, sampleWind } from './lib/transport';
 import AppHeader from './components/AppHeader';
 import ReplayBar from './components/ReplayBar';
 import IncidentQueue from './components/IncidentQueue';
@@ -127,6 +130,53 @@ const WARNINGS_SNAPSHOT: OfficialWarningsResult = (() => {
   }
 })();
 
+/** The grid time nearest to now (the snapshot's first time when now is outside the grid). */
+function nearestTime(times: string[], now: number): string {
+  let best = times[0];
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const t of times) {
+    const d = Math.abs(Date.parse(t) - now);
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  return best;
+}
+
+/** Modelled wind arrows and 48 h haze paths for the map; null when the wind field is unavailable. */
+function buildTransport(result: WindLoadResult | null): HazeTransportView | null {
+  const grid = result?.grid;
+  if (!result || result.status === 'unavailable' || !grid || grid.times.length === 0) return null;
+  try {
+    const time = nearestTime(grid.times, Date.now());
+    const arrows: HazeTransportView['arrows'] = [];
+    for (const lat of grid.lats) {
+      for (const lon of grid.lons) {
+        const w = sampleWind(grid, lat, lon, time);
+        if (w && Number.isFinite(w.u) && Number.isFinite(w.v)) arrows.push({ lat, lon, u: w.u, v: w.v });
+      }
+    }
+    const trajectories = computeTrajectories(grid, hazeSourcesFromFixtures(FIXTURES), time, 48, 30);
+    const closest = trajectories.reduce<(typeof trajectories)[number] | null>(
+      (best, t) => (best === null || t.receptor.closestKm < best.receptor.closestKm ? t : best),
+      null,
+    );
+    return {
+      time,
+      level: grid.level,
+      dataMode: grid.dataMode,
+      retrievedAt: grid.retrievedAt,
+      arrows,
+      paths: trajectories.map((t) => ({ id: t.source.id, label: t.source.label, points: t.points, reaches: t.receptor.reaches })),
+      summary: closest?.summary ?? null,
+    };
+  } catch (err) {
+    console.error('Haze transport could not be computed:', err);
+    return null;
+  }
+}
+
 function reviewFor(incident: Incident, replayIndex: number): ReviewResult | null {
   try {
     return deriveReview(visibleObservations(FIXTURES.observations, incident.id, replayIndex), incident.scenarioWindow);
@@ -186,6 +236,9 @@ export default function App() {
   /** The snapshot until the live load settles. */
   const [warningsResult, setWarningsResult] = useState<OfficialWarningsResult>(WARNINGS_SNAPSHOT);
   const [warningsLoading, setWarningsLoading] = useState(true);
+  /** Modelled wind field (Open-Meteo, live or snapshot); null until loaded. */
+  const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
+  const transport = useMemo(() => buildTransport(windResult), [windResult]);
   const briefSeq = useRef(0);
 
   // --- Derived state -------------------------------------------------------
@@ -424,6 +477,19 @@ export default function App() {
     };
   }, []);
 
+  // Modelled wind field: loaded once after first render; never throws, never blocks the UI.
+  useEffect(() => {
+    let alive = true;
+    loadWindField()
+      .then((result) => {
+        if (alive) setWindResult(result);
+      })
+      .catch((err: unknown) => console.error('Wind field could not be loaded:', err));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // Official warnings: loaded once, live first with per-feed snapshot fallback; never throws.
   useEffect(() => {
     let alive = true;
@@ -474,6 +540,7 @@ export default function App() {
     onSelectWarning: (id: string) => void;
   } = {
     onClearSelection: () => selectIncident(null),
+    transport,
     incidents: INCIDENTS,
     selectedId: incident?.id ?? null,
     states,
