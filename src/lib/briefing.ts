@@ -326,11 +326,13 @@ function neaSection(nea: NeaContext | null | undefined, drift: DriftAssessment):
       ...field('  ', 'Stations', `${nea.wind.stationCount} NEA stations used`),
     );
     if (nea.haze) {
+      const savedHaze = nea.haze.dataMode === 'historical' && nea.dataMode === 'live';
       lines.push(
         ...field(
           '  ',
           '24-hour PSI',
-          `${rangeText(nea.haze.psi24h)} across ${Object.keys(nea.haze.psi24h).length} regions; NEA band ` +
+          `${savedHaze ? 'HISTORICAL SNAPSHOT (live PSI unavailable): ' : ''}` +
+            `${rangeText(nea.haze.psi24h)} across ${Object.keys(nea.haze.psi24h).length} regions; NEA band ` +
             `for the highest region: ${nea.haze.psiBand} (reading time ${nea.haze.observedAt})`,
         ),
       );

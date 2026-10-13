@@ -477,6 +477,18 @@ interface CacheEntry {
 let inflight: Promise<NeaLoadResult> | null = null;
 let memoryCache: CacheEntry | null = null;
 
+/** sessionStorage key for the live-fetch backoff (separate from the result cache). */
+export const NEA_BACKOFF_KEY = 'asean-watch:nea:backoff:v1';
+/** After a 429, a fetch TypeError (CORS-less 429 or offline), or a timeout, skip live fetching this long. */
+export const NEA_BACKOFF_MS = 60 * 1000;
+
+interface Backoff {
+  until: number;
+  reason: string;
+}
+
+let memoryBackoff: Backoff | null = null;
+
 function sessionStore(): Storage | null {
   try {
     const s = (globalThis as { sessionStorage?: Storage }).sessionStorage;
@@ -531,13 +543,81 @@ function cachedResult(now: number): NeaLoadResult | null {
   return null;
 }
 
-/** Clear the in-memory cache and in-flight request (and, unless keepStorage, the sessionStorage entry). */
+/** Short label when a failure is transient (rate limit, CORS-less 429 or offline, timeout); else null. */
+function transientLabel(err: unknown): string | null {
+  if (err instanceof FetchFailure) return err.message === 'rate limited' ? 'rate limited' : null;
+  if (err instanceof Error && err.name === 'AbortError') return 'timed out';
+  if (err instanceof TypeError) return 'rate limited or offline';
+  return null;
+}
+
+function hhmmssUtc(ms: number): string {
+  return `${new Date(ms).toISOString().slice(11, 19)} UTC`;
+}
+
+function isActive(b: Backoff | null, now: number): b is Backoff {
+  return b !== null && b.until > now && b.until - now <= NEA_BACKOFF_MS;
+}
+
+function activeBackoff(now: number): Backoff | null {
+  if (isActive(memoryBackoff, now)) return memoryBackoff;
+  try {
+    const raw = sessionStore()?.getItem(NEA_BACKOFF_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed) || typeof parsed.until !== 'number' || typeof parsed.reason !== 'string') return null;
+    const stored: Backoff = { until: parsed.until, reason: parsed.reason };
+    if (!isActive(stored, now)) return null;
+    memoryBackoff = stored;
+    return stored;
+  } catch {
+    return null;
+  }
+}
+
+function startBackoff(reason: string, now: number): Backoff {
+  const b: Backoff = { until: now + NEA_BACKOFF_MS, reason };
+  memoryBackoff = b;
+  try {
+    sessionStore()?.setItem(NEA_BACKOFF_KEY, JSON.stringify(b));
+  } catch {
+    // Storage unavailable: the in-memory backoff still applies.
+  }
+  return b;
+}
+
+function clearBackoff(): void {
+  memoryBackoff = null;
+  try {
+    sessionStore()?.removeItem(NEA_BACKOFF_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function snapshotFallback(reason: string): NeaLoadResult {
+  const context = loadNeaSnapshot();
+  return {
+    context,
+    fellBack: true,
+    error: context
+      ? `Live NEA data unavailable (${reason}); showing the bundled snapshot captured ${context.retrievedAt}.`
+      : `Live NEA data unavailable (${reason}), and the bundled snapshot could not be read.`,
+  };
+}
+
+/**
+ * Clear the in-memory cache, backoff, and in-flight request (and, unless keepStorage, their
+ * sessionStorage entries).
+ */
 export function resetNeaCache(opts?: { keepStorage?: boolean }): void {
   inflight = null;
   memoryCache = null;
+  memoryBackoff = null;
   if (opts?.keepStorage) return;
   try {
     sessionStore()?.removeItem(NEA_CACHE_KEY);
+    sessionStore()?.removeItem(NEA_BACKOFF_KEY);
   } catch {
     // ignore
   }
@@ -550,8 +630,11 @@ export function resetNeaCache(opts?: { keepStorage?: boolean }): void {
  */
 export async function loadNeaContext(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }): Promise<NeaLoadResult> {
   try {
-    const cached = cachedResult(Date.now());
+    const now = Date.now();
+    const cached = cachedResult(now);
     if (cached) return cached;
+    const backoff = activeBackoff(now);
+    if (backoff) return snapshotFallback(`${backoff.reason}; retrying live after ${hhmmssUtc(backoff.until)}`);
   } catch {
     // fall through to a live fetch
   }
@@ -561,6 +644,7 @@ export async function loadNeaContext(opts?: { timeoutMs?: number; fetchImpl?: ty
       const entry: CacheEntry = { storedAt: Date.now(), context: result.context, error: result.error };
       memoryCache = entry;
       writeStoredEntry(entry);
+      clearBackoff();
     }
     return result;
   });
@@ -574,17 +658,7 @@ export async function loadNeaContext(opts?: { timeoutMs?: number; fetchImpl?: ty
 
 async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }): Promise<NeaLoadResult> {
   const timeoutMs = opts?.timeoutMs ?? 5000;
-
-  const fallBack = (reason: string): NeaLoadResult => {
-    const context = loadNeaSnapshot();
-    return {
-      context,
-      fellBack: true,
-      error: context
-        ? `Live NEA data unavailable (${reason}); showing the bundled snapshot captured ${context.retrievedAt}.`
-        : `Live NEA data unavailable (${reason}), and the bundled snapshot could not be read.`,
-    };
-  };
+  const fallBack = snapshotFallback;
 
   try {
     const fetchImpl = opts?.fetchImpl ?? (typeof fetch === 'function' ? fetch.bind(globalThis) : undefined);
@@ -623,10 +697,21 @@ async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }
       return r.status === 'fulfilled' ? r.value : null;
     };
 
-    const windFailures = (['windDirection', 'windSpeed'] as const)
-      .map((k) => (reasonFor(k) === null ? null : `${ENDPOINT_LABELS[k]}: ${reasonFor(k)}`))
-      .filter((f): f is string => f !== null);
-    if (windFailures.length > 0) return fallBack(windFailures.join('; '));
+    const failedWind = (['windDirection', 'windSpeed'] as const).filter((k) => result[k].status === 'rejected');
+    if (failedWind.length > 0) {
+      let reason = failedWind.map((k) => `${ENDPOINT_LABELS[k]}: ${reasonFor(k)}`).join('; ');
+      const transient = failedWind
+        .map((k) => {
+          const r = result[k];
+          return r.status === 'rejected' ? transientLabel(r.reason) : null;
+        })
+        .find((label): label is string => label !== null);
+      if (transient) {
+        const b = startBackoff(transient, Date.now());
+        reason += `; retrying live after ${hhmmssUtc(b.until)}`;
+      }
+      return fallBack(reason);
+    }
 
     const snapshot = loadNeaSnapshot();
     const retrievedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');

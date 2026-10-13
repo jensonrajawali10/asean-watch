@@ -4,6 +4,8 @@ import type { Incident, NeaContext, NeaStationWind } from '../types';
 import { buildBriefing } from './briefing';
 import { loadFixtures } from './fixtures';
 import {
+  NEA_BACKOFF_KEY,
+  NEA_BACKOFF_MS,
   NEA_CACHE_KEY,
   NEA_CACHE_TTL_MS,
   NEA_ENDPOINTS,
@@ -414,6 +416,7 @@ describe('loadNeaContext', () => {
 
   it('falls back on timeout, whether or not fetch honours the abort signal', async () => {
     for (const reply of ['never', 'abortable'] as const) {
+      resetNeaCache();
       const started = Date.now();
       const r = await loadNeaContext({ timeoutMs: 30, fetchImpl: fakeFetch({ windSpeed: reply, psi: reply }) });
       expect(Date.now() - started).toBeLessThan(2000);
@@ -550,8 +553,8 @@ describe('loadNeaContext dedupe and cache', () => {
     expect(third.context?.retrievedAt).toBe('2026-10-13T07:05:01Z');
   });
 
-  it('does not cache a fallback, so the next call tries live again', async () => {
-    const failing = countingFetch({ windDirection: { status: 429, body: {} } });
+  it('does not cache a non-transient fallback (HTTP 503), so the next call tries live again', async () => {
+    const failing = countingFetch({ windDirection: { status: 503, body: {} } });
     expect((await loadNeaContext({ fetchImpl: failing.fn })).fellBack).toBe(true);
     const ok = countingFetch();
     const r = await loadNeaContext({ fetchImpl: ok.fn });
@@ -679,5 +682,106 @@ describe('brief NEA section', () => {
     expect(b).toBe(a);
     expect(a).not.toContain('2031');
     expect(a).not.toContain('2001');
+  });
+});
+
+describe('loadNeaContext backoff after a live failure', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('skips live fetching for 60 s after a 429 and serves the snapshot, then retries', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T07:00:00Z'));
+    const snap = loadNeaSnapshot() as NeaContext;
+    const limited = countingFetch({ windDirection: { status: 429, body: {} } });
+    const first = await loadNeaContext({ fetchImpl: limited.fn });
+    expect(limited.counter.calls).toBe(4);
+    expect(first.fellBack).toBe(true);
+    expect(first.error).toContain('wind direction: rate limited; retrying live after 07:01:00 UTC');
+
+    const ok = countingFetch();
+    vi.setSystemTime(new Date('2026-10-13T07:00:30Z'));
+    const during = await loadNeaContext({ fetchImpl: ok.fn });
+    expect(ok.counter.calls).toBe(0);
+    expect(during.fellBack).toBe(true);
+    expect(during.context).toEqual(snap);
+    expect(during.error).toBe(
+      `Live NEA data unavailable (rate limited; retrying live after 07:01:00 UTC); showing the bundled snapshot captured ${snap.retrievedAt}.`,
+    );
+
+    vi.setSystemTime(new Date('2026-10-13T07:00:00Z').getTime() + NEA_BACKOFF_MS);
+    const after = await loadNeaContext({ fetchImpl: ok.fn });
+    expect(ok.counter.calls).toBe(4);
+    expect(after.fellBack).toBe(false);
+    expect(after.context?.dataMode).toBe('live');
+  });
+
+  it('also backs off after a fetch TypeError or a timeout, but not after HTTP 503', async () => {
+    const cases: Array<[Parameters<typeof fakeFetch>[0], string | null]> = [
+      [{ windSpeed: new TypeError('Failed to fetch') }, 'rate limited or offline; retrying live after'],
+      [{ windDirection: 'never' }, 'timed out after 20 ms; retrying live after'],
+      [{ windDirection: { status: 503, body: {} } }, null],
+    ];
+    for (const [replies, expected] of cases) {
+      resetNeaCache();
+      const r = await loadNeaContext({ timeoutMs: 20, fetchImpl: fakeFetch(replies) });
+      expect(r.fellBack).toBe(true);
+      const ok = countingFetch();
+      const next = await loadNeaContext({ fetchImpl: ok.fn });
+      if (expected) {
+        expect(r.error).toContain(expected);
+        expect(ok.counter.calls).toBe(0);
+        expect(next.fellBack).toBe(true);
+      } else {
+        expect(r.error).not.toContain('retrying live after');
+        expect(ok.counter.calls).toBe(4);
+        expect(next.fellBack).toBe(false);
+      }
+    }
+  });
+
+  it('persists the backoff in sessionStorage under its own key, and survives a reload', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T07:00:00Z'));
+    const storage = fakeStorage();
+    vi.stubGlobal('sessionStorage', storage);
+    await loadNeaContext({ fetchImpl: fakeFetch({ windDirection: { status: 429, body: {} } }) });
+    expect(JSON.parse(storage.data.get(NEA_BACKOFF_KEY) as string)).toEqual({
+      until: Date.parse('2026-10-13T07:01:00Z'),
+      reason: 'rate limited',
+    });
+    expect(storage.data.has(NEA_CACHE_KEY)).toBe(false);
+
+    resetNeaCache({ keepStorage: true }); // reload: memory gone, storage kept
+    const ok = countingFetch();
+    const r = await loadNeaContext({ fetchImpl: ok.fn });
+    expect(ok.counter.calls).toBe(0);
+    expect(r.error).toContain('rate limited; retrying live after 07:01:00 UTC');
+  });
+
+  it('serves a fresh cached live result during a backoff', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T07:00:00Z'));
+    const storage = fakeStorage();
+    vi.stubGlobal('sessionStorage', storage);
+    const live = await loadNeaContext({ fetchImpl: fakeFetch({}) });
+    storage.data.set(NEA_BACKOFF_KEY, JSON.stringify({ until: Date.now() + 30_000, reason: 'rate limited' }));
+    resetNeaCache({ keepStorage: true });
+    const ok = countingFetch();
+    const r = await loadNeaContext({ fetchImpl: ok.fn });
+    expect(ok.counter.calls).toBe(0);
+    expect(r.fellBack).toBe(false);
+    expect(r.context).toEqual(live.context);
+  });
+
+  it('keeps an in-memory backoff when storage throws', async () => {
+    vi.stubGlobal('sessionStorage', fakeStorage({ throws: true }));
+    await loadNeaContext({ fetchImpl: fakeFetch({ windDirection: { status: 429, body: {} } }) });
+    const ok = countingFetch();
+    const r = await loadNeaContext({ fetchImpl: ok.fn });
+    expect(ok.counter.calls).toBe(0);
+    expect(r.fellBack).toBe(true);
+    expect(r.error).toContain('rate limited; retrying live after');
   });
 });
