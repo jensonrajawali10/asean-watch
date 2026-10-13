@@ -26,6 +26,83 @@
   line-height: 1.35;
   container: region-map / size;
   isolation: isolate;
+  /* Free zoom and pan: the map takes touch gestures itself; overflow: clip so focusing a marker
+     never scrolls the canvas. */
+  overflow: clip;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.region-map.is-panning {
+  cursor: grabbing;
+}
+
+.region-map:focus {
+  outline: none;
+}
+
+.region-map:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
+}
+
+.region-map button,
+.region-map summary,
+.region-map label,
+.region-map a {
+  cursor: pointer;
+}
+
+/* Zoom control (bottom-left): + / − and All APAC. Square, hairline, no icons beyond the signs. */
+.region-map__zoom {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  cursor: default;
+}
+
+.region-map__zoom-btn,
+.region-map__zoom-home {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.region-map__zoom-btn {
+  width: 32px;
+  padding: 0;
+  font-size: 19px;
+}
+
+.region-map__zoom-btn:hover,
+.region-map__zoom-home:hover {
+  border-color: var(--text);
+  background: var(--panel-2);
+}
+
+.region-map__zoom-btn:focus-visible,
+.region-map__zoom-home:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .region-map p {
@@ -344,11 +421,32 @@
   right: calc(100% - 6px);
 }
 
-/* Compact maps: the selected marker's tag carries the state rail instead of a callout. */
+/* Compact maps: the selected marker's tag carries the state rail instead of a callout. Its
+   diagonal tuck is 3 px looser because the selected ring is scaled 1.15. */
 .region-map__tag.is-selected {
   border-color: var(--text-muted);
   border-left: 3px solid var(--rm-ring);
   background: var(--panel);
+}
+
+.region-map__tag.is-selected.is-below-right {
+  top: calc(100% - 3px);
+  left: calc(100% - 3px);
+}
+
+.region-map__tag.is-selected.is-above-right {
+  bottom: calc(100% - 3px);
+  left: calc(100% - 3px);
+}
+
+.region-map__tag.is-selected.is-below-left {
+  top: calc(100% - 3px);
+  right: calc(100% - 3px);
+}
+
+.region-map__tag.is-selected.is-above-left {
+  bottom: calc(100% - 3px);
+  right: calc(100% - 3px);
 }
 
 .region-map__tag-name {

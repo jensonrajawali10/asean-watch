@@ -298,9 +298,11 @@ Tells found: 0 structural, 1 visual (the uniform 1 px hairline card rhythm in th
 
 | Priority | Issue | Owner |
 |---|---|---|
-| P2 | NEA inset at 1366: the PSI chip ("Singapore 24-hr PSI … (NEA)") and the "Illustrative drift, not a dispersion model" label overlap each other inside the inset (both readable, but untidy); requested from the map helper, verify after its last pass | map |
-| P2 | Phone map (355×300): the legend and Layers now collapse into a "Legend and layers" toggle; re-check that the NEA strip stays inside the inset for Riau after the helper's last pass | map |
-| P2 | Java cluster hit-testing: the helper offset the overlapping Merapi/Semeru/Anak Krakatau markers with pointer-events off on tags; the mouse tour selects Merapi reliably at all three widths, but a click on each of the three by the lead at the projector size is the real test | map / lead |
+| done | NEA inset: PSI chip and drift label no longer overlap (chip modelled as an obstacle); the NEA strip docks under the inset and wraps inside it at every size; phone map uses a closed "Legend and layers" disclosure | map |
+| done | Java cluster: markers closer than 40 px are pushed apart with a 1 px leader to the true position, tags are `pointer-events: none`, the selected marker is on top; the helper's click test selects each of the five watches by its own centre at 1366 and 1024 | map |
+| P2 | Phone map (355×300): Merapi, Semeru and Anak Krakatau are 13 px apart on the real projection and still overlap physically after decluttering; a tag can graze a neighbouring symbol by 3–4 px. The rail list is the reliable selector at phone width | map |
+| P2 | At 1024×700 the Riau callout covers a cluster of PVMBG diamonds on Sulawesi/Halmahera (hover-only objects; chosen over clipping Sinabung's tag), and the bottom ~80 px of the map sit under the sticky timeline until the page scrolls | map / UI |
+| P2 | Dozens of DSDA Jakarta gauges share one point and render as one thick square (data, not layout); they are one tab stop. Country labels hide whenever the callout would cover them | map / data |
 | P1 | `WatchMeta.references` are labelled "Also see" with "(official)" / "(not official)" suffixes rather than "Independent monitoring", because the list includes the official MAGMA page | docs / lead decision |
 | done | Keyboard: the official diamond and gauge square markers are one roving-tabindex group (arrow keys inside); Next step is 34 Tabs from the top of the page with Merapi selected | map |
 | P2 | When the live feed result replaces the snapshot list a few seconds after load, the focused "Details" button is remounted and focus drops to the body once (warning ids include the retrieval time, so keys change). Harmless on stage; a stable key would fix it | lib (ids) / UI |

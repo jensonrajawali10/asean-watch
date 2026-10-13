@@ -473,6 +473,7 @@ export default function App() {
     selectedWarningId: string | null;
     onSelectWarning: (id: string) => void;
   } = {
+    onClearSelection: () => selectIncident(null),
     incidents: INCIDENTS,
     selectedId: incident?.id ?? null,
     states,

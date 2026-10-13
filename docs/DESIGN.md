@@ -282,6 +282,16 @@ Deviations from the plan above, with the reason:
 - **Reference links** are labelled "Also see" with "(official)" or "(not official)" per link, because the list mixes the official MAGMA page with independent monitoring (MOUNTS, ASMC).
 - **Control and panel names (for the demo script):** header "ASEAN Watch · Environment"; rail panels "Watch areas (5)" and "Official warnings near <name> (n)" / "Official warnings · APAC (n)" with "All APAC", "Elsewhere in APAC (n)", "Feeds: …", "Details", "Follow <issuer>"; map "Layers" (Watch areas · Official warnings · NEA wind and haze) and the legend; review column: the watch title, "Also see", the OFFICIAL block, the state badge, "Why this state?", "Context: NEA Singapore (real readings)", "Evidence · n records, newest first", "Details"; brief bar "Generate brief" / "Download .txt" with "Brief preview"; bottom timeline "Step n of 7 · <day> · <clock> · n records so far" with "Next step" / "Play" (Pause) / "Reset"; drawers "Record" and the warning inspector.
 
+## 8b. Map zoom and pan (13 October 2026, late)
+
+Jenson: "I can't zoom in to the map." The main map now has free zoom and pan; the three-column layout is unchanged (the full map-first floating-panel layout was cut for time).
+
+- **Controls (on the map, bottom-left):** `+` (Zoom in), `−` (Zoom out), **All APAC** (clears the selection and returns to the regional view). Mouse wheel / trackpad zooms around the cursor; drag pans; double-click zooms in (Shift + double-click zooms out); two-finger pinch zooms and one-finger drag pans on touch. With the map focused (it is a tab stop): `+` / `−` zoom, arrow keys pan.
+- **Range:** from the regional view (scale 1) to about 0.2° of longitude across the frame; the view centre stays over the APAC frame (±160 viewBox units).
+- **Selection zooms:** selecting a watch area (map, list or `#incident=` link) animates to ±1.5° around a summit, or the watch box plus 0.3° for Riau; clicking the selected marker again re-fits; Esc and All APAC return to APAC. 360 ms log-zoom, instant under `prefers-reduced-motion`.
+- **Constant pixel size:** only the basemap group is transformed (non-scaling strokes); markers, tags, callouts, labels, warning and gauge symbols are HTML overlays positioned from transformed coordinates, so text and hit areas keep their size at any zoom. A press that moves less than 4 px (mouse) or 8 px (touch) stays a click, so dragging never selects a marker and clicking still does.
+- **Known limits:** Natural Earth 1:50m coastlines look coarse at deep zoom (no 10m swap yet); the corner locator inset is kept; the map takes touch gestures, so on phones the page scrolls from outside the map.
+
 ## 9. Verification plan (phase B exit)
 
 Headless-Chrome tour (`scratchpad/aw-shots/tour.mjs`) at 1366×680, 1024×700, 375×812, plus a network-blocked run (`--offline`) and a keyboard-only run: every control reachable by Tab in path order, Enter/Space activates, Esc closes dialogs and returns focus, no page scroll at 1366×650 on the demo path, no horizontal overflow at 375, sticky chrome ≤ 110 px at 375, timeline rows ≤ 100 px, console errors 0. Then `npx tsc -b`, `npx vite build`, `npm test`. Then the vibecoded-tells audit and the accessibility table in `docs/UX_REVIEW.md` section 7.

@@ -10,7 +10,13 @@
 // the first measurement it assumes the historical 656×420 stage. Below 600 px container width a
 // compact arrangement applies (name-only tags, compact callout, layers card bottom-left).
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, ReactElement } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactElement,
+} from 'react';
 import { geoBounds, geoGraticule, geoMercator, geoPath } from 'd3-geo';
 import type { GeoProjection } from 'd3-geo';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
@@ -58,6 +64,42 @@ export interface RegionMapProps {
    * the gauge), so routine gauges never clutter the map.
    */
   gauges?: GaugeReading[] | null;
+  /** Clears the selection; the map's All APAC control calls it and returns to the regional view. */
+  onClearSelection?: () => void;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Free zoom and pan. The view is a transform in viewBox units: base point (bx, by) is drawn at
+// (x + k·bx, y + k·by). The basemap group takes the transform (strokes are non-scaling); every
+// overlay is positioned from transformed coordinates, so markers, labels and hit areas keep
+// their pixel size at any zoom.
+
+interface View {
+  k: number;
+  x: number;
+  y: number;
+}
+const HOME_VIEW: View = { k: 1, x: 0, y: 0 };
+/** Deepest zoom: about 0.2° of longitude across the map frame. */
+const MIN_SPAN_DEG = 0.2;
+/** The view centre stays over the base frame plus this margin (viewBox units). */
+const PAN_MARGIN = 160;
+/** Selection fits: ±1.5° around a summit; a watch box with a 0.3° margin. */
+const SUMMIT_FIT_HALF_DEG = 1.5;
+const BOX_FIT_MARGIN_DEG = 0.3;
+/** Fit region inside the frame, clear of the top-left legend and the top-right inset column. */
+const FIT_FRAME = { x0: 0.1, x1: 0.66, y0: 0.14, y1: 0.92 };
+const ANIM_MS = 360;
+const WHEEL_STEP = 0.003;
+const DRAG_THRESHOLD_MOUSE = 4;
+const DRAG_THRESHOLD_TOUCH = 8;
+
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -682,8 +724,11 @@ interface Obstacles {
   tags: Rect[];
   /** Movable boxes (provisional tags while placing the callout): weight 0.1. */
   soft?: Rect[];
-  /** Weight of a marker overlap; the callout uses 5 so it never prefers a marker over a tag. */
+  /** Weight of a marker overlap; the callout uses 10 so it never clips another watch marker. */
   markerWeight?: number;
+  /** Weight of a point overlap; the callout uses 0.4 because hover-only official symbols come
+      in dozens (a volcano cluster must not push it onto a watch marker). */
+  pointWeight?: number;
 }
 
 function outOfFrame(r: Rect, frame: Rect): number {
@@ -692,12 +737,13 @@ function outOfFrame(r: Rect, frame: Rect): number {
 
 function scoreRect(r: Rect, o: Obstacles, ownMarker: number): number {
   const mw = o.markerWeight ?? 3;
+  const pw = o.pointWeight ?? 2;
   let s = outOfFrame(r, o.frame) * 3;
   for (const c of o.chrome) s += overlapArea(r, c) * 2;
   o.markers.forEach((m, i) => {
     if (i !== ownMarker) s += overlapArea(r, m) * mw;
   });
-  for (const p of o.points) s += overlapArea(r, p) * 2;
+  for (const p of o.points) s += overlapArea(r, p) * pw;
   for (const t of o.tags) s += overlapArea(r, t) * 3;
   if (o.soft) for (const t of o.soft) s += overlapArea(r, t) * 0.1;
   return s;
@@ -757,14 +803,16 @@ const TAG_POSITIONS: TagPos[] = [
   'below-left',
   'above-left',
 ];
-/** Marker centre to tag edge for the four cardinal positions (ring radius 16 + 4), and the diagonal tuck. */
+/** Marker centre to tag edge for the four cardinal positions (ring radius 16 + 4), and the diagonal
+    tuck (15 for the selected marker, whose ring is scaled 1.15). */
 const TAG_GAP = 20;
 const TAG_DIAG = 12;
+const TAG_DIAG_SELECTED = 15;
 /** Cost of dropping the state text from a tag (px², against overlap areas). */
 const SHORT_PENALTY = 60;
 
 /** Where a tag of `size` sits for a marker centred at (mx, my). Mirrors the .region-map__tag.is-* rules. */
-function tagRectAt(mx: number, my: number, pos: TagPos, size: Size): Rect {
+function tagRectAt(mx: number, my: number, pos: TagPos, size: Size, diag = TAG_DIAG): Rect {
   const { w, h } = size;
   switch (pos) {
     case 'right':
@@ -776,13 +824,13 @@ function tagRectAt(mx: number, my: number, pos: TagPos, size: Size): Rect {
     case 'above':
       return { x: mx - w / 2, y: my - TAG_GAP - h, w, h };
     case 'below-right':
-      return { x: mx + TAG_DIAG, y: my + TAG_DIAG, w, h };
+      return { x: mx + diag, y: my + diag, w, h };
     case 'above-right':
-      return { x: mx + TAG_DIAG, y: my - TAG_DIAG - h, w, h };
+      return { x: mx + diag, y: my - diag - h, w, h };
     case 'below-left':
-      return { x: mx - TAG_DIAG - w, y: my + TAG_DIAG, w, h };
+      return { x: mx - diag - w, y: my + diag, w, h };
     case 'above-left':
-      return { x: mx - TAG_DIAG - w, y: my - TAG_DIAG - h, w, h };
+      return { x: mx - diag - w, y: my - diag - h, w, h };
   }
 }
 
@@ -803,12 +851,13 @@ function chooseTag(
   ownMarker: number,
   variants: { short: boolean; size: Size }[],
   obstacles: Obstacles,
+  diag = TAG_DIAG,
 ): TagChoice {
   let best: TagChoice | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   for (const { short, size } of variants) {
     TAG_POSITIONS.forEach((pos, order) => {
-      const rect = tagRectAt(mx, my, pos, size);
+      const rect = tagRectAt(mx, my, pos, size, diag);
       const score = scoreRect(rect, obstacles, ownMarker) + order * 0.5 + (short ? SHORT_PENALTY : 0);
       if (score < bestScore) {
         bestScore = score;
@@ -1038,8 +1087,16 @@ export default function RegionMap({
   selectedWarningId = null,
   onSelectWarning,
   gauges = null,
+  onClearSelection,
 }: RegionMapProps) {
   const basemap = useMemo(() => getBasemap(), []);
+  const [view, setView] = useState<View>(HOME_VIEW);
+  const viewRef = useRef<View>(HOME_VIEW);
+  const animRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const kMax = useMemo(() => VIEW_W / (MIN_SPAN_DEG * ((basemap.projection.scale() * Math.PI) / 180)), [basemap]);
+  /** Base viewBox point → zoomed viewBox point. */
+  const toView = useCallback((p: Point): Point => [view.x + view.k * p[0], view.y + view.k * p[1]], [view]);
   const calloutId = useId();
   const layersTitleId = useId();
   const [layers, setLayers] = useState({ watch: true, warnings: true, nea: true });
@@ -1055,6 +1112,7 @@ export default function RegionMap({
   const sideRef = useRef<HTMLDivElement>(null);
   const calloutRef = useRef<HTMLDivElement>(null);
   const attributionRef = useRef<HTMLParagraphElement>(null);
+  const zoomRef = useRef<HTMLDivElement>(null);
 
   /** Read the stage and the chrome cards; store only when something moved by half a pixel or more. */
   const measure = useCallback(() => {
@@ -1069,7 +1127,7 @@ export default function RegionMap({
       return b.width > 0 && b.height > 0 ? { x: b.left - s.left, y: b.top - s.top, w: b.width, h: b.height } : null;
     };
     const r = root.getBoundingClientRect();
-    const chrome = [legendRef.current, compactRef.current, sideRef.current, attributionRef.current]
+    const chrome = [legendRef.current, compactRef.current, sideRef.current, attributionRef.current, zoomRef.current]
       .map(rel)
       .filter((x): x is Rect => x !== null);
     const next: StageGeom = {
@@ -1086,7 +1144,7 @@ export default function RegionMap({
     () =>
       incidents
         .map((incident) => {
-          const [x, y] = project(basemap.projection, [incident.lon, incident.lat]);
+          const [x, y] = toView(project(basemap.projection, [incident.lon, incident.lat]));
           const state = states[incident.id] as ReviewState | undefined;
           return {
             incident,
@@ -1098,7 +1156,7 @@ export default function RegionMap({
           };
         })
         .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
-    [basemap, incidents, states, placeNames],
+    [basemap, incidents, states, placeNames, toView],
   );
 
   const selectedIndex = placed.findIndex((p) => p.incident.id === selectedId);
@@ -1114,6 +1172,280 @@ export default function RegionMap({
   const live = geom ?? fallbackGeom(selected !== null, neaActive, insetAtBottom);
   const { px, frame, narrow } = live;
 
+  // --- Free zoom and pan -------------------------------------------------------------------
+  /** Zoom between the regional view and about 0.2° across; keep the view centre over APAC. */
+  const clampView = useCallback(
+    (v: View): View => {
+      const k = clamp(v.k, 1, kMax);
+      const ax = VIEW_W / 2;
+      const ay = VIEW_H / 2;
+      const f = k / v.k;
+      const x0 = ax - (ax - v.x) * f;
+      const y0 = ay - (ay - v.y) * f;
+      const cx = clamp((ax - x0) / k, -PAN_MARGIN, VIEW_W + PAN_MARGIN);
+      const cy = clamp((ay - y0) / k, -PAN_MARGIN, VIEW_H + PAN_MARGIN);
+      return { k, x: ax - cx * k, y: ay - cy * k };
+    },
+    [kMax],
+  );
+
+  const cancelAnim = useCallback(() => {
+    if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    animRef.current = null;
+  }, []);
+
+  /** Interaction updates: one React commit per animation frame. */
+  const commitSoon = useCallback((v: View) => {
+    viewRef.current = v;
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setView(viewRef.current);
+    });
+  }, []);
+
+  /** Animated move (log-zoom, centre follows the zoom so it never swoops); instant under reduced motion. */
+  const animateTo = useCallback(
+    (to: View, ms = ANIM_MS) => {
+      cancelAnim();
+      const from = viewRef.current;
+      if (ms <= 0 || prefersReducedMotion()) {
+        viewRef.current = to;
+        setView(to);
+        return;
+      }
+      const ax = VIEW_W / 2;
+      const ay = VIEW_H / 2;
+      const c0: Point = [(ax - from.x) / from.k, (ay - from.y) / from.k];
+      const c1: Point = [(ax - to.x) / to.k, (ay - to.y) / to.k];
+      const lk0 = Math.log(from.k);
+      const lk1 = Math.log(to.k);
+      const t0 = performance.now();
+      const step = (now: number) => {
+        const t = Math.min(1, (now - t0) / ms);
+        const e = 1 - (1 - t) ** 3;
+        const k = Math.exp(lk0 + (lk1 - lk0) * e);
+        const u = Math.abs(lk1 - lk0) < 0.01 ? e : (1 / from.k - 1 / k) / (1 / from.k - 1 / to.k);
+        const v = { k, x: ax - (c0[0] + (c1[0] - c0[0]) * u) * k, y: ay - (c0[1] + (c1[1] - c0[1]) * u) * k };
+        viewRef.current = v;
+        setView(v);
+        animRef.current = t < 1 ? requestAnimationFrame(step) : null;
+      };
+      animRef.current = requestAnimationFrame(step);
+    },
+    [cancelAnim],
+  );
+
+  const zoomBy = useCallback(
+    (factor: number, ax = VIEW_W / 2, ay = VIEW_H / 2, animate = false) => {
+      const v = viewRef.current;
+      const k = clamp(v.k * factor, 1, kMax);
+      const f = k / v.k;
+      const next = clampView({ k, x: ax - (ax - v.x) * f, y: ay - (ay - v.y) * f });
+      if (animate) animateTo(next, 200);
+      else {
+        cancelAnim();
+        commitSoon(next);
+      }
+    },
+    [kMax, clampView, animateTo, cancelAnim, commitSoon],
+  );
+
+  /** The view a selection zooms to: ±1.5° around a summit, or the watch box with a margin. */
+  const selectedIncident = selected?.incident ?? null;
+  const fitView = useMemo<View>(() => {
+    if (!selectedIncident) return HOME_VIEW;
+    const area = (selectedIncident as { area?: Record<string, unknown> }).area;
+    const n = (key: string) => (area && typeof area[key] === 'number' ? (area[key] as number) : Number.NaN);
+    let west = selectedIncident.lon - SUMMIT_FIT_HALF_DEG;
+    let east = selectedIncident.lon + SUMMIT_FIT_HALF_DEG;
+    let south = selectedIncident.lat - SUMMIT_FIT_HALF_DEG;
+    let north = selectedIncident.lat + SUMMIT_FIT_HALF_DEG;
+    if (area?.kind === 'bbox' && [n('minLat'), n('maxLat'), n('minLon'), n('maxLon')].every(Number.isFinite)) {
+      west = n('minLon') - BOX_FIT_MARGIN_DEG;
+      east = n('maxLon') + BOX_FIT_MARGIN_DEG;
+      south = n('minLat') - BOX_FIT_MARGIN_DEG;
+      north = n('maxLat') + BOX_FIT_MARGIN_DEG;
+    }
+    const [x0, y0] = project(basemap.projection, [west, north]);
+    const [x1, y1] = project(basemap.projection, [east, south]);
+    const fw = (FIT_FRAME.x1 - FIT_FRAME.x0) * VIEW_W;
+    const fh = (FIT_FRAME.y1 - FIT_FRAME.y0) * VIEW_H;
+    const k = clamp(Math.min(fw / Math.max(x1 - x0, 1e-6), fh / Math.max(y1 - y0, 1e-6)), 1, kMax);
+    const ax = ((FIT_FRAME.x0 + FIT_FRAME.x1) / 2) * VIEW_W;
+    const ay = ((FIT_FRAME.y0 + FIT_FRAME.y1) / 2) * VIEW_H;
+    return { k, x: ax - k * ((x0 + x1) / 2), y: ay - k * ((y0 + y1) / 2) };
+  }, [selectedIncident, basemap, kMax]);
+
+  // Selecting a watch area (map, list, hash) zooms to it; clearing the selection returns to APAC.
+  const fitKey = selectedIncident?.id ?? '';
+  useEffect(() => {
+    animateTo(fitView);
+    // Only a change of selection refits; free zoom and pan are left alone otherwise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitKey]);
+
+  useEffect(
+    () => () => {
+      if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    },
+    [],
+  );
+
+  const goHome = () => {
+    if (selectedId !== null && onClearSelection) onClearSelection();
+    else animateTo(HOME_VIEW);
+  };
+
+  /** Client pixels → viewBox units of the (letterboxed) stage. */
+  const toViewBox = (clientX: number, clientY: number): Point => {
+    const s = stageRef.current?.getBoundingClientRect();
+    if (!s || s.width === 0) return [VIEW_W / 2, VIEW_H / 2];
+    const unit = s.width / VIEW_W;
+    return [(clientX - s.left) / unit, (clientY - s.top) / unit];
+  };
+  const stageUnit = () => {
+    const s = stageRef.current?.getBoundingClientRect();
+    return s && s.width > 0 ? s.width / VIEW_W : 1;
+  };
+
+  // Wheel / trackpad zoom centred on the cursor (native listener: React's wheel handler is passive).
+  const wheelRef = useRef<(e: WheelEvent) => void>(() => {});
+  wheelRef.current = (e: WheelEvent) => {
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+    const factor = Math.pow(2, -e.deltaY * unit * (e.ctrlKey ? 0.01 : WHEEL_STEP));
+    const [ax, ay] = toViewBox(e.clientX, e.clientY);
+    zoomBy(factor, ax, ay);
+  };
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const onWheel = (e: WheelEvent) => wheelRef.current(e);
+    root.addEventListener('wheel', onWheel, { passive: false });
+    return () => root.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Drag to pan, two-finger pinch; a press that moves less than the threshold stays a click.
+  const pointers = useRef(new Map<number, Point>());
+  const gesture = useRef<{ start: Point; moved: boolean; pinch: { dist: number; mid: Point } | null } | null>(null);
+  const suppressClick = useRef(false);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if ((e.target as Element).closest('[data-no-pan]')) return;
+    suppressClick.current = false;
+    pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pointers.current.size === 1) gesture.current = { start: [e.clientX, e.clientY], moved: false, pinch: null };
+    else if (gesture.current) {
+      gesture.current.moved = true;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture is best effort */
+      }
+    }
+  };
+
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const prev = pointers.current.get(e.pointerId);
+    const g = gesture.current;
+    if (!prev || !g) return;
+    const cur: Point = [e.clientX, e.clientY];
+    pointers.current.set(e.pointerId, cur);
+    const unit = stageUnit();
+    if (pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      const dist = Math.max(Math.hypot(a[0] - b[0], a[1] - b[1]), 1);
+      const mid: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      if (g.pinch) {
+        const v = viewRef.current;
+        const [ax, ay] = toViewBox(mid[0], mid[1]);
+        const k = clamp(v.k * (dist / g.pinch.dist), 1, kMax);
+        const f = k / v.k;
+        cancelAnim();
+        commitSoon(
+          clampView({
+            k,
+            x: ax - (ax - v.x) * f + (mid[0] - g.pinch.mid[0]) / unit,
+            y: ay - (ay - v.y) * f + (mid[1] - g.pinch.mid[1]) / unit,
+          }),
+        );
+      }
+      g.pinch = { dist, mid };
+      return;
+    }
+    if (!g.moved) {
+      const threshold = e.pointerType === 'mouse' ? DRAG_THRESHOLD_MOUSE : DRAG_THRESHOLD_TOUCH;
+      if (Math.hypot(cur[0] - g.start[0], cur[1] - g.start[1]) < threshold) return;
+      g.moved = true;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* capture is best effort */
+      }
+      e.currentTarget.classList.add('is-panning');
+    }
+    const v = viewRef.current;
+    cancelAnim();
+    commitSoon(clampView({ k: v.k, x: v.x + (cur[0] - prev[0]) / unit, y: v.y + (cur[1] - prev[1]) / unit }));
+  };
+
+  const onPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.delete(e.pointerId);
+    const g = gesture.current;
+    if (g) g.pinch = null;
+    if (pointers.current.size === 0) {
+      if (g?.moved) suppressClick.current = true;
+      gesture.current = null;
+      e.currentTarget.classList.remove('is-panning');
+    }
+  };
+
+  const onDoubleClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if ((e.target as Element).closest('button, a, input, summary, [data-no-pan]')) return;
+    const [ax, ay] = toViewBox(e.clientX, e.clientY);
+    zoomBy(e.shiftKey ? 0.5 : 2, ax, ay, true);
+  };
+
+  // Keyboard while the map (or a marker in it) has focus: + / − zoom, arrow keys pan.
+  const onMapKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+    if ((e.target as Element).closest('input, summary, a, [data-no-pan]')) return;
+    const v = viewRef.current;
+    const pan = (dx: number, dy: number) => {
+      cancelAnim();
+      commitSoon(clampView({ k: v.k, x: v.x + dx, y: v.y + dy }));
+    };
+    switch (e.key) {
+      case '+':
+      case '=':
+        zoomBy(1.5, VIEW_W / 2, VIEW_H / 2, true);
+        break;
+      case '-':
+      case '_':
+        zoomBy(1 / 1.5, VIEW_W / 2, VIEW_H / 2, true);
+        break;
+      case 'ArrowLeft':
+        pan(80, 0);
+        break;
+      case 'ArrowRight':
+        pan(-80, 0);
+        break;
+      case 'ArrowUp':
+        pan(0, 80);
+        break;
+      case 'ArrowDown':
+        pan(0, -80);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  };
+
   // Official warning markers: whole symbol inside the frame, official first, newest first, capped.
   const warningMarkers = useMemo<PlacedWarning[]>(() => {
     if (!warnings || warnings.length === 0) return [];
@@ -1127,12 +1459,12 @@ export default function RegionMap({
       .sort(compareWarningMarkers)
       .map((warning) => {
         const loc = warning.location as { lat: number; lon: number };
-        const [x, y] = project(basemap.projection, [loc.lon, loc.lat]);
+        const [x, y] = toView(project(basemap.projection, [loc.lon, loc.lat]));
         return { warning, x, y };
       })
       .filter((m) => m.x >= fx0 && m.x <= fx1 && m.y >= fy0 && m.y <= fy1)
       .slice(0, MAX_WARNING_MARKERS);
-  }, [warnings, basemap, px, frame]);
+  }, [warnings, basemap, px, frame, toView]);
 
   // Gauge markers: only readings at or above the lowest threshold, or cited by a drawn warning.
   const gaugeMarkers = useMemo<PlacedGauge[]>(() => {
@@ -1147,7 +1479,7 @@ export default function RegionMap({
     return gauges
       .filter((g) => Number.isFinite(g.lat) && Number.isFinite(g.lon) && Number.isFinite(g.value))
       .map((gauge): PlacedGauge => {
-        const [x, y] = project(basemap.projection, [gauge.lon, gauge.lat]);
+        const [x, y] = toView(project(basemap.projection, [gauge.lon, gauge.lat]));
         return { gauge, x, y, excess: gaugeExcess(gauge) };
       })
       .filter((m) =>
@@ -1162,7 +1494,7 @@ export default function RegionMap({
         return ra === rb ? 0 : rb - ra;
       })
       .slice(0, MAX_GAUGE_MARKERS);
-  }, [gauges, warningMarkers, basemap, px, frame]);
+  }, [gauges, warningMarkers, basemap, px, frame, toView]);
 
   const selectedRest = selected ? locationRest(selected.name, selected.incident.locationName) : '';
   const calloutText: CalloutText | null = selected
@@ -1179,7 +1511,8 @@ export default function RegionMap({
     const truePts: Point[] = placed.map((p) => [p.x * px, p.y * px]);
     const shown = declutter(truePts, selectedIndex);
     const markerRects = shown.map((pt, i) => box(pt[0], pt[1], i === selectedIndex ? 19 : 16));
-    const points: Rect[] = [box(basemap.singapore[0] * px, basemap.singapore[1] * px, 4)];
+    const sg = toView(basemap.singapore);
+    const points: Rect[] = [box(sg[0] * px, sg[1] * px, 4)];
     shown.forEach((pt, i) => {
       if (Math.hypot(pt[0] - truePts[i][0], pt[1] - truePts[i][1]) > 1.5) points.push(box(truePts[i][0], truePts[i][1], 4));
     });
@@ -1203,7 +1536,8 @@ export default function RegionMap({
       for (const i of order) {
         const others = order.filter((j) => j !== i && tags.has(j)).map((j) => (tags.get(j) as TagChoice).rect);
         const [mx, my] = shown[i];
-        tags.set(i, chooseTag(mx, my, i, variants[i], { ...base, chrome, tags: others }));
+        const diag = i === selectedIndex ? TAG_DIAG_SELECTED : TAG_DIAG;
+        tags.set(i, chooseTag(mx, my, i, variants[i], { ...base, chrome, tags: others }, diag));
       }
     };
 
@@ -1215,7 +1549,7 @@ export default function RegionMap({
     if (selected && calloutText && !narrow) {
       const [mx, my] = shown[selectedIndex];
       const soft = [...tags.values()].map((t) => t.rect);
-      callout = placeCallout(mx, my, selectedIndex, calloutText, { ...base, soft, markerWeight: 5 });
+      callout = placeCallout(mx, my, selectedIndex, calloutText, { ...base, soft, markerWeight: 10, pointWeight: 0.4 });
     }
     const calloutRect = !narrow ? (live.callout ?? callout?.rect ?? null) : null;
     const chrome = calloutRect ? [...live.chrome, calloutRect] : live.chrome;
@@ -1225,19 +1559,19 @@ export default function RegionMap({
 
     const labels: (CountryLabel & { x: number; y: number })[] = [];
     for (const label of COUNTRY_LABELS) {
-      const [x, y] = project(basemap.projection, [label.lon, label.lat]);
+      const [x, y] = toView(project(basemap.projection, [label.lon, label.lat]));
       const w = label.text.length * 9.6 + 8;
       const r: Rect = { x: x * px - w / 2, y: y * px - 9, w, h: 18 };
-      const clash = [...chrome, ...markerRects, ...tagRects, ...points].some((o) => overlapArea(r, o) > 0);
+      const offFrame = outOfFrame(r, frame) > 0;
+      const clash = offFrame || [...chrome, ...markerRects, ...tagRects, ...points].some((o) => overlapArea(r, o) > 0);
       if (!clash) labels.push({ ...label, x, y });
     }
     if (!basemap.hasSingaporePolygon) {
       // Fallback: Singapore drawn only as a labelled point.
-      const [x, y] = basemap.singapore;
-      labels.push({ text: 'Singapore', lon: SINGAPORE[0], lat: SINGAPORE[1], x: x + 40, y: y + 14 });
+      labels.push({ text: 'Singapore', lon: SINGAPORE[0], lat: SINGAPORE[1], x: sg[0] + 40, y: sg[1] + 14 });
     }
     return { shown, truePts, callout, tags, labels };
-  }, [placed, selectedIndex, selected, calloutText, px, frame, narrow, live.chrome, live.callout, basemap, warningMarkers, gaugeMarkers]);
+  }, [placed, selectedIndex, selected, calloutText, px, frame, narrow, live.chrome, live.callout, basemap, warningMarkers, gaugeMarkers, toView]);
 
   const calloutKey = layout.callout
     ? `${Math.round(layout.callout.rect.x)},${Math.round(layout.callout.rect.y)},${Math.round(layout.callout.rect.w)}`
@@ -1258,6 +1592,7 @@ export default function RegionMap({
       compactRef.current,
       sideRef.current,
       calloutRef.current,
+      zoomRef.current,
     ]) {
       if (el) observer.observe(el);
     }
@@ -1409,7 +1744,20 @@ export default function RegionMap({
       ref={rootRef}
       className={className ? `region-map ${className}` : 'region-map'}
       role="group"
-      aria-label="Regional map of watch areas and official warnings"
+      aria-label="Regional map of watch areas and official warnings. Drag or use the arrow keys to pan; scroll, pinch, or plus and minus to zoom."
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onClickCapture={(e) => {
+        if (!suppressClick.current) return;
+        suppressClick.current = false;
+        e.stopPropagation();
+        e.preventDefault();
+      }}
+      onDoubleClick={onDoubleClick}
+      onKeyDown={onMapKeyDown}
     >
       <div ref={stageRef} className="region-map__stage">
         <svg
@@ -1419,6 +1767,7 @@ export default function RegionMap({
           role="img"
           aria-label="Map of Southeast Asia with the ASEAN member states highlighted and neighbouring countries muted"
         >
+          <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
           <path className="region-map__graticule" d={basemap.graticule} />
           <g>
             {basemap.context.map((c) => (
@@ -1439,7 +1788,7 @@ export default function RegionMap({
             className="region-map__point"
             cx={basemap.singapore[0]}
             cy={basemap.singapore[1]}
-            r={3.4}
+            r={3.4 / view.k}
           />
           {inset && (
             <rect
@@ -1448,9 +1797,10 @@ export default function RegionMap({
               y={inset.locator.y}
               width={inset.locator.w}
               height={inset.locator.h}
-              rx={2}
+              rx={2 / view.k}
             />
           )}
+          </g>
           {layers.watch &&
             placed.map((p, i) => {
               const [sx, sy] = layout.shown[i];
@@ -1562,7 +1912,10 @@ export default function RegionMap({
                 aria-label={`${p.incident.title} — ${p.stateLabel}`}
                 aria-pressed={isSelected}
                 aria-describedby={isSelected && layout.callout ? calloutId : undefined}
-                onClick={() => onSelect(p.incident.id)}
+                onClick={() => {
+                  if (isSelected) animateTo(fitView);
+                  onSelect(p.incident.id);
+                }}
               >
                 <svg className="region-map__symbol" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
                   <MarkerSymbol hazard={p.incident.hazard} state={p.state} selected={isSelected} />
@@ -1600,14 +1953,14 @@ export default function RegionMap({
       {narrow ? (
         // Compact maps: one closed-by-default disclosure holds the legend and the layer toggles,
         // so nothing covers the markers unless the presenter opens it.
-        <details ref={compactRef} className="region-map__compact">
+        <details ref={compactRef} className="region-map__compact" data-no-pan>
           <summary className="region-map__compact-summary">Legend and layers</summary>
           <div className="region-map__legend is-inline" role="group" aria-label="Map legend and layers">
             {legendBody}
           </div>
         </details>
       ) : (
-        <div ref={legendRef} className="region-map__legend" role="group" aria-label="Map legend and layers">
+        <div ref={legendRef} className="region-map__legend" role="group" aria-label="Map legend and layers" data-no-pan>
           {legendBody}
         </div>
       )}
@@ -1615,6 +1968,7 @@ export default function RegionMap({
       {selected && inset && (
         <div
           ref={sideRef}
+          data-no-pan
           className={`region-map__side${insetAtBottom ? ' is-bottom' : ''}${neaActive ? ' has-nea' : ''}`}
         >
           <figure className="region-map__inset">
@@ -1731,6 +2085,18 @@ export default function RegionMap({
           )}
         </div>
       )}
+
+      <div ref={zoomRef} className="region-map__zoom" role="group" aria-label="Zoom" data-no-pan>
+        <button type="button" className="region-map__zoom-btn" aria-label="Zoom in" title="Zoom in (+)" onClick={() => zoomBy(2, VIEW_W / 2, VIEW_H / 2, true)}>
+          +
+        </button>
+        <button type="button" className="region-map__zoom-btn" aria-label="Zoom out" title="Zoom out (−)" onClick={() => zoomBy(0.5, VIEW_W / 2, VIEW_H / 2, true)}>
+          −
+        </button>
+        <button type="button" className="region-map__zoom-home" title="Back to the regional view" onClick={goHome}>
+          All APAC
+        </button>
+      </div>
 
       <p ref={attributionRef} className="region-map__attribution" title={REGION.attribution}>
         Boundaries: Natural Earth (public domain)
