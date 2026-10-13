@@ -1,82 +1,104 @@
 # Demo script
 
-Four minutes of demo, up to four minutes of questions, two minutes of buffer. One presenter drives the app and speaks. Control names below match the contract and acceptance checklist; if a label differs slightly in the final build, follow the behaviour described.
+Four minutes of demo, up to four minutes of questions, two minutes of buffer. One presenter drives the app and speaks.
+
+**Control names.** These labels are fixed: **Next step**, **Play** (Pause while playing), **Reset**, **Why this state?**, **Generate brief**, **Download .txt**. The redesign is still in progress, so every other on-screen name below is a working name taken from `docs/DESIGN.md` and marked **[confirm against UI]**. Before rehearsal, replace each marked name with the label in the final build.
+
+**Read the screen, not the script.** The data is real and changes with every refresh. The spoken lines below assume the snapshot of 2026-10-13 07:26 UTC. If the refreshed data gives a different state, a different gauge, or no Level III notice, say what the screen shows, and never claim anything that is not on it.
 
 ## Timed script
 
 | Time | On-screen action | Words |
 |---|---|---|
-| 0:00–0:35 | App open on the regional view. Point to the DEMO REPLAY banner, the ASEAN map, and the incident queue. | "Environmental evidence for Southeast Asia sits in separate satellite feeds and agency reports. ASEAN Watch brings it into one incident review workflow. Everything you see today is a labelled demo replay." |
-| 0:35–1:05 | Click the Merapi marker on the map (or its queue entry). The detail panel shows location, coordinates, catalog source, the baseline records, and **Monitoring**. | "This is a simulated scenario at a real volcano: Merapi, in Central Java, located from the Smithsonian catalog. Every record shows its source, when it was observed, and when we received it. At baseline nothing is flagged, so the state is Monitoring." |
-| 1:05–1:35 | Replay bar: **Next step** to step 1, Thermal observation. New thermal records appear in the timeline; the state becomes **Check observation**. | "A thermal anomaly arrives, and a second one from another sensor. One signal category asks for a check. The second thermal record is shown but not counted: a repeat from the same category is not independent corroboration." |
-| 1:35–2:00 | **Next step** to step 2, Gas observation. A sulfur dioxide record appears; the state becomes **Review needed** and the map marker updates. | "Now a sulfur dioxide anomaly. Two different categories, thermal and gas, prompt review. These are demo rules for directing an analyst's attention. They are not an eruption prediction and not an official alert level." |
-| 2:00–2:50 | Open **Why this state?** and read the rule and the counted / not counted reasons. Then select the gas record to open the **record inspector**: source link, observed time, ingested time, SIMULATED label, quality note. | "Every statement traces to a record. Here is the rule, and why each record did or did not count. The inspector shows the source, observation time separately from ingestion time, the data mode, and the quality note. Analysts can see what is missing and how reliable a source is before drawing conclusions." |
-| 2:50–3:30 | Click **Generate brief**. Scroll the preview past the evidence references, limitations, and analyst questions. Click **Download .txt**. | "The current evidence becomes a portable text brief for human review: incident and location, replay step, review state and rule, each evidence reference with its source, the limitations, and questions for an analyst. The suggested next step is to consult the volcano observatory and ground measurements. It never gives a date, a probability, or an evacuation zone." |
-| 3:30–4:00 | Click **Reset**: step returns to Baseline, state to Monitoring, the brief clears. Point to the wildfire and haze and flood examples in the queue. | "Reset returns to baseline, so the replay is repeatable. The same evidence model already holds the wildfire and haze and flood examples, and later deforestation and marine pollution. Our next step is a live data adapter validated with a local observatory." |
+| 0:00–0:30 | Fresh launch. Point to the header recency line [confirm against UI], the five watch areas on the map and in the **Watch areas** list [confirm against UI], and the **Official warnings · APAC** panel [confirm against UI]. | "ASEAN Watch uses real public data only. On the left are five places we watch in Indonesia: four volcanoes and the Riau peatlands. Next to them are official warnings from agencies across the Asia-Pacific, relayed word for word. The header tells you how old the satellite data is. This is not a warning service; it points you to the agencies that are." |
+| 0:30–0:50 | Click Merapi on the map or in the list. The review column opens on day 1 of 7, with the location, the Smithsonian catalog link and the workflow state. | "Merapi, north of Yogyakarta, located from the Smithsonian catalog. We replay the last seven real days, one UTC day at a time. Nothing here is simulated or staged." |
+| 0:50–1:35 | **Next step** twice, narrating the new records (each new row is marked as new [confirm against UI]). Then **Play** to run to day 7. | "Each step adds a real day. These are NASA FIRMS satellite hotspots within five kilometres of the summit, each with its satellite, its observation time, and when NASA last updated the file it came from. The evidence builds up day by day. The state is Check observation every day this week: thermal evidence only." |
+| 1:35–2:05 | Open **Why this state?** Read the stated watch rule and one counted and one not-counted reason. Optionally click a record to open the **record inspector** [confirm against UI]. | "Here's why. The rule is written out: a confident hotspot near the summit counts as thermal evidence. Review needed would require a second, independent category. No USGS or BMKG earthquake fell within 30 kilometres this week, and there is no open sulfur dioxide feed, so the second category never arrives. That is the honest result, and we don't fake one. The rule is illustrative, not an official threshold." |
+| 2:05–2:25 | Point to the official cross-reference line in the review column, **OFFICIAL · PVMBG MAGMA · LEVEL III (SIAGA)** [confirm against UI]. Open it in the drawer [confirm against UI] to show the issuer, the HISTORICAL label with its recorded time, and **Follow PVMBG MAGMA** [confirm against UI]. | "This is the official level from Indonesia's volcano agency, PVMBG, through MAGMA: Level III, Siaga. It sits in its own style, separate from our state, and we never derive it or override it. It is a recorded copy from 13 October, because MAGMA's data feed needs a token. The link goes to MAGMA for the current level." |
+| 2:25–2:55 | Select **Riau peatland hotspots** [confirm against UI]. Point to the daily hotspot totals, then the **NEA Singapore context card** [confirm against UI] and the map overlay: wind arrow, drift cone, PSI chip [confirm against UI]. | "Riau is a haze watch: confident hotspots are totalled per satellite per day. Because it's within range of Singapore, we add NEA's own station wind and the 24-hour PSI, in NEA's band words, with the reading time. The drift cone is illustrative, not a dispersion model, and the context never changes our state." |
+| 2:55–3:25 | Clear the selection so the panel lists APAC-wide warnings [confirm against UI: how to return to the overview]. Open the ThaiWater item for gauge **C.35** in Phra Nakhon Si Ayutthaya [confirm against UI]. Point to the GDACS impact-estimate style and the feed status footer [confirm against UI]. | "This panel is why the product exists: awareness of potential evacuation, by relaying what the authorities say. ThaiWater reports this Chao Phraya gauge at Ayutthaya at overflowing bank, in its own words. That is a gauge situation, not an evacuation order, so the link goes to the issuer. GDACS is labelled as an estimate. If a feed fails, we say so and tell you to check the issuer. An empty list is never an all-clear." |
+| 3:25–3:50 | Select Merapi again (move to day 7 with **Play** if the replay restarted [confirm against UI]). Click **Generate brief**, scroll the preview briefly, then click **Download .txt**. | "Everything we've just seen becomes a plain-text brief: the snapshot time, the day, the state and its rule, every record with its source, the official notices relayed separately and verbatim, the status of every feed, the limitations, and questions for an analyst. The next step it suggests is to consult the observatory." |
+| 3:50–4:00 | Click **Reset**. | "Reset, and it replays the same real week. Next, we would add scheduled ingestion and a proper agreement with MAGMA, and test the brief with analysts before claiming anything about accuracy." |
 
-Notes for the presenter:
+Presenter notes:
 
-- **Play** runs the remaining replay steps in sequence. Use **Next step** in the live demo so each state change can be narrated; use Play only if time is short.
-- Replay controls apply to Merapi only. The secondary examples are static.
-- If asked to repeat, Reset and run the same steps; the result is identical.
+- Evidence accumulates across the replay. In the 13 October snapshot, Merapi gets new qualifying hotspots on 7 to 11 October and none on 12 or 13 October, so the last two Next steps add nothing new. The state stays Check observation because the earlier records still count. If asked, say exactly that.
+- If the replay day labels or the state differ after a refresh, change the 0:50 and 1:35 lines to match. Never say "Review needed" unless the screen shows it.
+- If the app is online, the warnings panel may show LIVE items that differ from rehearsal. Read the issuer's words as shown. If C.35 is no longer at overflowing bank, use whichever relayed item is on screen, or say the gauge has dropped.
+- Do not call any of our states an alert, and do not say "evacuate" in your own voice. Only an issuer's words may.
 
 ## Pre-demo checklist
 
-Complete in order, no more than 15 minutes before presenting.
+**30 to 60 minutes before presenting** (needs internet):
 
-- [ ] App built with `npm run build` and served with `npm run preview`, then opened in a fresh browser tab (fresh launch: Baseline, no brief generated).
-- [ ] Network-off test passed: Wi-Fi off, page reloaded, full sequence (select, Next step twice, Why this state?, inspector, Generate brief, Download .txt, Reset) completed without errors. Network may be restored afterwards; the demo does not need it.
-- [ ] Final-step brief downloaded in advance (for example `asean-watch-brief_inc-merapi-demo_step-2.txt`) and opened once in a text editor to confirm it reads correctly. Keep the editor window ready.
-- [ ] Backup recording saved locally, played once from the presentation machine with the network off.
-- [ ] Browser zoom at 100 percent.
-- [ ] Display at 1366 × 768 or larger; projector mirroring checked.
-- [ ] Notifications off; unrelated tabs and windows closed; download location known.
-- [ ] Terminal running `npm run preview` left open in the background, in case a restart is needed.
+- [ ] Run `npm run refresh:all`. Read the output. If `refresh:data` fails, nothing is written, the previous snapshot stays, and the chain stops; run `npm run refresh:warnings` and `npm run refresh:nea` on their own. Present with the older snapshot if needed. The header shows its time, so say so.
+- [ ] Run `npm run build`, then `npm run preview`. Snapshots are bundled at build time, so a refresh without a rebuild changes nothing in the preview.
+- [ ] Optional: `npm test` passes.
+- [ ] Check the story against the refreshed data:
+  - Step through Merapi's seven days and note the state on each.
+  - Check Riau's NEA card and drift label.
+  - Find the ThaiWater C.35 item in the APAC list, or choose a replacement item.
+  - Note the header time.
+- [ ] Open MAGMA's public level list (https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas) in a browser. The app's MAGMA records were recorded at 2026-10-13 06:52 UTC and are not updated by any refresh script. If a level has changed, say so during the demo.
+- [ ] Network-off check: turn Wi-Fi off and reload. The app should load, the feeds should fall back to HISTORICAL snapshots, the feed footer should show snapshot or unavailable status, no screen should say "no warnings" or "all clear", and the full path (select, Next step, Play, Why this state?, inspector, Generate brief, Download .txt, Reset) should complete without errors.
+- [ ] Decide whether to present online or offline, and present in the mode you rehearsed. Offline guarantees that the warnings match rehearsal. Online may show LIVE items that differ.
+- [ ] Download the day-7 Merapi brief in advance (`asean-watch-brief_watch-merapi_step-6.txt`) and open it once in a text editor. Keep the editor ready.
+- [ ] Record the backup video after the refresh, so it matches today's data. Play it once offline.
+
+**At the venue:**
+
+- [ ] Browser zoom at 100 percent; display at 1366 × 768 or larger; projector mirroring checked.
+- [ ] Notifications off; unrelated tabs closed; the terminal running `npm run preview` left open in the background.
+- [ ] App open on a fresh launch, with nothing selected and no brief.
 
 ## If the app fails during the presentation
 
-Do not debug on stage. The goal is to show the workflow and be clear about what is real.
+Do not debug on stage.
 
-1. **Small fault, under 15 seconds to recover** (for example a stuck view): reload the tab, or click Reset and continue from the current script line.
-2. **Preview server stopped:** restart `npm run preview` in the prepared terminal and reload, only if it takes under 15 seconds. Otherwise go to step 3.
-3. **App unusable:** say "I'll switch to a recording of the same build," play the backup recording, and narrate it with the same script lines.
-4. **Download blocked or failing:** show the brief preview in the app if it is visible, then open the pre-downloaded `.txt` file.
-5. **Close honestly:** state which parts are functional (map, selection, validation, review rules, explanation, inspector, brief export, offline operation) and which inputs are simulated (all observation values, timestamps, anomaly flags, and scenario dates).
+1. **Small fault, under 15 seconds to recover:** reload the tab, or click Reset and continue from the current script line.
+2. **Preview server stopped:** restart `npm run preview` in the prepared terminal, but only if that takes under 15 seconds. Otherwise go to step 3.
+3. **App unusable:** say "I'll switch to a recording of the same build," play the backup video, and narrate it with the same lines.
+4. **A live feed misbehaves:** go offline (Wi-Fi off) and reload. The app falls back to the bundled snapshots.
+5. **Download fails:** show the brief preview in the app, then open the pre-downloaded `.txt` file.
+6. **Close honestly:** everything shown is real data with its source and time. The workflow states come from our illustrative rules. Official levels and warnings are the issuers' own words, and the MAGMA levels are a recorded copy from 13 October.
 
 ## Backup recording shot list (60–90 seconds)
 
-Record once after verification passes, at 1366 × 768 or 1920 × 1080, browser zoom 100 percent, cursor visible, notifications off. Silent recording is fine; the presenter narrates live. Save as a local video file and confirm it plays offline.
+Record after the refresh, at 1366 × 768 or 1920 × 1080, browser zoom 100 percent, cursor visible, notifications off. A silent recording is fine because the presenter narrates live.
 
 | Approx. time | Shot |
 |---|---|
-| 0–8 s | Regional view on fresh launch: DEMO REPLAY banner, map, incident queue. |
-| 8–18 s | Select Merapi on the map. Detail panel at Baseline, Monitoring. |
-| 18–30 s | Next step: thermal records appear, Check observation. Hold briefly on the second thermal record's "not counted" reason. |
-| 30–42 s | Next step: gas record appears, Review needed, map marker changes. |
-| 42–55 s | Why this state? open. Then the record inspector on the gas record showing SIMULATED, observed time, and ingested time. |
-| 55–70 s | Generate brief, Download .txt, open the downloaded file. |
-| 70–80 s | Reset: Baseline, Monitoring, brief cleared. |
-| 80–90 s | Hold on the queue showing the static wildfire and haze and flood examples. |
+| 0–8 s | Fresh launch: header recency line, map with five watch areas, APAC official-warnings panel. |
+| 8–16 s | Select Merapi: day 1 of 7, workflow state, catalog link. |
+| 16–34 s | Next step twice, then Play to day 7. Evidence rows accumulate. |
+| 34–46 s | Why this state? open, showing the watch rule and the counted and not-counted reasons. |
+| 46–54 s | The official MAGMA Level III line, and the drawer showing the HISTORICAL label and the Follow link. |
+| 54–66 s | Riau: daily totals, NEA context card, drift cone and PSI chip on the map. |
+| 66–78 s | APAC warnings list: the ThaiWater C.35 item opened, then the GDACS estimate style and the feed footer. |
+| 78–90 s | Merapi day 7: Generate brief, Download .txt, open the file; then Reset. |
 
 ## Judging questions
 
 **Does it use AI?**
-No. The prototype uses transparent rules over anomaly flags that are set in the fixtures, and the brief is a deterministic template: the same input always gives the same text. AI could later help extract structured claims from agency reports, with each claim linked to its source and checked by an analyst.
+No. Watch rules and workflow states are plain, stated rules, and the brief is a fixed template: the same data gives the same text. There is no model API. AI could later help extract structured claims from agency bulletins, with each claim linked to its source and checked by an analyst.
+
+**Does it tell people to evacuate?**
+No. It makes people aware of potential evacuation by relaying the official warnings, verbatim, from the agencies with authority, with a link to follow them. Our own states never say "evacuate". If a feed is down or empty, we say "check the issuer directly", never "all clear".
 
 **Can it predict eruptions?**
-No, and it does not try to. A satellite anomaly alone does not establish that an eruption will occur, and a hotspot can have other causes. Prediction needs expert validation, ground instruments, and additional measurements. The tool suggests what an analyst should look at next and documents the evidence.
+No, and it does not try to. A hotspot shows heat at a place and time. It can come from the volcano, a vegetation fire or other hot ground, and it does not show what happens next. Forecasting is the observatory's job, using ground instruments such as PVMBG's seismic network, which has no open feed.
 
-**How would it scale?**
-By proving one reliable incident workflow first, then adding source adapters that produce the same normalized observation records, plus persistence, scheduled ingestion, and monitoring of the pipeline itself. A new adapter does not change the interface contract.
+**Why is everything "Check observation" all week?**
+Because that is what the real data shows. The thermal rule fires on summit hotspots. No USGS or BMKG earthquake fell within 30 km of any summit in this window, and there is no open, keyless SO2 feed, so no second category exists. We could have staged a Review needed. We chose not to.
 
 **Where does the data come from?**
-Merapi's identity and coordinates come from the Smithsonian Global Volcanism Program, and the boundaries from Natural Earth. Every observation is a simulated fixture modelled on a public product type (satellite thermal detections as distributed by NASA FIRMS, Sentinel-5P sulfur dioxide, Sentinel-1 radar). Each record links to the product's public description page, not to a specific scene, and no acquisition identifiers were invented.
+Hotspots come from NASA FIRMS (VIIRS on three satellites, and MODIS); earthquakes from USGS and BMKG; volcano locations from the Smithsonian Global Volcanism Program. Official warnings come from BMKG, JMA, GeoNet, the US National Weather Service, ThaiWater, Jakarta's water agency, PUB and MAGMA, plus GDACS as an aggregator. NEA Singapore provides wind and haze context. Every record keeps its original time and links to its source. No identifier is invented. The full list is in `data/SOURCES.md`.
 
 **Why rules instead of machine learning?**
-An analyst can see exactly why a state changed, and the rules are tested. There is no labelled training data for this workflow, and a model's output would need validation that has not been done. The rules are explicitly illustrative; real criteria would be set with observatory scientists.
+An analyst can see exactly why a state changed, and the rules are tested. There is no labelled training data for this workflow, and a model would need validation we have not done. The rules are explicitly illustrative; real criteria would be set with observatory and agency experts.
 
-**What is real and what is simulated?**
-Real: the volcano's identity and location, the country boundaries, and the software (validation, review logic, replay, explanation, inspector, brief export, offline operation, unit tests). Simulated: every observation value, timestamp, and anomaly flag, and the scenario dates. The interface labels each record SIMULATED and keeps the DEMO REPLAY banner on screen.
+**Why is the MAGMA level a recorded copy?**
+MAGMA's data feed needs a token, and its site reserves all rights. So we show a recorded copy of the public level list, labelled HISTORICAL with its time, and link to MAGMA for the current level. Proper access needs an agreement with PVMBG.
 
 **What is the path to operational use?**
-One source adapter with scheduled ingestion and stored provenance, stale-data handling, and analyst acknowledgement of review prompts. Then calibration against local observatory data, expert review of the rules, and explicit uncertainty handling. Before any accuracy claim, measure how long analysts take to produce a correct brief and how often review prompts mislead. Permissions and audit history come before any multi-organisation use. Official alert levels would only appear with their issuing agency and publication time. See [ROADMAP.md](ROADMAP.md) and [DATA_AND_LIMITATIONS.md](DATA_AND_LIMITATIONS.md).
+Scheduled ingestion with stored history, in place of a manual refresh. Then data-sharing agreements (MAGMA first), stale-data flags on evidence, analyst acknowledgement of prompts, and calibration of the rules with the agencies. Before any accuracy claim, we would measure how long analysts take to produce a correct brief and how often prompts mislead. Permissions and audit history come before any multi-organisation use. See [ROADMAP.md](ROADMAP.md).

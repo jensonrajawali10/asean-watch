@@ -1,115 +1,130 @@
 # ASEAN Watch
 
-ASEAN Watch is a regional environmental intelligence prototype for Southeast Asia. It turns scattered environmental observations into one incident review workflow: an analyst selects an incident on a regional map, replays the observations as they arrive, sees why the incident needs attention, inspects the record behind every statement, and exports a plain-text briefing. Volcanoes are the first module, with a simulated scenario at Merapi in Central Java as the flagship demo. Wildfire and haze, flooding, deforestation, and marine pollution are planned as later modules on the same evidence model.
+ASEAN Watch is an Asia-Pacific environmental surveillance prototype that uses real public data only. It does two separate jobs on one map. First, it watches five places in Indonesia (the Merapi, Semeru, Anak Krakatau and Sinabung volcanoes, and the Riau peatlands) using NASA FIRMS satellite hotspots and USGS and BMKG earthquake reports. It replays the last seven days one UTC day at a time and shows, record by record, why each watch area is in its current workflow state. Second, it relays official tsunami, earthquake, volcano and flood warnings word for word from the agencies with authority, so people know a potential evacuation may be coming and whose instructions to follow. It never issues a warning of its own. Everything on screen can be exported as a plain-text brief.
 
-> **Prototype notice.** This is a hackathon prototype running on **simulated data**. It is **not** a validated eruption forecast, an official alert service, or a public warning system. It does not predict eruptions, estimate probabilities, or advise on evacuation. Review states are illustrative workflow labels, not official volcano alert levels. The real volcano's location is used; the scenario does not describe its current activity.
+> **Not an official warning service.** This is a hackathon prototype. It does not issue warnings, alert levels or evacuation advice, and it does not predict eruptions, fires or floods. Official warnings are copied verbatim from the issuing agency with a link to it: **follow that agency's instructions**. If a feed is unavailable or lists nothing, that is **never an all-clear**; check the issuer directly. Satellite and earthquake data come from a snapshot that can be hours or days old, and the header shows its time. The workflow states (Monitoring, Check observation, Review needed) come from illustrative rules and are not official alert levels.
 
 ## Quick start
 
-Requires Node.js 22.12 or later and npm. (Vite itself runs on Node 20.19+, but the test runner, Vitest 5, needs 22.12+.)
+Requires Node.js 22.12 or later and npm. (Vite runs on Node 20.19+, but the test runner, Vitest 5, needs 22.12+.)
 
 ```bash
 npm install
-npm run dev          # development server; Vite prints the local URL
+npm run dev              # development server; Vite prints the local URL
 ```
 
-Offline demo build (recommended for presenting):
+Refresh the data (needs internet):
 
 ```bash
-npm run build        # type-checks, then bundles the app, map, and fixtures
-npm run preview      # serves the built app locally
+npm run refresh:all      # FIRMS hotspots, USGS and BMKG quakes, official-warning and NEA snapshots
 ```
 
-After `npm run preview` is running, the app needs no network: the map geometry and all fixtures are bundled. Source and reference links open in a new tab and are never fetched by the app.
+Build for presenting or offline use:
 
-Other scripts:
+```bash
+npm run build            # snapshots are bundled at build time, so rebuild after every refresh
+npm run preview
+```
+
+Offline, the app runs entirely from the bundled snapshots. When it is online, the browser also fetches NEA and the official-warning feeds directly; each feed falls back to its snapshot if the request fails. FIRMS and earthquake data are only ever read from the snapshot.
 
 | Command | What it does |
 |---|---|
-| `npm test` | Runs unit tests for validation, review rules, and briefing output |
+| `npm run refresh:data` | Downloads the four FIRMS 7-day South East Asia CSVs (about 26 MB in total), the USGS query and the three BMKG lists. It keeps rows near the watch areas and writes `data/real/*.json`. All or nothing: if any source fails, nothing is written. |
+| `npm run refresh:warnings` | Captures the official-warning feeds to `data/warnings-snapshot.json`. If a feed fails, its previous entry is kept. |
+| `npm run refresh:nea` | Captures NEA wind, PSI and PM2.5 to `data/nea-snapshot.json`. All or nothing. |
+| `npm run refresh:all` | Runs the three scripts above in order. It stops at the first one that fails, so run the remaining ones yourself. |
+| `npm test` | Unit tests for validation, watch rules, review states, warnings parsing, NEA, and the brief |
 | `npm run typecheck` | TypeScript project check |
-| `npm run build:region` | Regenerates `data/region.geojson` from the Natural Earth data in the installed `world-atlas` package (only needed if the map extent changes) |
+| `npm run build:region` | Regenerates `data/region.geojson` from Natural Earth via the installed `world-atlas` package |
+
+The MAGMA Indonesia volcano levels are bundled records copied on 13 October 2026 (MAGMA's API needs a token). No refresh script updates them.
 
 ## Demo flow
 
-1. **Open the regional view.** The ASEAN map, the Merapi marker, the incident queue, and the persistent DEMO REPLAY banner are visible.
-2. **Select Merapi** on the map or in the queue. Both routes open the same incident: location, coordinates, catalog source, baseline records, and the state **Monitoring**.
-3. **Replay the observations** with the replay bar (Next step, Play, Reset). Step 1 adds thermal anomalies and the state becomes **Check observation**; step 2 adds a sulfur dioxide anomaly and the state becomes **Review needed**, because two distinct evidence categories are now present.
-4. **Trace the evidence.** "Why this state?" shows the rule and why each record was or was not counted. The record inspector shows each record's source link, observation time, ingestion time, data mode, and quality note.
-5. **Export and reset.** Generate brief, then Download .txt saves a deterministic text briefing for the current step. Reset returns to Baseline and clears the brief; the sequence repeats with the same result.
+1. **Overview.** The map shows the five watch areas with their workflow states, plus the official-warnings panel for the Asia-Pacific region. The header gives the snapshot time.
+2. **Select Merapi and step through the week.** Next step reveals one real UTC day at a time, and the evidence accumulates. Play runs the remaining days; Reset returns to day 1.
+3. **Why this state?** Shows the stated watch rules and why each record was or was not counted. The record inspector shows a record's source, observation time, ingestion time and quality note.
+4. **Official and context layers.** The official MAGMA level for Merapi sits beside our state, in a separate style. Riau shows NEA Singapore wind and haze as context. The official-warnings panel relays issuer messages verbatim, for example a ThaiWater gauge on the Chao Phraya at "overflowing bank".
+5. **Brief.** Generate brief, then Download .txt saves the brief for the current watch area and day.
 
-The full timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
-## What is functional vs simulated
+## What the app shows
 
-| Part | Status | Notes |
-|---|---|---|
-| Regional map with country boundaries | Functional, published geometry | Natural Earth boundaries bundled locally; no map tiles or tile server |
-| Merapi identity and coordinates | Real | Smithsonian GVP volcano 263250, lat -7.54, lon 110.446 |
-| Incident queue and selection | Functional | Map and queue set the same selection; incidents never share records |
-| Observation values, timestamps, anomaly flags | **Simulated** | Every record is labelled SIMULATED and modelled on a public product type |
-| Scenario dates and replay clock | **Simulated** | Fictional scenario clock, not real satellite overpass times |
-| Wildfire and haze, flood examples | **Simulated**, static | Show the queue and rules on other hazards; they do not replay |
-| Fixture validation | Functional | Invalid records are dropped with a readable message; duplicate ids are ignored |
-| Review state derivation | Functional, illustrative rules | Rules are transparent and tested; they are not scientific thresholds |
-| Explanation and record inspector | Functional | Every state and statement traces to a record |
-| Brief generation and `.txt` download | Functional | Deterministic text, generated in the browser |
-| Offline operation | Functional | After `npm run build`; no runtime network call |
-| Live or historical data ingestion | Not built | First item on the [roadmap](docs/ROADMAP.md) |
-| Eruption prediction, alert levels, evacuation advice | Out of scope | Never generated by the app |
+| Layer | Source | Mode label | Role |
+|---|---|---|---|
+| Satellite hotspots | NASA FIRMS VIIRS 375 m (Suomi NPP, NOAA-20, NOAA-21) and MODIS 1 km | HISTORICAL SNAPSHOT | Evidence, category `thermal` |
+| Earthquakes | USGS ComCat; BMKG Data Terbuka and InaTEWS lists | HISTORICAL SNAPSHOT | Evidence, category `seismic` |
+| Volcano identity and summit points | Smithsonian Global Volcanism Program | Catalog | Watch-area centres |
+| Workflow state | Stated watch rules in `src/lib/watchRules.ts` | Derived | Analyst prompt, not an alert level |
+| Official warnings | BMKG, JMA, GeoNet, US NWS, ThaiWater, Jakarta DSDA, PUB Singapore | LIVE if fetched this session, else HISTORICAL | Relayed verbatim; never changes a workflow state |
+| Volcano levels | PVMBG via MAGMA Indonesia (Merapi, Semeru, Anak Krakatau, Sinabung at Level III) | HISTORICAL, recorded 2026-10-13 06:52 UTC | Relayed verbatim beside the watch, linked to MAGMA |
+| Impact estimates | GDACS | LIVE or HISTORICAL | Aggregator; labelled as an estimate, not a warning |
+| Wind and haze | NEA Singapore via data.gov.sg | LIVE or HISTORICAL SNAPSHOT | Context only; shown for Riau (within 600 km of Singapore) |
+| Volcanic gas, deformation, ash | none open and keyless | Not shown | Each volcano links to MOUNTS instead |
+| Modelled weather or air quality | none | Not used | |
+
+**Current result.** In the snapshot retrieved 2026-10-13 07:26 UTC (7 to 13 October), every watch area reads **Check observation** on every day, from thermal evidence alone (records accumulate across the week, so an early hotspot keeps counting). No USGS or BMKG earthquake fell within range of any watch area, and there is no open SO2 feed, so no second evidence category exists and no watch area reaches Review needed. Nothing is staged. A refresh can change this result.
 
 ## Architecture
 
-No server, database, model API, or runtime network call. Data flow:
+There is no server, database or model API. Data flow:
 
 ```
-data/*.json fixtures → validateObservations → visibleObservations(incident, replayIndex)
-  → deriveReview → map + queue + detail + timeline → buildBriefing → .txt download
+refresh scripts → data/real/*.json, data/watches.json (snapshot, bundled at build)
+  → loadFixtures: watch rules turn rows into observations → validateObservations
+  → visibleObservations(watch, day) → deriveReview → map, rail, review column, timeline
+  → buildBriefing → .txt download
+
+loadOfficialWarnings (live per feed → cache → bundled snapshot) → warningsNear → panel, map, brief
+loadNeaContext (live → bundled snapshot) → assessDrift → context card, map overlay, brief
 ```
 
-The app component owns three pieces of state: the selected incident, the replay index, and the generated brief. Everything else is derived from them. Changing the incident or replay step clears the brief.
+Official warnings and NEA context never enter `deriveReview`. The app component owns the selected watch area, the replay day and the generated brief. Changing the area or the day clears the brief.
 
 | File or module | Responsibility |
 |---|---|
-| `src/types.ts` | Shared data contract: observation, incident, replay step, and review result types |
-| `data/volcanoes.json` | Volcano catalog entry: stable id, GVP number, name, coordinates, catalog source |
-| `data/incidents.json` | Incidents: hazard type, location, data mode, scenario window, whether it replays |
-| `data/demo-events.json` | Merapi replay steps (labels and scenario clock) and all observation records |
-| `data/SOURCES.md` | Source and attribution for every fixture |
-| `scripts/build-region.mjs`, `data/region.geojson` | Build and bundle the regional boundary geometry |
-| `src/lib/fixtures.ts` | Load and validate fixtures once at startup |
-| `src/lib/reviewRules.ts` | Validate records, select records visible at a replay step, derive the review state and a reason for each record (pure functions) |
-| `src/lib/briefing.ts` | Build the deterministic text brief, name the file, trigger the browser download |
-| `src/lib/*.test.ts` | Unit tests for validation, rules, and briefing |
-| `src/components/RegionMap.tsx` | Render the bundled map, incident markers, and selection highlight |
-| `src/App.tsx`, other `src/components/*` | App state, header and DEMO REPLAY banner, incident queue, detail panel, evidence timeline, replay bar, explanation, record inspector, brief panel |
-| `docs/CONTRACT.md`, `docs/ACCEPTANCE.md` | Implementation contract and demo acceptance checklist |
+| `src/types.ts` | Shared data contract |
+| `data/watches.json` | The five watch areas: centre, summit radius or haze box, reference links |
+| `data/volcanoes.json` | Smithsonian GVP catalog entries for the four volcanoes |
+| `data/real/firms.json`, `quakes.json`, `meta.json` | The snapshot: kept rows, and per-source URL, retrieval time, Last-Modified, row counts and attribution |
+| `data/warnings-snapshot.json`, `data/nea-snapshot.json` | Raw official-warning and NEA payloads, used as offline fallbacks |
+| `data/SOURCES.md` | Provenance, field mapping and caveats for the snapshot |
+| `scripts/refresh-data.mjs`, `capture-warnings-snapshot.mjs`, `capture-nea-snapshot.mjs` | Download and write the snapshots |
+| `src/lib/watchRules.ts` | Stated watch rules: turn raw rows into observations and set `anomaly` with the rule text |
+| `src/lib/fixtures.ts` | Load the snapshot, build seven replay days, validate records |
+| `src/lib/reviewRules.ts` | Validation, records visible on a day, workflow state, and a reason for each record |
+| `src/lib/warnings.ts` | Official-warning feeds: parse verbatim, track feed status, fall back to the snapshot, filter by distance |
+| `src/lib/nea.ts` | NEA wind and haze: fetch, normalise to UTC, fall back to the snapshot, illustrative drift |
+| `src/lib/briefing.ts` | Plain-text brief, file name, browser download |
+| `src/components/*`, `src/App.tsx` | Header, watch-area rail, official-warnings panel, map, review column, record inspector, replay timeline, brief panel |
+| `scripts/build-region.mjs`, `data/region.geojson` | Bundled country boundaries |
 
-## Review rules
+## Watch rules and workflow states
 
-For the selected incident, using only the records visible at the current replay step:
+These illustrative watch rules mark a record as an anomaly. They are not official thresholds:
 
-- Records observed outside the incident's scenario window are shown but not counted.
-- **Monitoring**: no counted record is marked anomalous.
-- **Check observation**: anomalies from one category (for example, thermal).
-- **Review needed**: anomalies from two or more distinct categories (for example, thermal and gas).
-- Only the first anomaly in each category counts. A second thermal reading is shown with the reason "not independent corroboration" and does not raise the state.
-- Anomaly flags are configured in the fixtures with a stated reason. The app never computes them from values.
+- **Thermal, volcano:** a FIRMS hotspot within 5 km of the GVP summit point, with VIIRS confidence nominal or high, or MODIS confidence 50 or more.
+- **Thermal, haze box:** 10 or more confident hotspots from one sensor on one UTC day inside the Riau box.
+- **Seismic:** a USGS or BMKG earthquake of M 3.0 or more within 30 km of the summit, or inside the box. USGS and BMKG reports of the same event are both shown and never merged.
 
-These are **illustrative workflow rules, not scientific thresholds or official alert levels**. They suggest which incidents an analyst should look at next; they say nothing about the likelihood of an eruption.
+The workflow state counts distinct evidence categories among the flagged records visible up to the current day. None gives **Monitoring**, one gives **Check observation**, and two or more give **Review needed**. A repeat from the same category is shown but not counted as independent corroboration. These states tell an analyst where to look. They say nothing about the likelihood of an eruption or a fire, and they are never worded as "evacuate".
+
+## Official warnings relay
+
+- Issuer, level, headline, area, times and any instruction are shown verbatim, with "Follow <issuer>" linking to the issuer's page. Fixed, reviewed glosses explain unfamiliar scales: for example, DSDA's Siaga 1 is its most severe level, not its least.
+- Levels are never re-scored, merged, translated on the fly, or restyled as workflow states. Official items have their own style.
+- A failed feed reads "Official feed unavailable: check <issuer> directly". An empty list says it is not an all-clear. Expired or ended messages are labelled.
+- GDACS is an aggregator. Its items are labelled as impact estimates, not warnings.
 
 ## Data and attribution
 
-- **Merapi identity and coordinates:** Smithsonian Institution Global Volcanism Program, volcano number 263250, <https://volcano.si.edu/volcano.cfm?vn=263250>.
-- **Country boundaries:** [Natural Earth](https://www.naturalearthdata.com/) (public domain), redistributed as TopoJSON by the [world-atlas](https://github.com/topojson/world-atlas) package and bundled with the app.
-- **Simulated observations:** each record names the product type it is modelled on and links to that product's public description page, not to a specific scene or granule. The product types are satellite thermal detections (VIIRS or MODIS, as distributed by [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/content/active_fire/)), Sentinel-5P sulfur dioxide, and Sentinel-1 radar ([Copernicus Data Space Ecosystem](https://documentation.dataspace.copernicus.eu/Applications/Browser.html)). No acquisition identifier has been invented. The per-record list is in `data/SOURCES.md`.
-
-Full references and the label policy are in [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md).
+NASA FIRMS (LANCE/ESDIS) hotspots; U.S. Geological Survey earthquakes (public domain); "Sumber data: BMKG" (required by BMKG's terms); Smithsonian Institution Global Volcanism Program catalog; PVMBG/MAGMA Indonesia levels (all rights reserved by MAGMA; recorded and linked, not redistributed in bulk); JMA (Public Data License v1.0); GeoNet (CC BY 3.0 NZ); US National Weather Service; GDACS; ThaiWater (Hydro-Informatics Institute, RID gauges); Dinas Sumber Daya Air DKI Jakarta; PUB and NEA via data.gov.sg (Singapore Open Data Licence v1.0); Natural Earth boundaries (public domain) via `world-atlas`. The full attribution texts are in `data/SOURCES.md` and [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md).
 
 ## Documentation
 
 - [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md): four-minute script, pre-demo checklist, backup procedure, judging Q&A
-- [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md): signal types, label policy, limitations, requirements for operational use, references
-- [docs/ROADMAP.md](docs/ROADMAP.md): expansion modules and post-sprint priorities
-- [docs/CONTRACT.md](docs/CONTRACT.md): implementation contract
-- [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md): demo acceptance checklist
+- [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md): sources, watch rules, the warnings relay, label policy, limitations, references
+- [docs/ROADMAP.md](docs/ROADMAP.md): what exists per hazard, and what comes next
+- [docs/CONTRACT.md](docs/CONTRACT.md), [docs/DESIGN.md](docs/DESIGN.md), [data/SOURCES.md](data/SOURCES.md): implementation contract, UI design, data provenance

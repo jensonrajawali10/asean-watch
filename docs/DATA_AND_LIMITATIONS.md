@@ -1,73 +1,149 @@
 # Data and limitations
 
-What the prototype's data is, how it is labelled, what it cannot tell you, and what a real service would need. Bracketed numbers refer to the [references](#references) at the end.
+What ASEAN Watch shows, where each item comes from, how it is labelled, what it cannot tell you, and what an operational service would need. Bracketed numbers refer to the [references](#references). Record-level provenance and field mapping are in [`data/SOURCES.md`](../data/SOURCES.md).
 
-## Satellite signals for volcano monitoring
+Everything shown is real. The earlier simulated Merapi scenario and the Ayutthaya flood example were removed on 13 October 2026.
 
-USGS identifies four principal types of satellite observation for volcanoes: deformation and surface change, gas emissions, thermal anomalies, and ash plumes [1]. These observations support monitoring and expert assessment. A detected anomaly on its own does not establish that an eruption will occur.
+## Four layers, kept apart
 
-| Signal | Candidate source | Sprint treatment |
+| Layer | What it is | Can it change a workflow state? |
 |---|---|---|
-| Ground deformation | Sentinel-1 radar and InSAR [2][3] | One simulated, non-anomalous deformation record in the Merapi baseline. No radar pairs are processed and no displacement series is presented as a measured product. |
-| Volcanic gas | Sentinel-5P sulfur dioxide [5] | One simulated sulfur dioxide anomaly at replay step 2. No historical gas product is included. |
-| Thermal anomaly | VIIRS or MODIS thermal detections, distributed by NASA FIRMS [6] | Two simulated thermal anomalies from different sensors at replay step 1; only the first counts. The static wildfire and haze example also carries one simulated thermal anomaly. No FIRMS sample file is included. |
-| Ash and surface change | Optical or meteorological imagery | Not part of the demo scenario. The `ash` category exists in the data schema, but no imagery is shown, and no schematic is presented as satellite imagery. |
+| **Evidence** | Satellite hotspots and earthquake reports near a watch area, from the bundled snapshot | Yes, through the stated watch rules |
+| **Workflow state** | Monitoring, Check observation or Review needed, derived from the evidence | It is the state, and it is an analyst prompt, not an alert level |
+| **Official warnings** | Agency messages relayed verbatim | No. Shown in a separate, reserved style |
+| **Context** | NEA Singapore wind and haze | No. Labelled "context only" |
 
-The build plan allowed optional real samples (a FIRMS extract, a historical gas example) under a strict time limit. The implementation contract makes every sprint record simulated, so none are included.
+## Watch areas
 
-## Data in this repository
+| Watch area | Centre | Area | Source of the centre |
+|---|---|---|---|
+| Merapi | -7.54, 110.446 | 5 km thermal and 30 km seismic radius | Smithsonian GVP 263250 [4] |
+| Semeru | -8.108, 112.922 | same | GVP 263300 |
+| Anak Krakatau | -6.1009, 105.4233 | same | GVP 262000 (Krakatau). The GVP catalogs Anak Krakatau under Krakatau; the watch uses that entry's point, which may not mark the active cone exactly. |
+| Sinabung | 3.17, 98.392 | same | GVP 261080 |
+| Riau peatland hotspots | 0.50, 102.55 (Siak-Kampar peatlands) | Box: latitude -0.5 to 1.6, longitude 101.0 to 103.2 | Chosen to exclude Malaysian and Singapore land. It approximates the Riau mainland; province boundaries were not checked. |
 
-| File | Contents | Status |
+The four volcanoes were chosen because MAGMA Indonesia listed them at Level III (Siaga) on 13 October 2026.
+
+## Satellite and ground signals
+
+USGS identifies four principal types of satellite observation for volcanoes: deformation, gas emissions, thermal anomalies and ash plumes [1]. This build uses only those with an open, keyless, machine-readable source.
+
+| Signal | Candidate source | This build |
 |---|---|---|
-| `data/volcanoes.json` | Merapi: GVP volcano number 263250, latitude -7.54, longitude 110.446 | Real, from the Smithsonian Global Volcanism Program [4] |
-| `data/incidents.json` | The Merapi demo incident and two static examples (wildfire and haze, flood) | Simulated scenarios |
-| `data/demo-events.json` | Merapi replay steps with a fictional scenario clock, and every observation record | Simulated |
-| `data/region.geojson` | Country boundaries for the regional map, built by `npm run build:region` | Natural Earth (public domain), via the `world-atlas` package |
-| `data/SOURCES.md` | Source and attribution for each fixture | Reference list |
+| Thermal anomaly | NASA FIRMS VIIRS 375 m (Suomi NPP, NOAA-20, NOAA-21) and MODIS 1 km [6] | **Used.** 7-day South East Asia CSVs, filtered to the watch areas. |
+| Earthquakes (category `seismic`) | USGS ComCat; BMKG Data Terbuka and InaTEWS lists | **Used.** No event fell within range of any watch area in the current snapshot. |
+| Volcanic gas (SO2) | Sentinel-5P [5] | **Not shown.** There is no open, keyless numeric feed; Copernicus downloads need an account and NetCDF processing. Each volcano links to MOUNTS (independent research, not official). It is never filled with modelled values. |
+| Ground deformation | Sentinel-1 radar and InSAR [2][3] | **Not shown.** MOUNTS link only. |
+| Ash | Volcanic Ash Advisory Centres | **Not shown.** Darwin VAAC, which covers Indonesia, blocked scripted requests. |
 
-The coordinates identify the real volcano. The scenario does not describe Merapi's current activity.
+## The snapshot
+
+| | |
+|---|---|
+| Retrieved | 2026-10-13T07:26:44Z |
+| Window | 2026-10-07T00:00Z to the retrieval time: the last 7 UTC days, with the final day incomplete |
+| Replay | One step per UTC day, oldest first. Records accumulate from day to day. |
+| Refresh | `npm run refresh:data`, or `npm run refresh:all` for every snapshot. Rebuild afterwards. |
+
+- **Collection vs rule.** The refresh keeps hotspots within 10 km and earthquakes within 50 km, then the watch rules apply the tighter 5 km and 30 km radii.
+- **All or nothing.** `refresh:data` and `refresh:nea` write nothing unless every source succeeds. `refresh:warnings` keeps the previous entry for any feed that fails.
+- **Times.** `observedAt` is the provider's own observation time, converted to UTC. `ingestedAt` is the Last-Modified time of the file or response the record came from (when the provider last wrote it), falling back to the retrieval time. Both are shown separately.
+- **Identifiers.** Record ids come from the provider's event id, or from watch, source, time and coordinates. No granule, scene or orbit identifier is invented. `sourceUrl` points to the product page or the event's own page.
+
+## Watch rules
+
+Defined in `src/lib/watchRules.ts`. The rule text travels with each flagged record and appears in "Why this state?" and the brief. Every rule is **an illustrative watch rule, not an official threshold**.
+
+- **Thermal, volcano:** a FIRMS hotspot within 5 km of the GVP summit point with VIIRS confidence nominal or high, or MODIS confidence 50 or more. Low-confidence hotspots are shown but not flagged.
+- **Thermal, haze box:** hotspots inside the box are totalled per sensor per UTC day. A day with 10 or more confident hotspots from one sensor is flagged.
+- **Seismic:** a USGS or BMKG earthquake within 30 km of the summit (or inside the box) is shown; M 3.0 or more is flagged, and smaller events are context. Reports of one event from different agencies or products are each shown and never merged or averaged.
+
+**Workflow state.** The state counts the distinct categories among flagged records visible up to the current day. None gives Monitoring, one gives Check observation, and two or more give Review needed. A later record from an already counted category is shown with the reason that it is not independent corroboration.
+
+**Current result.** In the 13 October snapshot, every watch area reads Check observation on every day, from thermal evidence alone. Records accumulate over the replay, so a flagged hotspot early in the week keeps the state. Merapi, for example, has qualifying hotspots on 7 to 11 October and none on 12 or 13 October; Sinabung only on 7 and 8 October. Review needed would require a second category. No earthquake fell within range, and no gas feed exists, so it does not occur. Nothing is staged, and a refresh can change the result.
+
+## Official warnings (evacuation awareness)
+
+ASEAN Watch exists to make people aware of potential evacuation. It does this **only by relaying official warnings** from the agencies with authority, and never by issuing its own.
+
+| Issuer | Product | How it arrives |
+|---|---|---|
+| BMKG InaTEWS (Indonesia) | Tsunami warnings; earthquake information | Live in the browser, snapshot fallback |
+| Japan Meteorological Agency | Tsunami and volcano warnings | Live, snapshot fallback |
+| GeoNet (GNS Science, New Zealand) | Volcanic alert levels | Live, snapshot fallback |
+| US National Weather Service | Tsunami alerts for Hawaii, Guam, CNMI, American Samoa | Live, snapshot fallback |
+| ThaiWater (Hydro-Informatics Institute; RID gauges) | River gauges at situation level 5 ("overflowing bank") | Live, snapshot fallback |
+| Dinas Sumber Daya Air DKI Jakarta | Floodgate levels and Siaga status | Live, snapshot fallback |
+| PUB Singapore (via data.gov.sg) | Flood alerts | Live, snapshot fallback |
+| PVMBG via MAGMA Indonesia | Volcano activity level (Level III Siaga for the four volcanoes) | Bundled record from the public level list, retrieved 2026-10-13T06:52:03Z. The API is token-only, and no refresh updates it. |
+| GDACS | Cross-hazard impact estimates | Live, snapshot fallback. An **aggregator**, labelled as an estimate, not a warning |
+
+Relay rules:
+
+- **Verbatim.** Issuer, level, headline, affected area, issue time, expiry and any instruction are copied from the message, with only outer whitespace trimmed. Each item links to the issuer ("Follow <issuer>").
+- **No re-scoring.** Levels are never ranked against each other, merged, translated on the fly, or restyled as workflow states. A fixed, reviewed gloss explains an unfamiliar scale. For example, MAGMA Level III is "Level 3 of 4 (Alert)", and DSDA's Siaga 1 is its most severe level.
+- **Absence is not safety.** A failed feed reads "Official feed unavailable: check <issuer> directly". An empty list says "This is not an all-clear". Expired or ended messages are labelled with their time.
+- **Mode.** LIVE means fetched in this session. HISTORICAL means a bundled snapshot with its original times, and it must never look current.
+- **Near a watch area** means within 150 km. With nothing selected, the panel lists every relayed item in the Asia-Pacific.
+
+Example from the bundled snapshot: ThaiWater gauge C.35 (Ban Pom, Phra Nakhon Si Ayutthaya, Chao Phraya basin) read 4.97 m MSL, at 104.56% of bank capacity, at 13:00 ICT on 13 October 2026, situation level 5, "overflowing bank". A ThaiWater situation level is a gauge category, not an evacuation order.
+
+## NEA Singapore context
+
+- **Source:** NEA wind direction, wind speed, PSI and PM2.5 from data.gov.sg (18 wind stations). Fetched live, falling back to the bundled snapshot.
+- **Role:** context only. It never enters the workflow state.
+- **Coverage:** shown only for watch areas within 600 km of Singapore. In this build, that means Riau.
+- **Drift:** distance, bearing and downwind direction from Riau, plus whether Singapore lies within ±45° of downwind. Labelled "Illustrative haze drift using Singapore station wind, not a dispersion model".
+- **PSI:** shown with NEA's own band words, source and reading time.
 
 ## Label policy
 
-These rules keep the demo from being mistaken for real monitoring output.
-
-- **DEMO REPLAY banner.** The page banner stays visible at all times.
-- **Data mode in text.** Every record shows SIMULATED, HISTORICAL, or LIVE as a text label, not as colour alone. In the sprint every record is SIMULATED. A historical record would stay HISTORICAL even when replayed.
-- **No fabricated identifiers.** No satellite granule, scene, or acquisition identifier is invented. A record's source name states the product type it is modelled on (for example, a simulated fixture modelled on VIIRS 375 m active fire detections), and its link points to the public page describing that product, not to a specific record.
-- **No simulated value presented as measured.** No simulated chart or value is shown as a measured product.
-- **No official alert levels.** Monitoring, Check observation, and Review needed are analyst workflow labels. Any official agency alert level added later must show its own source and publication time.
-- **Observation time vs ingestion time.** Each record carries the time the sensor or reporter observed it and, separately, the time the platform received it. Both are shown, in ISO 8601 UTC.
-- **Anomalies are configured, not computed.** Each anomaly flag is set in the fixture with a stated reason. The app does not infer anomalies from values.
-
-## Validation
-
-At startup, fixture records are checked. A record is dropped, with a readable message, if its id is missing, its incident is unknown, its category or data mode is not recognised, a timestamp is unparseable or not UTC, a numeric value is not finite or has no unit, or its replay step is not a non-negative integer. When two records share an id, the first is kept and the duplicate is ignored. Validation issues are listed in the brief.
+- **Header recency line:** "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".
+- **Mode labels in text, never colour alone:** HISTORICAL SNAPSHOT (with its time), LIVE (with the reading time), and MODELLED (reserved; no modelled data is used).
+- **Workflow states** always carry the note "not an official alert level" and never say "evacuate".
+- **Official items** use a reserved style that our own states never use. GDACS uses a separate dashed "impact estimate" style.
+- **Provenance:** every record, card and warning shows its source and time.
 
 ## Limitations
 
-- **An anomaly is not an eruption.** Satellite anomalies indicate change worth reviewing. They do not establish that an eruption will occur, when, or how large [1].
-- **Hotspots can have other causes.** A thermal detection near a volcano may come from vegetation or agricultural fires, industrial heat sources, or other surface heating. It needs contextual review [6].
-- **Cloud obscures optical and thermal views.** Optical imagery and many thermal detections fail under cloud, which is frequent over tropical volcanoes. Radar can observe through cloud and at night [2], but it measures different things.
-- **InSAR atmospheric artefacts.** InSAR measures change between two acquisitions. Atmospheric water vapour and other effects can produce patterns that resemble ground deformation [3].
-- **Revisit, resolution, and latency differ.** Satellites pass at different times, see at different resolutions, and publish products after different delays. A missing observation may mean no overpass or no product yet, not an absence of activity.
-- **Illustrative rules.** The review rules count distinct anomaly categories. They do not weigh signal strength, trend, or source reliability, and they are not scientific thresholds.
-- **No uncertainty model.** Records carry a quality note but no quantified uncertainty or confidence.
-- **No ground data.** Satellite observations complement ground instruments (seismometers, ground deformation and gas stations, visual observation), none of which the prototype includes.
-- **Simulated timing.** Scenario timestamps are fictional and do not correspond to real satellite overpasses or product release times.
-- **No stale-data handling.** With no live feed, the prototype does not detect or flag observations that have aged past their expected update interval.
+- **A hotspot is not an eruption or a confirmed fire.** Near a volcano it can be volcanic heat, a vegetation fire or other hot ground. In the haze box it can be a fire, a gas flare or other hot ground. Every hotspot needs contextual review [6]. Satellite anomalies alone do not establish that an eruption will occur [1].
+- **Missing detections are not evidence of no heat.** Cloud and thick smoke hide hotspots, so daily counts are lower bounds. FIRMS near-real-time data are preliminary and can change. Each satellite is counted separately, so one fire seen by two satellites appears in two daily totals.
+- **Earthquake coverage is partial.** BMKG's lists are rolling (the latest 15, or about 200, events), so small unfelt events before the list's start are missing. PVMBG's own volcano-seismic network, which records small volcano-tectonic events, has no open feed. Magnitudes differ between agencies and products.
+- **No gas, deformation or ash evidence.** As a result, a watch area cannot reach Review needed unless an earthquake of M 3.0 or more occurs within range.
+- **Optical and radar caveats.** Optical and thermal views are lost under cloud. Radar works through cloud and at night [2], and InSAR measures change between acquisitions but can contain atmospheric artefacts [3]. Revisit time, resolution and product latency differ between satellites.
+- **The snapshot ages.** Satellite and earthquake data are only as fresh as the last refresh, and nothing refreshes automatically. The header shows the time.
+- **Official items can be stale or incomplete.** Live feeds can fail, change format or tighten browser access without notice. GeoNet's alert level carries no timestamp. The MAGMA levels are a copy from 13 October 2026. PHIVOLCS, PTWC and Malaysian and Philippine flood feeds are not relayed: they have no browser-callable feed, or need a proxy.
+- **Units and terms are inferred in places.** DSDA publishes millimetres, which the app shows as centimetres, as DSDA's own page does. ThaiWater, DSDA and Smithsonian GVP terms pages were not found, or blocked scripted access.
+- **Languages.** BMKG and MAGMA text is Indonesian, and JMA volcano levels are Japanese. They are shown as issued, with fixed glosses, never machine-translated.
+- **Illustrative rules.** The watch rules ignore trend, signal strength and source reliability, and they carry no uncertainty model.
+- **Drift is not dispersion.** The NEA drift cone uses surface wind at Singapore stations, not at the fire, and models no transport.
 
 ## What operational use would require
 
-- **Calibration against local observatory data.** Anomaly criteria and review rules set and checked with the responsible volcano observatory, using its ground records.
-- **Expert review.** Volcanologists and operations staff reviewing the rules, the wording of review prompts, and the brief template.
-- **Uncertainty handling.** Detection limits, confidence, cloud cover, and missing coverage shown explicitly, so an absence of evidence is not read as evidence of absence.
-- **Validation.** Retrospective testing against documented episodes, and measurement of how often review prompts mislead, before any accuracy claim.
-- **Provenance and freshness.** Original product metadata, retrieval time, and attribution stored with every record, and stale observations flagged.
-- **Clear authority.** Official alert levels and public warnings remain with the responsible agencies. The tool supports analysts; it does not issue warnings.
+- **Agreements and access:** data-sharing with PVMBG (MAGMA) and the other issuers, and confirmed licences for every relayed feed.
+- **Scheduled ingestion with stored history and provenance**, so that the evidence and the relayed messages are archived rather than overwritten.
+- **Freshness handling:** stale-data flags on evidence, and alarms when an official feed goes quiet.
+- **Calibration and expert review:** rules set with the volcano observatory and the haze and flood agencies, using their ground data.
+- **Uncertainty handling:** cloud cover, detection limits and missing coverage shown explicitly.
+- **Validation:** measure how often prompts mislead, and how long analysts take to produce a correct brief, before any accuracy claim. Check relay fidelity and latency against the issuers' own pages.
+- **Clear authority:** warnings and evacuation decisions stay with the issuing agencies. The tool directs people to them.
+
+## Attribution and licences
+
+- **NASA FIRMS:** "We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) and NASA's Earth Science Data and Information System (ESDIS)." NASA open data.
+- **USGS:** U.S. Geological Survey, Earthquake Hazards Program. Public domain.
+- **BMKG:** "Sumber data: BMKG (Badan Meteorologi, Klimatologi, dan Geofisika)". Must be credited in the app; 60 requests per minute per IP.
+- **Smithsonian GVP:** Global Volcanism Program, Volcanoes of the World, Smithsonian Institution (terms page blocked to scripts).
+- **MAGMA Indonesia (PVMBG):** the site states all rights reserved. The app shows four recorded levels with a link, and does not ingest bulk data.
+- **JMA:** Public Data License v1.0. **GeoNet:** CC BY 3.0 NZ. **US NWS:** US Government work. **GDACS:** terms ambiguous (its feeds say both "public domain" and "Copyright, GDACS").
+- **ThaiWater (HII)** and **Dinas Sumber Daya Air DKI Jakarta:** attributed on screen; terms not found.
+- **NEA and PUB via data.gov.sg:** Singapore Open Data Licence v1.0.
+- **Boundaries:** Natural Earth (public domain) via the `world-atlas` package.
 
 ## References
 
-All accessed 13 October 2026.
+Background references, accessed 13 October 2026:
 
 1. USGS. *Forecasting, detecting, and tracking volcanic eruptions from space.* <https://www.usgs.gov/publications/forecasting-detecting-and-tracking-volcanic-eruptions-space>
 2. ESA. *Earth's most active volcanoes on satellite watch.* <https://www.esa.int/Applications/Observing_the_Earth/Earth_s_most_active_volcanoes_on_satellite_watch>
@@ -76,4 +152,19 @@ All accessed 13 October 2026.
 5. Copernicus Data Space Ecosystem. *Browser documentation.* <https://documentation.dataspace.copernicus.eu/Applications/Browser.html>
 6. NASA FIRMS. *Active fire data.* <https://firms.modaps.eosdis.nasa.gov/content/active_fire/>
 
-Boundary data: Natural Earth, <https://www.naturalearthdata.com/>, redistributed by `world-atlas`, <https://github.com/topojson/world-atlas>.
+Data sources and issuer pages (exact download URLs are in `data/real/meta.json` and `src/lib/warnings.ts`):
+
+- NASA FIRMS VIIRS 375 m product page: <https://www.earthdata.nasa.gov/data/instruments/viirs/viirs-i-band-375-m-active-fire-data>
+- USGS earthquake catalog (FDSN): <https://earthquake.usgs.gov/fdsnws/event/1/>
+- BMKG: <https://data.bmkg.go.id/gempabumi/> and <https://inatews.bmkg.go.id/>
+- MAGMA Indonesia volcano levels: <https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas>
+- JMA: <https://www.jma.go.jp/bosai/map.html>
+- GeoNet: <https://www.geonet.org.nz/volcano>
+- US National Weather Service: <https://www.weather.gov/>
+- GDACS: <https://www.gdacs.org/>
+- ThaiWater: <https://www.thaiwater.net/>
+- Jakarta DSDA Posko Banjir: <https://poskobanjir.dsdadki.web.id/>
+- PUB: <https://www.pub.gov.sg/>
+- NEA via data.gov.sg: <https://data.gov.sg/datasets/d_534cf203023b51f51f879145ccc56ff9/view>; licence <https://data.gov.sg/open-data-licence>
+- MOUNTS (independent research, not official): <http://www.mounts-project.com/>
+- Natural Earth: <https://www.naturalearthdata.com/>
