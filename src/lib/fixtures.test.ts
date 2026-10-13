@@ -119,10 +119,9 @@ describe('Merapi replay', () => {
 
 describe('secondary examples', () => {
   const wildfire = only('wildfire');
-  const flood = only('flood');
 
   it('are static, simulated, and keep every record at replay step 0', () => {
-    for (const inc of [wildfire, flood]) {
+    for (const inc of [wildfire]) {
       expect(inc.replayable).toBe(false);
       expect(inc.dataMode).toBe('simulated');
       expect(replayStepsFor(fx, inc.id)).toEqual([]);
@@ -138,15 +137,13 @@ describe('secondary examples', () => {
     expect(r.anomalyCategories).toEqual(['thermal']);
   });
 
-  it('flood example is Monitoring', () => {
-    const r = reviewAt(flood, 0);
-    expect(r.label).toBe('Monitoring');
-    expect(r.anomalyCategories).toEqual([]);
+  it('has no simulated flood example (flood watch uses official gauges, see warnings.ts)', () => {
+    expect(fx.incidents.some((i) => i.hazard === 'flood')).toBe(false);
   });
 
   it('never include Merapi records at any replay index', () => {
     const merapiIds = new Set(fx.observations.filter((o) => o.incidentId === MERAPI_ID).map((o) => o.id));
-    for (const inc of [wildfire, flood]) {
+    for (const inc of [wildfire]) {
       for (const step of [0, 1, 2, 99]) {
         const visible = visibleObservations(fx.observations, inc.id, step);
         expect(visible.every((o) => o.incidentId === inc.id && !merapiIds.has(o.id))).toBe(true);

@@ -158,40 +158,6 @@
       "anomaly": false,
       "anomalyReason": null,
       "replayStep": 0
-    },
-    {
-      "id": "obs-ayutthaya-report-extent-01",
-      "incidentId": "inc-ayutthaya-flood-demo",
-      "observedAt": "2026-09-24T11:31:00Z",
-      "ingestedAt": "2026-09-24T19:40:00Z",
-      "category": "report",
-      "value": "Standing water limited to paddy fields and river margins near the Chao Phraya and Pa Sak confluence; extent within the seasonal baseline configured for this example.",
-      "unit": null,
-      "sourceName": "Simulated fixture modelled on a Copernicus Sentinel-1 radar water-extent review",
-      "sourceUrl": "https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel1.html",
-      "dataMode": "simulated",
-      "qualityNote": "Simulated text for the demo. Radar sees through cloud, but flooded vegetation and built-up areas can hide water and wind-roughened water can be missed; one acquisition shows extent at one moment only.",
-      "summary": "Qualitative water-extent note from a radar image review; no change beyond the configured seasonal baseline.",
-      "anomaly": false,
-      "anomalyReason": null,
-      "replayStep": 0
-    },
-    {
-      "id": "obs-ayutthaya-report-rainfall-01",
-      "incidentId": "inc-ayutthaya-flood-demo",
-      "observedAt": "2026-09-25T00:00:00Z",
-      "ingestedAt": "2026-09-25T04:30:00Z",
-      "category": "report",
-      "value": 38,
-      "unit": "mm",
-      "sourceName": "Simulated fixture modelled on NASA GPM IMERG Early Run satellite precipitation estimate",
-      "sourceUrl": "https://gpm.nasa.gov/data/imerg",
-      "dataMode": "simulated",
-      "qualityNote": "Simulated value for the demo. Satellite rainfall estimates are grid-cell averages that can under- or over-estimate intense local rain; the Early Run is a near-real-time estimate later superseded by calibrated runs.",
-      "summary": "Area-average 24-hour rainfall estimate of 38 mm for the period ending at the observation time.",
-      "anomaly": false,
-      "anomalyReason": null,
-      "replayStep": 0
     }
   ]
 }

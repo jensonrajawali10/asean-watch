@@ -30,8 +30,6 @@ Scenario dates are fictional and serve only as a replay clock. The Merapi coordi
 | `obs-merapi-gas-baseline-01`, `obs-merapi-gas-tropomi-01` | Copernicus Sentinel-5P TROPOMI Level 2 sulfur dioxide | https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel5P.html | Resolves. Copernicus Data Space Ecosystem documentation listing the Sentinel-5P SO2 and UV aerosol index products. |
 | `obs-riau-report-haze-01` | Copernicus Sentinel-5P TROPOMI UV aerosol index | https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel5P.html | Resolves (same page). |
 | `obs-merapi-deformation-baseline-01` | Copernicus Sentinel-1 radar interferometry (InSAR) | https://www.esa.int/Applications/Observing_the_Earth/Earth_s_most_active_volcanoes_on_satellite_watch | Resolves. ESA article on volcano monitoring with Sentinel-1 radar, which can be acquired at night and in cloudy conditions. |
-| `obs-ayutthaya-report-extent-01` | Copernicus Sentinel-1 C-band SAR imagery (water-extent review) | https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel1.html | Resolves. Copernicus Data Space Ecosystem documentation for Sentinel-1 all-weather, day-and-night radar imaging. |
-| `obs-ayutthaya-report-rainfall-01` | NASA GPM IMERG Early Run precipitation estimate | https://gpm.nasa.gov/data/imerg | Resolves. NASA GPM page describing IMERG and its Early, Late and Final runs. |
 
 ## Background references (quality-note wording, not used as `sourceUrl`)
 
@@ -44,10 +42,13 @@ Scenario dates are fictional and serve only as a replay clock. The Merapi coordi
 |---|---|---|
 | `inc-merapi-demo` | -7.54, 110.446 | Smithsonian GVP (above) |
 | `inc-riau-haze-demo` | 0.50, 102.55 | Central point of Key Biodiversity Area "Hutan Rawa Gambut Siak-Kampar" (peat swamp between the Siak and Kampar rivers, Riau). https://www.keybiodiversityareas.org/site/factsheet/15811 |
-| `inc-ayutthaya-flood-demo` | 14.35, 100.56 | Phra Nakhon Si Ayutthaya city (14°20′52″N 100°33′38″E), where the Chao Phraya, Pa Sak and Lopburi rivers meet. https://en.wikipedia.org/wiki/Phra_Nakhon_Si_Ayutthaya_(city) |
 
 The coordinates place each example at a real location. The events themselves are simulated.
 
 ## Map geometry
 
 `data/region.geojson` comes from Natural Earth (public domain) through the `world-atlas` npm package. The map builder generates that file with `scripts/build-region.mjs`.
+
+## Removed: simulated Ayutthaya flood example (2026-10-13)
+
+The simulated flood example was removed because the real official ThaiWater gauge at Ayutthaya (C.35) reported "overflowing bank" at the time of the build. Showing a simulated "Monitoring" beside a real flood would mislead. Flood watch now relays official gauge levels; see `src/lib/warnings.ts` and `docs/research/APIS_HYDROMET.md`.

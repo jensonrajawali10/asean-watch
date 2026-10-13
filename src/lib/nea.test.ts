@@ -336,7 +336,8 @@ describe('compass, angles, and PSI bands', () => {
 describe('assessDrift', () => {
   const riau = incidentById('inc-riau-haze-demo');
   const merapi = incidentById('inc-merapi-demo');
-  const flood = fixtures.incidents.find((i) => i.hazard === 'flood') as Incident;
+  // Ayutthaya, central Thailand: well outside NEA range (inline; there is no simulated flood fixture).
+  const flood: Incident = { ...merapi, id: 'test-ayutthaya', hazard: 'flood', volcanoId: null, lat: 14.35, lon: 100.56 };
 
   it('Riau is about 170 km away, with Singapore to the NE (Riau is SW of Singapore)', () => {
     const d = assessDrift(riau, ctxWith(236));
