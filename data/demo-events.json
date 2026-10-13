@@ -1,0 +1,9 @@
+{
+  "scenario": {
+    "incidentId": "inc-merapi-demo",
+    "replaySteps": [
+      { "index": 0, "label": "Baseline", "description": "PLACEHOLDER", "clock": "2026-10-01T00:00:00Z" }
+    ]
+  },
+  "observations": []
+}

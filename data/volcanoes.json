@@ -1,0 +1,13 @@
+[
+  {
+    "id": "gvp-263250",
+    "gvpNumber": "263250",
+    "name": "Merapi",
+    "country": "Indonesia",
+    "region": "Java",
+    "lat": -7.54,
+    "lon": 110.446,
+    "elevationM": null,
+    "catalogSource": { "name": "Smithsonian Global Volcanism Program", "url": "https://volcano.si.edu/volcano.cfm?vn=263250" }
+  }
+]

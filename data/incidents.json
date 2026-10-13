@@ -1,0 +1,16 @@
+[
+  {
+    "id": "inc-merapi-demo",
+    "title": "Merapi volcanic observations",
+    "hazard": "volcano",
+    "volcanoId": "gvp-263250",
+    "locationName": "Central Java, Indonesia",
+    "country": "Indonesia",
+    "lat": -7.54,
+    "lon": 110.446,
+    "dataMode": "simulated",
+    "scenarioWindow": { "start": "2026-10-01T00:00:00Z", "end": "2026-10-03T00:00:00Z" },
+    "replayable": true,
+    "summary": "PLACEHOLDER"
+  }
+]

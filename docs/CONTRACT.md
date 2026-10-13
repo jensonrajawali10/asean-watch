@@ -1,0 +1,72 @@
+# Implementation contract
+
+The shared agreement every builder works against. Types live in `src/types.ts`; this file explains the behaviour those types carry.
+
+## Data flow
+
+```
+data/*.json fixtures → validateObservations → visibleObservations(incident, replayIndex)
+  → deriveReview → map + queue + detail + timeline → buildBriefing → .txt download
+```
+
+No server, database, model API, or runtime network call. External links (sources, references) open in a new tab and are never fetched by the app.
+
+## File ownership
+
+| Owner | Files |
+|---|---|
+| Lead (integration) | `src/types.ts`, `docs/CONTRACT.md`, `docs/ACCEPTANCE.md`, `package.json`, `vite.config.ts`, `tsconfig*.json` |
+| Data | `data/volcanoes.json`, `data/incidents.json`, `data/demo-events.json`, `data/SOURCES.md` |
+| Logic | `src/lib/reviewRules.ts`, `src/lib/briefing.ts`, `src/lib/fixtures.ts`, `src/lib/*.test.ts` |
+| Map | `scripts/build-region.mjs`, `data/region.geojson`, `src/components/RegionMap.tsx`, `src/components/RegionMap.css` |
+| UI shell | `src/App.tsx`, `src/main.tsx`, `src/index.css`, `src/App.css`, every other `src/components/*`, `index.html`, `public/favicon.svg` |
+| Docs | `README.md`, `docs/DEMO_SCRIPT.md`, `docs/DATA_AND_LIMITATIONS.md`, `docs/ROADMAP.md` |
+
+Rules for every builder: edit only your files; do not run `npm install` or add dependencies (installed: react, d3-geo, topojson-client, world-atlas, vitest); do not run git; do not start dev servers. Ask the lead for anything outside your files.
+
+## Observation records
+
+Schema: `Observation` in `src/types.ts`. ISO 8601 UTC timestamps (`...Z`). Categories: thermal, gas, deformation, ash, report. `dataMode`: simulated, historical, live. Numeric values must be finite and carry a unit; qualitative reports use a text value and `unit: null`.
+
+Anomalies are **configured in the fixtures** (`anomaly`, `anomalyReason`) and never computed from values. `replayStep` controls when a record becomes visible.
+
+Labels that protect the demo:
+
+- Every sprint record is `dataMode: "simulated"` and is displayed with the text SIMULATED.
+- A historical record stays HISTORICAL even when replayed.
+- Never invent a satellite granule, scene, or acquisition identifier. `sourceName` names the product type the fixture is modelled on (for example, "Simulated fixture modelled on VIIRS 375 m active fire detections"); `sourceUrl` points to the public page describing that product, not to a specific record.
+- Never present a simulated value as a measured product, and never state an official alert level.
+
+## Review rules (illustrative, not scientific thresholds)
+
+Given the visible records for one incident:
+
+1. Drop records whose `observedAt` falls outside `incident.scenarioWindow` from the count. Show them with the reason "Outside scenario window, not counted".
+2. Collect the distinct categories of the remaining records with `anomaly: true`.
+3. Zero categories → `monitoring` / "Monitoring". One → `check` / "Check observation". Two or more → `review` / "Review needed".
+4. Within one category, only the earliest anomalous record is `counted: true`. Later records from the same category get the reason "Same category as an earlier anomaly; not independent corroboration".
+5. Non-anomalous records get the reason "Within configured baseline; not an anomaly".
+
+`explanation` lists the rule and one line per counted category. `latestObservedAt` is the max `observedAt` of the visible records.
+
+Validation (`validateObservations`): the input must be an array. Drop and report (readable `message`) any record with a missing or non-string id, an unknown incident, an unknown category or data mode, an unparseable or non-UTC timestamp, a non-finite numeric value, a numeric value without a unit, or a non-integer or negative `replayStep`. Duplicate ids: keep the first and increment `duplicatesIgnored`.
+
+## Merapi scenario
+
+Incident id `inc-merapi-demo`, volcano id `gvp-263250` (Smithsonian GVP 263250, lat -7.54, lon 110.446). Scenario dates are fictional and labelled as a scenario clock.
+
+| Step | Label | New records | Expected state |
+|---|---|---|---|
+| 0 | Baseline | Non-anomalous thermal, gas, and deformation records | Monitoring |
+| 1 | Thermal observation | One thermal anomaly plus a second thermal anomaly from another sensor | Check observation (one category; the second thermal record is not counted) |
+| 2 | Gas observation | One SO2 gas anomaly | Review needed (thermal + gas) |
+
+Secondary examples are static (`replayable: false`, every record at `replayStep: 0`), simulated, and own their own records: one wildfire and haze example (one thermal anomaly → Check observation) and one flood example (no anomaly → Monitoring).
+
+## UI state
+
+`App` owns `selectedIncidentId`, `replayIndex`, and the generated brief. Everything else is derived. Selecting an incident from the map or the queue sets the same state. Changing the incident or replay step clears the brief; Reset sets `replayIndex` to 0 and clears the brief. Replay controls apply to replayable incidents only.
+
+## Briefing
+
+Plain text, deterministic (no wall-clock time; the timestamp is the replay clock). Contents: incident name and location, coordinates and catalog source, replay step and clock, data mode notice, current review state and the rule, evidence references (id, category, value, observed and ingested times, mode, source name and URL, quality note, counted reason), validation issues if any, limitations, questions for an analyst, and the suggested next step: consult the relevant volcano observatory and corroborating ground measurements. Never a predicted eruption date, probability, or evacuation boundary.
