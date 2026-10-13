@@ -71,7 +71,7 @@ Requested by Jenson: when the map zooms in near Singapore, show wind direction a
 - Source: NEA real-time APIs on data.gov.sg, v2, no key, CORS open: `https://api-open.data.gov.sg/v2/real-time/api/{wind-direction,wind-speed,psi,pm25}`. Wind direction is degrees FROM (10-minute average), speed in knots, 18 Singapore stations; timestamps are `+08:00` and get normalised to UTC `Z`.
 - It is **context, not evidence**. It never changes a review state and never enters `deriveReview`.
 - `src/lib/nea.ts` owns fetching and normalising: `loadNeaContext()` tries live (5 s timeout) and on any failure falls back to the bundled real snapshot `data/nea-snapshot.json` (`dataMode: "historical"`, original timestamps kept). It never throws. The core demo still works fully offline.
-- `assessDrift(incident, ctx)` returns null when the incident is more than 600 km from Singapore (Merapi and Ayutthaya show "No NEA station coverage here"). For the Riau example it returns distance, bearing, downwind direction and whether Singapore is within ±45° of downwind.
+- `assessDrift(incident, ctx)` returns null when the incident is more than 600 km from Singapore (the volcano watches show "No NEA station coverage here"). For the Riau watch it returns distance, bearing, downwind direction and whether Singapore is within ±45° of downwind.
 - Labels: LIVE or HISTORICAL SNAPSHOT plus the reading time; "Wind measured at NEA Singapore stations"; drift is "Illustrative haze drift using Singapore station wind, not a dispersion model"; PSI bands are NEA's own descriptors with their source and time. Attribution follows the Singapore Open Data Licence.
 - Types: `NeaContext`, `WindSummary`, `HazeReading`, `DriftAssessment` in `src/types.ts`.
 
@@ -91,8 +91,8 @@ Decision (Jenson, 2026-10-13): the product exists to make people aware of potent
 - **Absence is not safety.** If a feed is unreachable, stale, or returns nothing, the UI says "Official feed unavailable: check <issuer> directly", never "no warnings" or "all clear". Expired warnings are labelled EXPIRED with their expiry time.
 - Mode labels apply: LIVE for messages fetched this session; HISTORICAL for bundled examples, with their original times. A bundled example must never look current.
 - Types: `OfficialWarning`, `OfficialWarningArea`, `WarningFeedStatus`, `WarningHazard` in `src/types.ts`. `authority: "aggregator"` (e.g. GDACS) is an impact estimate and is never styled or worded as a warning.
-- Adapter: `src/lib/warnings.ts`, `loadOfficialWarnings()` (never throws; per-feed live, cache, backoff, then bundled snapshot) and `warningsNear()`. v1 feeds: BMKG InaTEWS and BMKG earthquakes, JMA tsunami and volcano, GeoNet volcanic alert levels, NWS Pacific tsunami, GDACS, plus a recorded MAGMA Indonesia level notice for Merapi (historical; MAGMA's API is token-only). Source research: `docs/research/APIS_GEOPHYSICAL.md`.
-- A real official level shown next to a simulated scenario sits in a separate panel and style, so the two can never be confused.
+- Adapter: `src/lib/warnings.ts`, `loadOfficialWarnings()` (never throws; per-feed live, cache, backoff, then bundled snapshot) and `warningsNear()`. v1 feeds: BMKG InaTEWS and BMKG earthquakes, JMA tsunami and volcano, GeoNet volcanic alert levels (level 0 not relayed), NWS Pacific tsunami, GDACS (aggregator), ThaiWater gauges (overflowing bank relayed; all gauges kept as readings), Jakarta DSDA flood gates, PUB flood alerts, plus recorded MAGMA Indonesia level notices for Merapi, Semeru, Anak Krakatau and Sinabung (historical, retrieved 2026-10-13 06:52 UTC; MAGMA's API is token-only, so check MAGMA's public list before presenting). Source research: `docs/research/APIS_GEOPHYSICAL.md`.
+- Official levels sit in their own panel and style, apart from our workflow states and the observation evidence, so the two can never be confused.
 
 ## Real data only (decision 2026-10-13)
 
@@ -103,8 +103,8 @@ Jenson: "make it all real data". Simulated fixtures are retired. Everything show
   - NASA FIRMS VIIRS/MODIS active-fire CSVs (open, no key, no CORS) give `thermal`.
   - USGS and BMKG earthquakes within a stated radius give `seismic`.
   - There is no open numeric SO2 feed, so `gas` is empty and links out to MOUNTS. It is never filled with modelled values.
-  - Modelled data (Open-Meteo/CAMS) is context only, labelled MODELLED, and never evidence.
+  - Modelled data (e.g. Open-Meteo/CAMS, not yet integrated) would be context only, labelled MODELLED, and never evidence.
 - **Anomalies come from stated watch rules,** e.g. "FIRMS detection, confidence nominal or high, within 5 km of the summit". The rule text travels with each record (`anomalyReason`) and appears in "Why this state?". These rules are illustrative workflow rules, not official thresholds.
 - **Replay steps through the real last 7 days,** one step per UTC day, oldest first, so the demo flow keeps working on real data. The state at each step is whatever the real data gives. Nothing is staged.
-- **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. Browser-callable feeds (NEA, BMKG, JMA, GeoNet, USGS, NWS, GDACS, Open-Meteo) also refresh live in the app when online.
+- **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. In the app, NEA and the official warning feeds (warnings.ts) also refresh live when online; FIRMS and earthquakes come from the snapshot only. Snapshots are bundled at build time, so rebuild after `npm run refresh:all`.
 - **Banner:** "DEMO REPLAY" becomes a data-recency banner, e.g. "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".
