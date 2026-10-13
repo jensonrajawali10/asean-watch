@@ -3,7 +3,9 @@ import type { Incident, OfficialWarning, WarningFeedStatus } from '../types';
 import { buildBriefing } from './briefing';
 import { dataGovSgBackoffUntil, markDataGovSgRateLimited, resetNeaCache } from './nea';
 import { deriveReview } from './reviewRules';
+import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from './magmaLevels';
 import {
+  BUNDLED_WARNINGS_SNAPSHOT,
   FEEDS,
   GDACS_PREFIX,
   MAGMA_RETRIEVED_AT,
@@ -21,6 +23,7 @@ import {
   parseGeonetVal,
   parseJmaTsunami,
   parseJmaVolcano,
+  parseMagmaSnapshot,
   parseNwsAlerts,
   parsePubFlood,
   parseThaiWater,
@@ -588,10 +591,10 @@ describe('GeoNet, NWS, GDACS and MAGMA', () => {
       levelGloss: 'Level 3 of 4 (Alert)',
       issuedAt: null,
       dataMode: 'historical',
-      retrievedAt: '2026-10-13T06:52:03Z',
+      retrievedAt: MAGMA_RETRIEVED_AT,
       location: { lat: -7.54, lon: 110.446 },
     });
-    expect(MAGMA_RETRIEVED_AT).toBe('2026-10-13T06:52:03Z');
+    expect(MAGMA_RETRIEVED_AT).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     expect(merapi.headline).toContain("recorded from MAGMA Indonesia's public volcano activity level list");
     expect(merapi.headline).toContain('Check MAGMA for the current level.');
   });
@@ -873,7 +876,7 @@ describe('brief OFFICIAL WARNINGS section', () => {
     expect(text).toContain('OFFICIAL WARNINGS NEAR THIS INCIDENT (relayed verbatim; follow the issuer)');
     expect(text).toContain('[W1] PVMBG (Badan Geologi) via MAGMA Indonesia (official issuer) - HISTORICAL');
     expect(text).toContain('Level: Level III (Siaga) [Level 3 of 4 (Alert)]');
-    expect(text).toContain('Issued: no issue time published; retrieved 2026-10-13T06:52:03Z');
+    expect(text).toContain(`Issued: no issue time published; retrieved ${MAGMA_RETRIEVED_AT}`);
     expect(text).toContain('Follow official instructions from PVMBG (Badan Geologi) via MAGMA Indonesia');
     expect(text).toContain('https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas');
     expect(text).toContain('Feeds checked:');
@@ -913,5 +916,160 @@ describe('brief OFFICIAL WARNINGS section', () => {
     const b = buildBriefing({ ...base, warnings: [...snap.warnings.slice(0, 5)].reverse(), warningFeeds: snap.feeds });
     expect(b).toBe(a);
     expect(a).not.toContain('2031');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MAGMA level list (trimmed from api-research/geo/magma_tingkat.sample.html; report links shortened)
+
+const MAGMA_ROW = (label: string, id: string) => `
+                                                        <tr>
+                                <td>
+                                ${label} <a href="https://magma.esdm.go.id/v1/gunung-api/laporan/${id}?signature=x"><i class="fa fa-angle-right mg-r-5"
+                                        target="_blank"></i>Lihat laporan</a><br>
+                                </td>
+                            </tr>`;
+
+function magmaPage(opts: { level3?: string[]; level3Count?: number; level2?: string[] } = {}): string {
+  const level3 = opts.level3 ?? [
+    'Anak Krakatau - Lampung',
+    'Merapi - Daerah Istimewa Yogyakarta dan Jawa Tengah',
+    'Semeru - Jawa Timur',
+    'Sinabung - Sumatera Utara',
+  ];
+  const level2 = opts.level2 ?? ['Anak Ranakah - Nusa Tenggara Timur', 'Awu - Sulawesi Utara'];
+  return `<div class="card"><p>Level IV (Awas)</p><p>Level III (Siaga)</p></div>
+                        <tr>
+                            <td rowspan="1">
+                                <a href="" class="tx-inverse tx-14 tx-medium d-block">Level IV (Awas)</a>
+                                <span class="tx-11 d-block">Hasil pengamatan visual dan instrumental teramati mengalami peningkatan aktivitas yang semakin nyata atau gunung api mengalami erupsi</span>
+                            </td>
+                            <td class="tx-12" rowspan="1">
+                                0
+                            </td>
+                                                        <td>
+                                Tidak ada gunung api Level IV (Awas)
+                            </td>
+                                                    </tr>
+                        <tr>
+                            <td rowspan="5">
+                                <a href="" class="tx-inverse tx-14 tx-medium d-block">Level III (Siaga)</a>
+                                <span class="tx-11 d-block">Hasil pengamatan visual dan instrumental memperlihatkan peningkatan aktivitas yang semakin nyata atau gunung api mengalami erupsi</span>
+                            </td>
+                            <td class="tx-12" rowspan="5">
+                                ${opts.level3Count ?? level3.length}
+                            </td>
+                                                    </tr>${level3.map((l, i) => MAGMA_ROW(l, `32820${i}`)).join('')}
+                        <tr>
+                            <td rowspan="24">
+                                <a href="" class="tx-inverse tx-14 tx-medium d-block">Level II (Waspada)</a>
+                                <span class="tx-11 d-block">Hasil pengamatan visual dan instrumental mulai memperlihatkan peningkatan aktivitas. Pada beberapa gunung api dapat terjadi erupsi</span>
+                            </td>
+                            <td class="tx-12" rowspan="24">
+                                23
+                            </td>
+                                                    </tr>${level2.map((l, i) => MAGMA_ROW(l, `32819${i}`)).join('')}`;
+}
+
+describe('MAGMA level list parser', () => {
+  it('reads the level headings with their counts and each volcano name under its level', () => {
+    const list = parseMagmaLevelList(magmaPage());
+    expect(list.headings).toEqual([
+      { level: 'Level IV (Awas)', levelNumber: 4, count: 0 },
+      { level: 'Level III (Siaga)', levelNumber: 3, count: 4 },
+      { level: 'Level II (Waspada)', levelNumber: 2, count: 23 },
+    ]);
+    expect(list.volcanoes.map((v) => [v.name, v.region, v.level])).toEqual([
+      ['Anak Krakatau', 'Lampung', 'Level III (Siaga)'],
+      ['Merapi', 'Daerah Istimewa Yogyakarta dan Jawa Tengah', 'Level III (Siaga)'],
+      ['Semeru', 'Jawa Timur', 'Level III (Siaga)'],
+      ['Sinabung', 'Sumatera Utara', 'Level III (Siaga)'],
+      ['Anak Ranakah', 'Nusa Tenggara Timur', 'Level II (Waspada)'],
+      ['Awu', 'Sulawesi Utara', 'Level II (Waspada)'],
+    ]);
+  });
+
+  it('selects Level III/IV plus every watched volcano at whatever level, and copies no report prose', () => {
+    const list = parseMagmaLevelList(
+      magmaPage({ level3: ['Semeru - Jawa Timur'], level2: ['Merapi - Daerah Istimewa Yogyakarta dan Jawa Tengah', 'Awu - Sulawesi Utara'] }),
+    );
+    const picked = selectMagmaVolcanoes(list);
+    expect(picked.map((v) => [v.name, v.level])).toEqual([
+      ['Semeru', 'Level III (Siaga)'],
+      ['Merapi', 'Level II (Waspada)'],
+    ]);
+    expect(MAGMA_WATCHED).toEqual(['Merapi', 'Semeru', 'Anak Krakatau', 'Sinabung']);
+    expect(JSON.stringify(list)).not.toContain('Hasil pengamatan');
+    expect(JSON.stringify(list)).not.toContain('signature');
+  });
+
+  it('throws (so the capture keeps the previous records) when the structure is not recognised', () => {
+    expect(() => parseMagmaLevelList('<html><body>Maintenance</body></html>')).toThrow(/no level headings found/);
+    expect(() => parseMagmaLevelList(magmaPage({ level3: [], level2: [] }))).toThrow(/no volcano entries found/);
+    expect(() => parseMagmaLevelList(magmaPage({ level3Count: 5 }))).toThrow(
+      /Level III \(Siaga\) lists 4 volcanoes but the page says 5/,
+    );
+    expect(() => parseMagmaLevelList('')).toThrow(/empty/);
+  });
+
+  it('turns snapshot records into historical warnings with the fixed I-IV gloss and the MAGMA link', () => {
+    const meta: ParseMeta = { dataMode: 'historical', retrievedAt: '2026-10-13T07:51:22Z' };
+    const { warnings, note } = parseMagmaSnapshot(
+      {
+        volcanoes: [
+          { name: 'Merapi', region: 'Daerah Istimewa Yogyakarta dan Jawa Tengah', level: 'Level II (Waspada)' },
+          { name: 'Lewotobi Laki-laki', region: 'Nusa Tenggara Timur', level: 'Level IV (Awas)', gvpNumber: '264180', lat: -8.542, lon: 122.775 },
+          { name: 'Contoh', region: null, level: 'Level V (Baru)' },
+        ],
+      },
+      meta,
+    );
+    expect(warnings.map((w) => [w.level, w.levelGloss])).toEqual([
+      ['Level II (Waspada)', 'Level 2 of 4 (Advisory)'],
+      ['Level IV (Awas)', 'Level 4 of 4 (Warning, the highest)'],
+      ['Level V (Baru)', null],
+    ]);
+    expect(warnings[0]).toMatchObject({
+      issuer: 'PVMBG (Badan Geologi) via MAGMA Indonesia',
+      issuerUrl: 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas',
+      issuedAt: null,
+      dataMode: 'historical',
+      retrievedAt: '2026-10-13T07:51:22Z',
+      areaDescription: 'Merapi - Daerah Istimewa Yogyakarta dan Jawa Tengah',
+      location: { lat: -7.54, lon: 110.446 },
+      headline:
+        "Merapi: Level II (Waspada), as recorded from MAGMA Indonesia's public volcano activity level list on 2026-10-13. Check MAGMA for the current level.",
+    });
+    expect(warnings[1].location).toEqual({ lat: -8.542, lon: 122.775 });
+    expect(warnings[2].location).toBeNull();
+    expect(note).toBe("Recorded from MAGMA's public level list at 2026-10-13T07:51:22Z; MAGMA's API is token-only. Check MAGMA for the current level.");
+    expect(() => parseMagmaSnapshot({ volcanoes: [] }, meta)).toThrow();
+  });
+
+  it('the bundled snapshot holds only levels and names for Level III/IV and the watched volcanoes', () => {
+    const entry = BUNDLED_WARNINGS_SNAPSHOT.feeds['magma-level-list'];
+    expect(entry?.retrievedAt).toBe(MAGMA_RETRIEVED_AT);
+    const raw = entry?.raw as { volcanoes?: Array<Record<string, unknown>> } | undefined;
+    const volcanoes = raw?.volcanoes ?? [];
+    expect(volcanoes.length).toBeGreaterThan(0);
+    for (const v of volcanoes) {
+      expect(Object.keys(v).sort()).toEqual(['coordinateSource', 'gvpNumber', 'lat', 'level', 'levelNumber', 'lon', 'name', 'region']);
+      expect((v.levelNumber as number) >= 3 || (MAGMA_WATCHED as readonly string[]).includes(v.name as string)).toBe(true);
+    }
+    for (const name of MAGMA_WATCHED) expect(volcanoes.some((v) => v.name === name)).toBe(true);
+  });
+
+  it('reports MAGMA as unavailable with the exact message when the snapshot has no MAGMA records', async () => {
+    const feeds = { ...BUNDLED_WARNINGS_SNAPSHOT.feeds };
+    delete feeds['magma-level-list'];
+    const r = await loadOfficialWarnings({
+      fetchImpl: fakeFetch().fn,
+      snapshot: { capturedAt: BUNDLED_WARNINGS_SNAPSHOT.capturedAt, feeds },
+    });
+    expect(statusOf(r.feeds, 'magma-level-list')).toMatchObject({
+      status: 'unavailable',
+      message: 'Official feed unavailable: check PVMBG (Badan Geologi) via MAGMA Indonesia directly',
+    });
+    expect(r.warnings.some((w) => w.id.startsWith('magma'))).toBe(false);
   });
 });

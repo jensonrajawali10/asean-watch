@@ -6,7 +6,7 @@ ASEAN Watch is an Asia-Pacific environmental surveillance prototype that uses re
 
 ## Quick start
 
-Requires Node.js 22.12 or later and npm. (Vite runs on Node 20.19+, but the test runner, Vitest 5, needs 22.12+.)
+Requires Node.js 22.18 or later (24 recommended) and npm. Vitest 5 needs 22.12+, and `npm run refresh:warnings` imports a TypeScript module directly, which relies on Node's built-in type stripping (on by default from 22.18).
 
 ```bash
 npm install

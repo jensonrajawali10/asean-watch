@@ -11,9 +11,9 @@
 // - BMKG InaTEWS last30tsunamievent.xml and datagempa.json (CORS *). Times are WIB (UTC+7).
 // - JMA bosai tsunami list.json + latest detail, volcano warning.json + volcano_list.json (CORS *).
 // - GeoNet /volcano/val (no timestamp), NWS /alerts/active (US Pacific territories), GDACS events API.
-// - MAGMA Indonesia (PVMBG): API is token-only, so four Level III (Siaga) entries are bundled records
-//   copied from the public level list https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas,
-//   retrieved 2026-10-13T06:52:03Z (the research sample file time). Coordinates: Smithsonian GVP WFS.
+// - MAGMA Indonesia (PVMBG): API is token-only. The capture script parses the public level list
+//   https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas (src/lib/magmaLevels.ts) into snapshot records,
+//   with the capture time as retrievedAt (Level III/IV plus the watched volcanoes). Coordinates: Smithsonian GVP WFS.
 // - ThaiWater waterlevel_load (HII; RID gauges). Times are ICT (UTC+7) with no offset.
 // - Jakarta DSDA Posko Banjir xmldata.xml. Units: the XML is in millimetres. Evidence: DSDA's own page
 //   https://poskobanjir.dsdadki.web.id/ renders every value as `value / 10 + " cm"` (thresholds and
@@ -701,49 +701,87 @@ export function parseGdacs(raw: unknown, meta: ParseMeta): FeedParseResult {
   return { warnings, gauges: [], note: `${warnings.length} GDACS impact estimates in the Asia-Pacific box (aggregator, not official warnings).` };
 }
 
-/** MAGMA Indonesia level-list records (bundled; MAGMA's API is token-only). */
-export const MAGMA_RETRIEVED_AT = '2026-10-13T06:52:03Z';
+/** MAGMA level text -> fixed, reviewed gloss (verbatim level texts from the public level list). */
+const MAGMA_GLOSS: Record<string, string> = {
+  'Level I (Normal)': 'Level 1 of 4 (Normal)',
+  'Level II (Waspada)': 'Level 2 of 4 (Advisory)',
+  'Level III (Siaga)': 'Level 3 of 4 (Alert)',
+  'Level IV (Awas)': 'Level 4 of 4 (Warning, the highest)',
+};
 
-const MAGMA_LEVEL_III: Array<{ name: string; area: string; gvp: string; lat: number; lon: number }> = [
-  // areaDescription verbatim from the list page; coordinates from the Smithsonian GVP WFS.
-  { name: 'Anak Krakatau', area: 'Anak Krakatau - Lampung', gvp: '262000', lat: -6.1009, lon: 105.4233 },
-  { name: 'Merapi', area: 'Merapi - Daerah Istimewa Yogyakarta dan Jawa Tengah', gvp: '263250', lat: -7.54, lon: 110.446 },
-  { name: 'Semeru', area: 'Semeru - Jawa Timur', gvp: '263300', lat: -8.108, lon: 112.922 },
-  { name: 'Sinabung', area: 'Sinabung - Sumatera Utara', gvp: '261080', lat: 3.17, lon: 98.392 },
-];
+/** Smithsonian GVP coordinates for the watched volcanoes, used if the snapshot has none. */
+const MAGMA_FALLBACK_COORDS: Record<string, { gvpNumber: string; lat: number; lon: number }> = {
+  'anak krakatau': { gvpNumber: '262000', lat: -6.1009, lon: 105.4233 },
+  merapi: { gvpNumber: '263250', lat: -7.54, lon: 110.446 },
+  semeru: { gvpNumber: '263300', lat: -8.108, lon: 112.922 },
+  sinabung: { gvpNumber: '261080', lat: 3.17, lon: 98.392 },
+};
 
-export function magmaRecords(): FeedParseResult {
+/** Capture time of the bundled MAGMA records (from data/warnings-snapshot.json), or null. */
+export const MAGMA_RETRIEVED_AT: string | null =
+  (snapshotJson as unknown as { feeds?: Record<string, { retrievedAt?: unknown }> }).feeds?.['magma-level-list']
+    ?.retrievedAt as string | null ?? null;
+
+/**
+ * MAGMA Indonesia level-list records from the snapshot (written by scripts/capture-warnings-snapshot.mjs
+ * from the public level list; MAGMA's API is token-only). raw = { volcanoes: [{ name, region, level, lat?, lon?, gvpNumber? }] }.
+ */
+export function parseMagmaSnapshot(raw: unknown, meta: ParseMeta): FeedParseResult {
   const feed = FEEDS.magma;
-  const meta: ParseMeta = { dataMode: 'historical', retrievedAt: MAGMA_RETRIEVED_AT };
-  const warnings = MAGMA_LEVEL_III.map((v) =>
-    base(feed, meta, {
-      id: `${feed.id}:${v.gvp}:${MAGMA_RETRIEVED_AT}`,
-      authority: 'official',
-      hazard: 'volcano',
-      product: 'Tingkat Aktivitas Gunung Api (MAGMA Indonesia level list)',
-      level: 'Level III (Siaga)',
-      levelGloss: 'Level 3 of 4 (Alert)',
-      headline:
-        `${v.name}: Level III (Siaga), as recorded from MAGMA Indonesia's public volcano activity level list on ` +
-        `${MAGMA_RETRIEVED_AT.slice(0, 10)}. Check MAGMA for the current level.`,
-      areaDescription: v.area,
-      areas: [{ name: v.name, level: 'Level III (Siaga)', lat: v.lat, lon: v.lon }],
-      location: { lat: v.lat, lon: v.lon },
-      issuedAt: null,
-      expiresAt: null,
-      ended: false,
-      instruction: null,
-      language: 'id',
-      sourceUrl: feed.url,
-    }),
-  );
+  const list = isRecord(raw) && Array.isArray(raw.volcanoes) ? raw.volcanoes.filter(isRecord) : null;
+  if (!list || list.length === 0) throw new Error('no MAGMA records in the snapshot');
+  const date = meta.retrievedAt.slice(0, 10);
+  const warnings: OfficialWarning[] = [];
+  for (const v of list) {
+    const name = str(v.name);
+    const level = str(v.level);
+    if (!name || !level) continue;
+    const region = str(v.region);
+    const fallback = MAGMA_FALLBACK_COORDS[name.toLowerCase()];
+    const location = validLatLon(num(v.lat), num(v.lon)) ?? (fallback ? { lat: fallback.lat, lon: fallback.lon } : null);
+    const gvp = str(v.gvpNumber) ?? fallback?.gvpNumber ?? null;
+    warnings.push(
+      base(feed, meta, {
+        id: `${feed.id}:${gvp ?? name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}:${meta.retrievedAt}`,
+        authority: 'official',
+        hazard: 'volcano',
+        product: 'Tingkat Aktivitas Gunung Api (MAGMA Indonesia level list)',
+        level,
+        levelGloss: MAGMA_GLOSS[level] ?? null,
+        headline:
+          `${name}: ${level}, as recorded from MAGMA Indonesia's public volcano activity level list on ${date}. ` +
+          'Check MAGMA for the current level.',
+        areaDescription: region ? `${name} - ${region}` : name,
+        areas: [{ name, level, lat: location?.lat ?? null, lon: location?.lon ?? null }],
+        location,
+        issuedAt: null,
+        expiresAt: null,
+        ended: false,
+        instruction: null,
+        language: 'id',
+        sourceUrl: feed.url,
+      }),
+    );
+  }
+  if (warnings.length === 0) throw new Error('no usable MAGMA records in the snapshot');
   return {
     warnings,
     gauges: [],
     note:
-      `Bundled record from MAGMA's public level list (retrieved ${MAGMA_RETRIEVED_AT}); MAGMA's API is ` +
-      'token-only. Check MAGMA for the current level.',
+      `Recorded from MAGMA's public level list at ${meta.retrievedAt}; MAGMA's API is token-only. ` +
+      'Check MAGMA for the current level.',
   };
+}
+
+/** The bundled MAGMA records (historical), or an empty result when the snapshot has none. */
+export function magmaRecords(source: WarningsSnapshot | null = BUNDLED_WARNINGS_SNAPSHOT): FeedParseResult {
+  const snap = source?.feeds?.[FEEDS.magma.id];
+  if (!snap || typeof snap.retrievedAt !== 'string') return { warnings: [], gauges: [], note: null };
+  try {
+    return parseMagmaSnapshot(snap.raw, { dataMode: 'historical', retrievedAt: snap.retrievedAt });
+  } catch {
+    return { warnings: [], gauges: [], note: null };
+  }
 }
 
 /** ThaiWater waterlevel_load: every gauge as a GaugeReading; gauges at THAIWATER_RELAY_MIN_LEVEL or above as flood warnings. */
@@ -1049,7 +1087,7 @@ const SPECS: FeedSpec[] = [
   { key: 'geonet', parse: parseGeonetVal, fetchRaw: (get) => get(FEEDS.geonet.url, 'json') },
   { key: 'nws', parse: parseNwsAlerts, fetchRaw: (get) => get(FEEDS.nws.url, 'json') },
   { key: 'gdacs', parse: parseGdacs, fetchRaw: (get, nowMs) => get(gdacsSearchUrl(nowMs), 'json') },
-  { key: 'magma', parse: () => magmaRecords() },
+  { key: 'magma', parse: parseMagmaSnapshot },
   { key: 'thaiwater', parse: parseThaiWater, fetchRaw: (get) => get(FEEDS.thaiwater.url, 'json') },
   { key: 'dsda', parse: parseDsda, fetchRaw: (get) => get(FEEDS.dsda.url, 'text') },
   { key: 'pub', parse: parsePubFlood, fetchRaw: (get) => get(FEEDS.pub.url, 'json'), dataGovSg: true },
@@ -1268,6 +1306,21 @@ function fromSnapshot(spec: FeedSpec, reason: string | null, source: WarningsSna
   return { status: statusOf(spec, 'unavailable', null, `Official feed unavailable: check ${feed.issuer} directly`), result: EMPTY };
 }
 
+/** Snapshot-only feeds (MAGMA): the parser's note is the status; unavailable when the snapshot has none. */
+function fromBundled(spec: FeedSpec, source: WarningsSnapshot | null): FeedOutcome {
+  const feed = FEEDS[spec.key];
+  const snap = snapshotFeed(feed.id, source);
+  if (snap) {
+    try {
+      const result = spec.parse(snap.raw, { dataMode: 'historical', retrievedAt: snap.retrievedAt as string });
+      return { status: statusOf(spec, 'snapshot', snap.retrievedAt, result.note), result };
+    } catch {
+      // fall through
+    }
+  }
+  return { status: statusOf(spec, 'unavailable', null, `Official feed unavailable: check ${feed.issuer} directly`), result: EMPTY };
+}
+
 async function loadFeed(
   spec: FeedSpec,
   fetchImpl: typeof fetch | undefined,
@@ -1275,10 +1328,7 @@ async function loadFeed(
   source: WarningsSnapshot | null,
 ): Promise<FeedOutcome> {
   const feed = FEEDS[spec.key];
-  if (!spec.fetchRaw) {
-    const result = spec.parse(null, { dataMode: 'historical', retrievedAt: MAGMA_RETRIEVED_AT });
-    return { status: statusOf(spec, 'snapshot', MAGMA_RETRIEVED_AT, result.note), result };
-  }
+  if (!spec.fetchRaw) return fromBundled(spec, source);
   const now = Date.now();
   const cached = readCache(feed.id, now);
   if (cached) return { status: statusOf(spec, 'cached', cached.retrievedAt, cached.result.note), result: cached.result };
@@ -1369,7 +1419,7 @@ export async function loadOfficialWarnings(opts?: {
 /** Every feed parsed from the bundled snapshot only (no network), for offline-first rendering. */
 export function loadWarningsSnapshot(): OfficialWarningsResult {
   const outcomes = SPECS.map((spec) =>
-    spec.fetchRaw ? fromSnapshot(spec, null, BUNDLED_WARNINGS_SNAPSHOT) : { status: statusOf(spec, 'snapshot', MAGMA_RETRIEVED_AT, magmaRecords().note), result: magmaRecords() },
+    spec.fetchRaw ? fromSnapshot(spec, null, BUNDLED_WARNINGS_SNAPSHOT) : fromBundled(spec, BUNDLED_WARNINGS_SNAPSHOT),
   );
   return {
     warnings: outcomes.flatMap((o) => o.result.warnings).sort(compareWarnings),

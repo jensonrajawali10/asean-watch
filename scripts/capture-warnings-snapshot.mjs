@@ -5,8 +5,13 @@
 // bundle small, with every kept row untouched: ThaiWater keeps gauges at situation level >= 4 plus all of
 // Phra Nakhon Si Ayutthaya province, and GDACS keeps events inside the Asia-Pacific box used by warnings.ts.
 // A feed that fails keeps its previous snapshot entry, so a good capture is never replaced by a bad one.
+// MAGMA Indonesia: the public level list (HTML, no token) is parsed by src/lib/magmaLevels.ts (imported
+// directly; Node 24 strips the types). Only facts are stored: each Level III/IV volcano and each watched
+// volcano (Merapi, Semeru, Anak Krakatau, Sinabung) with its verbatim level, plus Smithsonian GVP
+// coordinates joined by name. If the page cannot be fetched or parsed, the previous MAGMA records are kept.
 // Owned by the logic builder. No dependencies.
 import { readFile, writeFile } from 'node:fs/promises';
+import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from '../src/lib/magmaLevels.ts';
 
 const OUT = new URL('../data/warnings-snapshot.json', import.meta.url);
 const TIMEOUT_MS = 20000;
@@ -33,6 +38,45 @@ const now = Date.now();
 const gdacsUrl =
   'https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TS;VO;FL;TC' +
   `&fromDate=${isoDay(now - 30 * 86400000)}&toDate=${isoDay(now)}&alertlevel=green;orange;red`;
+
+const GVP_INDONESIA =
+  'https://webservices.volcano.si.edu/geoserver/GVP-VOTW/ows?service=WFS&version=2.0.0&request=GetFeature' +
+  '&typeName=GVP-VOTW:Smithsonian_VOTW_Holocene_Volcanoes&outputFormat=application/json' +
+  "&CQL_FILTER=Country='Indonesia'";
+
+/** MAGMA names that differ from GVP names. */
+const GVP_ALIASES = { anakkrakatau: 'krakatau' };
+const norm = (name) => String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Join GVP coordinates by name; fail-soft (previous coordinates, else none). */
+async function gvpCoordinates(volcanoes, previousEntry) {
+  const previous = new Map(
+    (previousEntry?.raw?.volcanoes ?? []).filter((v) => typeof v.lat === 'number').map((v) => [norm(v.name), v]),
+  );
+  let gvp = [];
+  try {
+    const body = await get(GVP_INDONESIA, 'json');
+    gvp = (body?.features ?? []).map((f) => ({
+      number: String(f?.properties?.Volcano_Number ?? ''),
+      key: norm(f?.properties?.Volcano_Name ?? ''),
+      lon: Number(f?.geometry?.coordinates?.[0]),
+      lat: Number(f?.geometry?.coordinates?.[1]),
+    }));
+  } catch (err) {
+    console.warn(`warn  magma: GVP coordinates unavailable (${err instanceof Error ? err.message : String(err)}); reusing previous ones`);
+  }
+  return volcanoes.map((v) => {
+    const key = GVP_ALIASES[norm(v.name)] ?? norm(v.name);
+    const hit =
+      gvp.find((g) => g.key === key) ?? gvp.find((g) => g.key.length >= 4 && key.startsWith(g.key));
+    if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lon)) {
+      return { ...v, gvpNumber: hit.number, lat: hit.lat, lon: hit.lon, coordinateSource: 'Smithsonian GVP' };
+    }
+    const prev = previous.get(norm(v.name));
+    if (prev) return { ...v, gvpNumber: prev.gvpNumber ?? null, lat: prev.lat, lon: prev.lon, coordinateSource: prev.coordinateSource ?? null };
+    return { ...v, gvpNumber: null, lat: null, lon: null, coordinateSource: null };
+  });
+}
 
 const FEEDS = {
   'bmkg-inatews': async () => {
@@ -89,6 +133,17 @@ const FEEDS = {
     const url = 'https://poskobanjir.dsdadki.web.id/xmldata.xml';
     return { urls: [url], raw: await get(url, 'text') };
   },
+  'magma-level-list': async (previousEntry) => {
+    const url = 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas';
+    const parsed = parseMagmaLevelList(await get(url, 'text'));
+    const selected = selectMagmaVolcanoes(parsed).map(({ name, region, level, levelNumber }) => ({ name, region, level, levelNumber }));
+    if (selected.length === 0) throw new Error('MAGMA: no Level III/IV or watched volcano found; nothing written');
+    const missing = MAGMA_WATCHED.filter((w) => !parsed.volcanoes.some((v) => v.name.toLowerCase() === w.toLowerCase()));
+    if (missing.length > 0) console.warn(`warn  magma: watched volcano not on the page: ${missing.join(', ')}`);
+    const counts = parsed.headings.map((h) => `${h.level}: ${h.count ?? '?'}`).join(', ');
+    console.log(`      magma: ${counts}`);
+    return { urls: [url, GVP_INDONESIA], raw: { volcanoes: await gvpCoordinates(selected, previousEntry) } };
+  },
   'pub-flood': async () => {
     const url = 'https://api-open.data.gov.sg/v2/real-time/api/weather/flood-alerts';
     return { urls: [url], raw: await get(url, 'json') };
@@ -107,7 +162,7 @@ async function main() {
   for (const [id, run] of Object.entries(FEEDS)) {
     const retrievedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     try {
-      const { urls, raw } = await run();
+      const { urls, raw } = await run(previous.feeds?.[id]);
       feeds[id] = { retrievedAt, urls, raw, error: null };
       const size = JSON.stringify(raw).length;
       console.log(`ok    ${id.padEnd(14)} ${String(size).padStart(8)} chars  ${urls.join(' ')}`);
