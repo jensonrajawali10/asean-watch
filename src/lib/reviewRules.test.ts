@@ -246,7 +246,7 @@ describe('validateObservations', () => {
     ['non-string id', { id: 42 }, /^Record at position 1 skipped: id must be text, but got 42\.$/],
     ['empty id', { id: '  ' }, /id is empty/],
     ['unknown incident', { incidentId: 'inc-nope' }, /incidentId "inc-nope" does not match any known incident/],
-    ['unknown category', { category: 'seismic' }, /category "seismic" is not one of: thermal, gas, deformation, ash, report/],
+    ['unknown category', { category: 'lava-flow' }, /category "lava-flow" is not one of: thermal, gas, deformation, ash, seismic, report/],
     ['unknown data mode', { dataMode: 'synthetic' }, /dataMode "synthetic" is not one of: simulated, historical, live/],
     ['unparseable observedAt', { observedAt: 'yesterday' }, /observedAt "yesterday" is not a valid ISO 8601 UTC timestamp/],
     ['impossible date', { observedAt: '2026-02-30T00:00:00Z' }, /observedAt "2026-02-30T00:00:00Z" is not a valid ISO 8601 UTC timestamp/],
@@ -277,9 +277,9 @@ describe('validateObservations', () => {
   });
 
   it('lists every problem of one record in a single issue', () => {
-    const v = validateObservations([{ ...obs('multi'), category: 'seismic', value: Number.NaN }], KNOWN);
+    const v = validateObservations([{ ...obs('multi'), category: 'lava-flow', value: Number.NaN }], KNOWN);
     expect(v.issues).toHaveLength(1);
-    expect(v.issues[0].message).toMatch(/category "seismic".*; value NaN is not a finite number\.$/);
+    expect(v.issues[0].message).toMatch(/category "lava-flow".*; value NaN is not a finite number\.$/);
   });
 
   it('reports non-object entries by position', () => {

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import snapshotJson from '../../data/nea-snapshot.json';
 import type { Incident, NeaContext, NeaStationWind } from '../types';
 import { buildBriefing } from './briefing';
-import { loadFixtures } from './fixtures';
 import {
   NEA_BACKOFF_KEY,
   NEA_BACKOFF_MS,
@@ -24,7 +23,7 @@ import {
   toUtcIso,
   type NeaRawResponses,
 } from './nea';
-import { deriveReview, visibleObservations } from './reviewRules';
+import { deriveReview } from './reviewRules';
 
 // ---------------------------------------------------------------------------
 // Trimmed copies of real NEA v2 responses (2026-10-13), plus deliberately bad station values.
@@ -148,9 +147,39 @@ function ctxWith(fromDeg: number | null, opts: Partial<NeaContext['wind']> & { d
   };
 }
 
-const fixtures = loadFixtures();
+// Test incidents defined inline (the real-data fixtures are owned and changed elsewhere).
+const TEST_INCIDENTS: Record<string, Incident> = {
+  'inc-riau-haze-demo': {
+    id: 'inc-riau-haze-demo',
+    title: 'Riau peatland hotspots',
+    hazard: 'wildfire',
+    volcanoId: null,
+    locationName: 'Siak-Kampar peatlands, Riau, Sumatra, Indonesia',
+    country: 'Indonesia',
+    lat: 0.5,
+    lon: 102.55,
+    dataMode: 'historical',
+    scenarioWindow: { start: '2026-10-07T00:00:00Z', end: '2026-10-14T00:00:00Z' },
+    replayable: false,
+    summary: '',
+  },
+  'inc-merapi-demo': {
+    id: 'inc-merapi-demo',
+    title: 'Merapi',
+    hazard: 'volcano',
+    volcanoId: 'gvp-263250',
+    locationName: 'Central Java, Indonesia',
+    country: 'Indonesia',
+    lat: -7.54,
+    lon: 110.446,
+    dataMode: 'historical',
+    scenarioWindow: { start: '2026-10-07T00:00:00Z', end: '2026-10-14T00:00:00Z' },
+    replayable: true,
+    summary: '',
+  },
+};
 function incidentById(id: string): Incident {
-  const found = fixtures.incidents.find((i) => i.id === id);
+  const found = TEST_INCIDENTS[id];
   if (!found) throw new Error(`missing incident ${id}`);
   return found;
 }
@@ -350,13 +379,13 @@ describe('assessDrift', () => {
     expect(compassName(d?.bearingToSingaporeDeg ?? 0)).toBe('NE');
   });
 
-  it('says plainly that the hotspot is simulated, the wind is real, and the drift is illustrative', () => {
+  it('says plainly that the hotspots are FIRMS detections, the wind is real, and the drift is illustrative', () => {
     const d = assessDrift(riau, ctxWith(236));
     expect(d?.downwindDeg).toBe(56);
     expect(d?.singaporeDownwind).toBe(true);
     expect(d?.text).toBe(
-      'Real wind measured at NEA Singapore stations (from SW, 4.1 kn) would carry haze from this simulated ' +
-        'hotspot toward Singapore, about 170 km away. Illustrative only; not a dispersion model.',
+      'Real wind measured at NEA Singapore stations (from SW, 4.1 kn) would carry haze from these FIRMS ' +
+        'hotspots toward Singapore, about 170 km away. Illustrative only; not a dispersion model.',
     );
   });
 
@@ -365,8 +394,8 @@ describe('assessDrift', () => {
     expect(d?.downwindDeg).toBe(236);
     expect(d?.singaporeDownwind).toBe(false);
     expect(d?.text).toBe(
-      'Real wind measured at NEA Singapore stations (from NE, 4.1 kn) would not carry haze from this ' +
-        'simulated hotspot toward Singapore, about 170 km away; it blows toward SW. Illustrative only; ' +
+      'Real wind measured at NEA Singapore stations (from NE, 4.1 kn) would not carry haze from these ' +
+        'FIRMS hotspots toward Singapore, about 170 km away; it blows toward SW. Illustrative only; ' +
         'not a dispersion model.',
     );
   });
@@ -385,7 +414,8 @@ describe('assessDrift', () => {
     const none = assessDrift(riau, ctxWith(null));
     expect(none?.downwindDeg).toBeNull();
     expect(none?.singaporeDownwind).toBeNull();
-    expect(none?.text).toMatch(/No usable real wind direction .* simulated hotspot .* about 170 km away\. Illustrative only; not a dispersion model\.$/);
+    expect(none?.text).toMatch(/No usable real wind direction .* these FIRMS hotspots .* about 170 km away\. Illustrative only; not a dispersion model\.$/);
+    expect(assessDrift(riau, ctxWith(236))?.text).not.toMatch(/simulated/i);
   });
 
   it(`returns null beyond ${NEA_RANGE_KM} km (Merapi, Ayutthaya)`, () => {
@@ -626,7 +656,7 @@ describe('bundled snapshot', () => {
 
 describe('brief NEA section', () => {
   const riau = incidentById('inc-riau-haze-demo');
-  const review = deriveReview(visibleObservations(fixtures.observations, riau.id, 0), riau.scenarioWindow);
+  const review = deriveReview([], riau.scenarioWindow);
   const base = { incident: riau, volcano: null, step: null, review, issues: [] };
   const nea = normaliseNea(RAW, 'live', '2026-10-13T06:45:00Z');
   const drift = assessDrift(riau, nea);
@@ -645,7 +675,8 @@ describe('brief NEA section', () => {
     expect(text).toContain(flat(drift?.text ?? 'missing'));
     expect(text).toContain(NEA_SOURCE_URL);
     expect(text).toContain(flat(nea.attribution));
-    expect(text).toContain('SIMULATED DEMO DATA');
+    expect(text).toContain('REAL DATA (');
+    expect(text).not.toMatch(/simulated/i);
   });
 
   it('marks snapshot haze inside a live context', () => {

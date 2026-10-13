@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Incident, Observation, ReplayStep, ValidationIssue, Volcano } from '../types';
-import { NEXT_STEP, buildBriefing, briefingFilename, type BriefingInput } from './briefing';
+import { NEXT_STEP, buildBriefing, briefingFilename, replayDayLabel, type BriefingInput } from './briefing';
 import { deriveReview } from './reviewRules';
 
 const incident: Incident = {
@@ -12,7 +12,7 @@ const incident: Incident = {
   country: 'Indonesia',
   lat: -7.54,
   lon: 110.446,
-  dataMode: 'simulated',
+  dataMode: 'historical',
   scenarioWindow: { start: '2026-10-01T00:00:00Z', end: '2026-10-03T00:00:00Z' },
   replayable: true,
   summary: 'Synthetic incident for tests.',
@@ -46,9 +46,9 @@ function obs(id: string, overrides: Partial<Observation> = {}): Observation {
     category: 'thermal',
     value: 2.1,
     unit: 'MW',
-    sourceName: `Simulated fixture source ${id}`,
+    sourceName: `NASA FIRMS VIIRS 375 m active fire detections (${id})`,
     sourceUrl: `https://example.org/source/${id}`,
-    dataMode: 'simulated',
+    dataMode: 'historical',
     qualityNote: `Quality note for ${id}.`,
     summary: `Summary for ${id}.`,
     anomaly: false,
@@ -119,18 +119,22 @@ describe('buildBriefing', () => {
     expect(a).not.toContain('1999');
   });
 
-  it('includes incident, location, coordinates, catalog, replay step, clock, state, and the SIMULATED notice', () => {
+  it('includes incident, location, coordinates, catalog, replay day, clock, state, and the REAL DATA notice', () => {
     const raw = buildBriefing(input());
     const text = flat(raw);
     const firstLines = raw.split('\n').slice(0, 4).join('\n');
-    expect(firstLines).toMatch(/SIMULATED DEMO DATA - NOT A FORECAST AND NOT AN OFFICIAL WARNING/);
+    expect(firstLines).toContain(
+      '*** REAL DATA (snapshot as of 2026-10-01T06:30:00Z) - NOT A FORECAST AND NOT AN OFFICIAL WARNING ***',
+    );
+    expect(text).not.toMatch(/simulated|fictional/i);
     expect(text).toContain(incident.title);
     expect(text).toContain(incident.locationName);
     expect(text).toContain('lat -7.54, lon 110.446');
     expect(text).toContain('Test catalog');
     expect(text).toContain('https://example.org/catalog/000001');
     expect(text).toContain('elevation 2910 m');
-    expect(text).toContain('2 - Gas observation');
+    expect(text).toContain('Replay step: Day 3 of 7 (2026-10-02 UTC)');
+    expect(text).toContain('Step label: Gas observation');
     expect(text).toContain(step.clock);
     expect(text).toMatch(/State:\s+Review needed/);
     expect(text).toContain('thermal, gas');
@@ -151,7 +155,7 @@ describe('buildBriefing', () => {
     });
     expect(text).toContain('24.6 MW');
     expect(text).toContain('6.2 DU');
-    expect(text).toMatch(/Data mode:\s+SIMULATED/);
+    expect(text).toMatch(/Data mode:\s+HISTORICAL/);
     expect(text).toContain('NO - Same category as an earlier anomaly; not independent corroboration');
     expect(text).not.toContain('[E5]');
   });
@@ -172,7 +176,7 @@ describe('buildBriefing', () => {
     const text = flat(buildBriefing(input({ review: deriveReview([], incident.scenarioWindow) })));
     expect(text).toContain('No observations at this replay step.');
     expect(text).toMatch(/State:\s+Monitoring/);
-    expect(text).toContain('SIMULATED DEMO DATA');
+    expect(text).toContain('REAL DATA (snapshot, time not given)');
     expect(text).toContain(NEXT_STEP.volcano);
     expect(text).not.toContain('[E1]');
   });
@@ -200,7 +204,7 @@ describe('buildBriefing', () => {
     const fireObs = [obs('obs-fire', { incidentId: wildfire.id, anomaly: true, anomalyReason: 'Configured.' })];
     const review = deriveReview(fireObs, wildfire.scenarioWindow);
     const text = flat(buildBriefing({ incident: wildfire, volcano: null, step, review, issues: [] }));
-    expect(text).toMatch(/Scenario clock:\s+static example/);
+    expect(text).toMatch(/Replay clock:\s+static example/);
     expect(text).not.toContain(step.clock);
     expect(text).toMatch(/State:\s+Check observation/);
     expect(text).toContain('Consult the relevant national agency and corroborating ground reports.');
@@ -220,6 +224,40 @@ describe('buildBriefing', () => {
     const text = flat(buildBriefing(input()));
     expect(text).not.toMatch(/%/);
     expect(text).not.toMatch(/will erupt|eruption (is )?(expected|likely|imminent)|evacuate /i);
+  });
+});
+
+describe('real-data header and replay day', () => {
+  const header = (text: string) => text.split('\n')[2];
+
+  it('uses dataAsOf for the snapshot time when given', () => {
+    expect(header(buildBriefing(input({ dataAsOf: '2026-10-13T07:22:17Z' })))).toBe(
+      '*** REAL DATA (snapshot as of 2026-10-13T07:22:17Z) - NOT A FORECAST AND NOT AN OFFICIAL WARNING ***',
+    );
+  });
+
+  it('says live when any record is live', () => {
+    const live = observations.map((o, i) => (i === 0 ? { ...o, dataMode: 'live' as const } : o));
+    const text = buildBriefing(input({ review: deriveReview(live, incident.scenarioWindow), dataAsOf: '2026-10-13T07:22:17Z' }));
+    expect(header(text)).toBe('*** REAL DATA (live) - NOT A FORECAST AND NOT AN OFFICIAL WARNING ***');
+  });
+
+  it('still flags simulated input loudly if any reaches the brief', () => {
+    const sim = observations.map((o) => ({ ...o, dataMode: 'simulated' as const }));
+    const text = buildBriefing(input({ review: deriveReview(sim, incident.scenarioWindow) }));
+    expect(header(text)).toBe('*** SIMULATED DEMO DATA - NOT A FORECAST AND NOT AN OFFICIAL WARNING ***');
+  });
+
+  it('labels replay steps as Day n of 7 with the UTC date', () => {
+    expect(replayDayLabel({ index: 0, label: 'x', description: '', clock: '2026-10-07T23:59:59Z' })).toBe(
+      'Day 1 of 7 (2026-10-07 UTC)',
+    );
+    expect(replayDayLabel({ index: 6, label: 'x', description: '', clock: '2026-10-13T00:00:00Z' }, 7)).toBe(
+      'Day 7 of 7 (2026-10-13 UTC)',
+    );
+    const text = flat(buildBriefing(input({ step: { ...step, label: 'Day 3 of 7 (2026-10-02 UTC)' } })));
+    expect(text).toContain('Replay step: Day 3 of 7 (2026-10-02 UTC)');
+    expect(text).not.toContain('Step label:');
   });
 });
 

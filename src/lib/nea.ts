@@ -595,6 +595,19 @@ function clearBackoff(): void {
   }
 }
 
+/**
+ * Shared data.gov.sg rate-limit backoff. Other data.gov.sg adapters (PUB flood alerts in warnings.ts)
+ * check this before calling the host and report their own 429s here, so NEA and PUB respect one limit.
+ */
+export function dataGovSgBackoffUntil(now: number = Date.now()): number | null {
+  return activeBackoff(now)?.until ?? null;
+}
+
+/** Record a transient data.gov.sg failure (429, CORS-less 429, timeout) from another adapter. */
+export function markDataGovSgRateLimited(reason: string, now: number = Date.now()): number {
+  return startBackoff(reason, now).until;
+}
+
 function snapshotFallback(reason: string): NeaLoadResult {
   const context = loadNeaSnapshot();
   return {
@@ -749,9 +762,9 @@ async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }
 // ---------------------------------------------------------------------------
 // Drift
 
+/** Real data: wildfire/haze watch areas are NASA FIRMS hotspot detections. */
 function hazardSource(incident: Incident): string {
-  const mode = incident.dataMode === 'simulated' ? 'simulated ' : '';
-  return incident.hazard === 'wildfire' ? `this ${mode}hotspot` : `this ${mode}incident location`;
+  return incident.hazard === 'wildfire' ? 'these FIRMS hotspots' : 'this watch area';
 }
 
 function aboutKm(km: number): string {

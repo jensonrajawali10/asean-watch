@@ -1,6 +1,6 @@
 // Deterministic plain-text incident brief. Owned by the logic builder.
-// No wall-clock time anywhere: timestamps come only from the data (the replay step clock or
-// "static example", and, in the optional NEA section, the NEA reading and capture times).
+// No wall-clock time anywhere: timestamps come only from the data (the replay step clock, the data
+// snapshot time, NEA reading and capture times, and official-warning issue/expiry/retrieval times).
 import type {
   Category,
   DriftAssessment,
@@ -9,12 +9,15 @@ import type {
   Incident,
   NeaContext,
   Observation,
+  OfficialWarning,
   ReplayStep,
   ReviewResult,
   ValidationIssue,
   Volcano,
+  WarningFeedStatus,
 } from '../types';
 import { REASONS } from './reviewRules';
+import { compareWarnings } from './warnings';
 
 export interface BriefingInput {
   incident: Incident;
@@ -27,6 +30,14 @@ export interface BriefingInput {
   nea?: NeaContext | null;
   /** Optional drift assessment; the NEA section is added only when this is present. */
   drift?: DriftAssessment | null;
+  /** Official warnings near this incident (e.g. from warningsNear); relayed verbatim. */
+  warnings?: OfficialWarning[];
+  /** Status of every official feed checked; listed so absence is never read as an all-clear. */
+  warningFeeds?: WarningFeedStatus[];
+  /** ISO 8601 UTC time of the data snapshot (header "snapshot as of"); ignored when any record is live. */
+  dataAsOf?: string | null;
+  /** Number of replay days (default 7). */
+  stepCount?: number;
 }
 
 const WIDTH = 100;
@@ -117,19 +128,35 @@ function effectiveStep(incident: Incident, step: ReplayStep | null): ReplayStep 
 // ---------------------------------------------------------------------------
 // Sections
 
-function headerSection(incident: Incident): string[] {
-  const mode = incident.dataMode.toUpperCase();
-  const notice =
-    incident.dataMode === 'live'
-      ? 'LIVE DATA - NOT A FORECAST AND NOT AN OFFICIAL WARNING'
-      : `${mode} DEMO DATA - NOT A FORECAST AND NOT AN OFFICIAL WARNING`;
+function hasSimulated(incident: Incident, evidence: EvidenceItem[]): boolean {
+  return incident.dataMode === 'simulated' || evidence.some((e) => e.observation.dataMode === 'simulated');
+}
+
+/** "live", or "snapshot as of <time>" from dataAsOf (fallback: the latest ingestion time in the evidence). */
+function asOfText(input: BriefingInput): string {
+  const evidence = input.review.evidence;
+  if (input.incident.dataMode === 'live' || evidence.some((e) => e.observation.dataMode === 'live')) return 'live';
+  const latestIngested = evidence.map((e) => e.observation.ingestedAt).sort().pop();
+  const time = input.dataAsOf ?? latestIngested ?? null;
+  return time ? `snapshot as of ${time}` : 'snapshot, time not given';
+}
+
+function headerSection(input: BriefingInput): string[] {
+  const simulated = hasSimulated(input.incident, input.review.evidence);
+  const notice = simulated
+    ? 'SIMULATED DEMO DATA - NOT A FORECAST AND NOT AN OFFICIAL WARNING'
+    : `REAL DATA (${asOfText(input)}) - NOT A FORECAST AND NOT AN OFFICIAL WARNING`;
+  const about = simulated
+    ? 'This brief was generated from demo replay fixtures to support human review.'
+    : 'This brief was generated from real observations, with official warnings relayed verbatim, to ' +
+      'support human review.';
   return [
     'ASEAN WATCH - INCIDENT BRIEF',
     RULE_LINE,
     `*** ${notice} ***`,
     ...wrap(
-      'This brief was generated from demo replay fixtures to support human review. It contains no ' +
-        'predicted eruption date, no probability, no official alert level, and no evacuation boundary.',
+      `${about} It contains no predicted eruption date, no probability, no alert level of its own, ` +
+        'and no evacuation boundary.',
       '',
     ),
     RULE_LINE,
@@ -164,29 +191,98 @@ function incidentSection(incident: Incident, volcano: Volcano | null): string[] 
       ...field('  ', 'Catalog source', `not available (volcano record "${incident.volcanoId ?? 'none'}" not found)`),
     );
   } else {
-    lines.push(...field('  ', 'Catalog source', 'not applicable (no volcano catalog entry for this example)'));
+    lines.push(...field('  ', 'Catalog source', 'not applicable (no volcano catalog entry for this watch area)'));
   }
   if (incident.summary.trim() !== '') lines.push(...field('  ', 'Summary', incident.summary));
   return lines;
 }
 
-function replaySection(incident: Incident, step: ReplayStep | null): string[] {
+/** "Day <n> of <total> (<date> UTC)" for a replay step. */
+export function replayDayLabel(step: ReplayStep, total = 7): string {
+  const date = /^\d{4}-\d{2}-\d{2}/.test(step.clock) ? step.clock.slice(0, 10) : step.clock;
+  return `Day ${step.index + 1} of ${total} (${date} UTC)`;
+}
+
+function replaySection(incident: Incident, step: ReplayStep | null, total: number): string[] {
   const lines = [...heading('REPLAY')];
   if (step) {
-    lines.push(
-      ...field('  ', 'Replay step', `${step.index} - ${step.label}`),
-      ...field('  ', 'Scenario clock', `${step.clock} (fictional scenario clock, not the current time)`),
-    );
+    const day = replayDayLabel(step, total);
+    lines.push(...field('  ', 'Replay step', day));
+    if (step.label.trim() !== '' && step.label.trim() !== day) lines.push(...field('  ', 'Step label', step.label));
+    lines.push(...field('  ', 'Replay clock', `${step.clock} (replayed data time, not the current time)`));
     if (step.description.trim() !== '') lines.push(...field('  ', 'Step description', step.description));
   } else {
     lines.push(
       ...field('  ', 'Replay step', `${STATIC_CLOCK} (this incident does not replay)`),
-      ...field('  ', 'Scenario clock', STATIC_CLOCK),
+      ...field('  ', 'Replay clock', STATIC_CLOCK),
     );
   }
-  lines.push(
-    ...field('  ', 'Scenario window', `${incident.scenarioWindow.start} to ${incident.scenarioWindow.end}`),
-  );
+  lines.push(...field('  ', 'Watch window', `${incident.scenarioWindow.start} to ${incident.scenarioWindow.end}`));
+  return lines;
+}
+
+const FEED_STATUS_LABEL: Record<WarningFeedStatus['status'], string> = {
+  live: 'LIVE',
+  cached: 'LIVE (cached)',
+  snapshot: 'HISTORICAL SNAPSHOT',
+  unavailable: 'UNAVAILABLE',
+};
+
+/** OFFICIAL WARNINGS section: issuer messages relayed verbatim; never an all-clear. */
+function warningsSection(warnings: OfficialWarning[], feeds: WarningFeedStatus[]): string[] {
+  const lines = [
+    ...heading('OFFICIAL WARNINGS NEAR THIS INCIDENT (relayed verbatim; follow the issuer)'),
+    ...wrap(
+      'Messages are relayed unchanged from the issuing agencies. ASEAN Watch does not issue warnings; ' +
+        "follow each issuer's own instructions and official channels.",
+      '  ',
+    ),
+  ];
+  const sorted = [...warnings].sort(compareWarnings);
+  if (sorted.length === 0) {
+    lines.push(...wrap('No official warning near this incident was returned by the feeds checked below.', '  '));
+  }
+  sorted.forEach((w, i) => {
+    const ref = `[W${i + 1}]`;
+    const indent = ' '.repeat(2 + ref.length + 1);
+    const lw = 14;
+    const mode = w.dataMode === 'live' ? 'LIVE' : 'HISTORICAL';
+    const authority =
+      w.authority === 'aggregator' ? 'aggregator impact estimate, NOT an official warning' : 'official issuer';
+    let status = 'in force as relayed (check the issuer for the current status)';
+    if (w.ended && w.expiresAt && Date.parse(w.expiresAt) <= Date.parse(w.retrievedAt)) status = `EXPIRED at ${w.expiresAt}`;
+    else if (w.ended) status = 'ENDED by the issuer';
+    lines.push('');
+    lines.push(...wrap(`${ref} ${w.issuer} (${authority}) - ${mode}`, '  ', indent));
+    lines.push(
+      ...field(indent, 'Level', w.levelGloss ? `${w.level} [${w.levelGloss}]` : w.level, lw),
+      ...field(indent, 'Headline', w.headline, lw),
+      ...field(indent, 'Area', w.areaDescription || 'not given', lw),
+      ...field(indent, 'Issued', w.issuedAt ?? `no issue time published; retrieved ${w.retrievedAt}`, lw),
+      ...field(indent, 'Expires', w.expiresAt ?? 'no expiry given', lw),
+      ...field(indent, 'Status', status, lw),
+    );
+    if (w.instruction) {
+      const instructionLines = w.instruction.split('\n');
+      instructionLines.forEach((line, j) => {
+        const prefix = j === 0 ? fieldPrefix(indent, 'Instruction', lw) : ' '.repeat(fieldPrefix(indent, 'Instruction', lw).length);
+        lines.push(...wrap(line, prefix, ' '.repeat(prefix.length)));
+      });
+    }
+    lines.push(
+      ...field(indent, 'Language', w.language, lw),
+      ...fieldWithUrl(indent, 'Follow', `Follow official instructions from ${w.issuer}`, w.issuerUrl, lw),
+      ...fieldWithUrl(indent, 'Source', `retrieved ${w.retrievedAt}`, w.sourceUrl, lw),
+    );
+  });
+  if (feeds.length > 0) {
+    lines.push('', '  Feeds checked:');
+    for (const f of feeds) {
+      const when = f.retrievedAt ? `, retrieved ${f.retrievedAt}` : '';
+      lines.push(...bullet(`${f.issuer} (${f.feedId}): ${FEED_STATUS_LABEL[f.status]}${when}. ${f.message ?? ''}`.trim(), '-', '    '));
+    }
+  }
+  if (sorted.length === 0) lines.push('  Absence of a warning here is not an all-clear.');
   return lines;
 }
 
@@ -312,7 +408,7 @@ function neaSection(nea: NeaContext | null | undefined, drift: DriftAssessment):
   const lines = [
     ...heading('CONTEXT: NEA SINGAPORE (not evidence)'),
     ...wrap(
-      'Real NEA readings shown for context only, separate from the simulated evidence above. They never ' +
+      'Real NEA readings shown for context only, separate from the evidence above. They never ' +
         'change the review state.',
       '  ',
     ),
@@ -363,16 +459,19 @@ function neaSection(nea: NeaContext | null | undefined, drift: DriftAssessment):
   return lines;
 }
 
-function limitationsFor(incident: Incident, hasDrift = false): string[] {
+function limitationsFor(incident: Incident, hasDrift = false, simulated = false): string[] {
   const items: string[] = [];
-  if (incident.dataMode === 'simulated') {
+  if (simulated) {
     items.push(
       'This is a simulated demo scenario. The location is real; the observations and dates are not, ' +
         'and they do not describe current conditions there.',
     );
   }
   items.push(
-    'Anomaly flags are configured in the fixtures, not computed from the values.',
+    simulated
+      ? 'Anomaly flags are configured in the fixtures, not computed from the values.'
+      : "Anomaly flags come from stated watch rules (see each record's reason); they are illustrative " +
+        'workflow rules, not official thresholds.',
     'Review states are illustrative workflow rules, not scientific thresholds or official alert levels.',
     'Satellite observations complement, and do not replace, ground instruments and expert assessment.',
     'Observation and ingestion times are shown separately; products differ in revisit time, ' +
@@ -512,16 +611,19 @@ export function buildBriefing(input: BriefingInput): string {
   const { incident, volcano, review, issues } = input;
   const step = effectiveStep(incident, input.step);
   const lines: string[] = [
-    ...headerSection(incident),
+    ...headerSection(input),
     ...incidentSection(incident, volcano),
-    ...replaySection(incident, step),
+    ...replaySection(incident, step, input.stepCount ?? 7),
+    ...(input.warnings !== undefined || input.warningFeeds !== undefined
+      ? warningsSection(input.warnings ?? [], input.warningFeeds ?? [])
+      : []),
     ...dataModeSection(incident, review.evidence),
     ...reviewSection(review),
     ...evidenceSection(review.evidence),
     ...issuesSection(issues),
     ...(input.drift ? neaSection(input.nea, input.drift) : []),
     ...heading('LIMITATIONS'),
-    ...limitationsFor(incident, Boolean(input.drift)).flatMap((item) => bullet(item)),
+    ...limitationsFor(incident, Boolean(input.drift), hasSimulated(incident, review.evidence)).flatMap((item) => bullet(item)),
     ...heading('QUESTIONS FOR AN ANALYST'),
     ...analystQuestions(input).flatMap((q, i) => bullet(q, `${i + 1}.`)),
     ...nextStepSection(incident, volcano),
