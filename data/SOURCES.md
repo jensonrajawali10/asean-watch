@@ -49,19 +49,21 @@ Each record links to the public page for its product, or to its own event page. 
 
 ## Field mapping
 
-- **FIRMS.** `observedAt` = `acq_date` + `acq_time` (HHMM, UTC per FIRMS) with `Z`. `value` = `frp` in MW for volcano watches; for the haze box, the count of confident hotspots per sensor per UTC day (`unit: "detections"`, summed FRP in the summary). Confidence is quoted as given: VIIRS low, nominal or high; MODIS 0 to 100. The `version` (e.g. `2.0NRT`) is quoted in the quality note.
+- **FIRMS, volcano watches.** One record per satellite overpass: hotspots within 5 km from the same satellite with the same `acq_date` and `acq_time` (HHMM, UTC per FIRMS). `observedAt` = that time with `Z`. `value` = the highest `frp` in the overpass (MW); the hotspot count and summed FRP are in the summary.
+- **FIRMS, haze box.** One record per sensor per UTC day. `value` = the count of confident hotspots (`unit: "detections"`); summed FRP is in the summary, and `observedAt` is the last detection that day.
+- **FIRMS hotspots are never dropped by grouping.** Each one is kept as a member of its record (`loadFixtures().members[observationId]`): coordinates, distance to the summit, FRP, confidence as given (VIIRS low, nominal or high; MODIS 0 to 100), day/night, brightness temperature, satellite and `version` (e.g. `2.0NRT`).
 - **USGS.** `observedAt` = `time` (epoch ms). `value` = `mag`, `unit` = `M (<magType>)`. `sourceUrl` = the event page. The `updated` time is quoted in the quality note.
 - **BMKG Data Terbuka.** `observedAt` = `DateTime` (given as `+00:00`). `Coordinates` is "lat,lon". Magnitude type is not published, so `unit` = `M (type not stated)`.
 - **BMKG live30event.** `waktu` (e.g. `2026/10/13  06:42:29.657`) is read as UTC. Check: 14 of the 15 felt events in `gempadirasakan` (whose `DateTime` is explicit UTC) match a live30event entry within 10 s and 100 km when `waktu` is read as UTC. The refresh fails if none match.
 - **`ingestedAt`** = the Last-Modified header of the file or response the record came from, which is when the provider last wrote it (not when the record first appeared in it); if no header was sent, the retrieval time.
 - **USGS and BMKG reports of one event are never merged or averaged.** Each is its own record, naming its product and magnitude type.
-- **ids** are stable: watch key + source + time + coordinates for FIRMS (`merapi-firms-n20-20261007T1752Z-7.54423S-110.44315E`), the provider's event id for USGS and live30event, and time + coordinates for the BMKG lists that have no id. Haze totals use watch key + sensor + date (`riau-firms-snpp-20261007`).
+- **ids** are stable. Volcano overpasses: watch key + sensor + acquisition time (`merapi-firms-n20-20261007T1752Z`). Haze totals: watch key + sensor + date (`riau-firms-snpp-20261007`). Single hotspots (members): the overpass id + coordinates (`merapi-firms-n20-20261007T1752Z-7.54423S-110.44315E`). Earthquakes: the provider's event id for USGS and live30event, and time + coordinates for the BMKG lists that have no id.
 
 ## Watch rules
 
 Defined in `src/lib/watchRules.ts`. Every rule is an **illustrative watch rule, not an official threshold**, and its text travels with each flagged record as `anomalyReason`.
 
-- **Thermal, volcano:** a FIRMS hotspot within 5 km of the GVP summit point with VIIRS confidence nominal or high, or MODIS confidence 50 or more. Low-confidence hotspots are shown but not flagged.
+- **Thermal, volcano:** FIRMS hotspots within 5 km of the GVP summit point are grouped per satellite overpass. An overpass is flagged when at least one hotspot has VIIRS confidence nominal or high, or MODIS confidence 50 or more, and the reason says how many of its hotspots did. Overpasses with only low-confidence hotspots are shown but not flagged.
 - **Thermal, haze box:** hotspots inside the box are totalled per sensor per UTC day; 10 or more confident hotspots from one sensor on one day is flagged.
 - **Seismic:** USGS or BMKG earthquakes within 30 km of the summit (or inside the haze box); M 3.0 or more is flagged, smaller ones are context.
 - **Gas:** there is no open numeric SO2 feed, so no gas records exist. Each volcano watch links to MOUNTS instead. Modelled data (Open-Meteo, CAMS) is never used as evidence.

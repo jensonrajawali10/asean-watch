@@ -7,7 +7,16 @@ import metaJson from '../../data/real/meta.json';
 import volcanoesJson from '../../data/volcanoes.json';
 import watchesJson from '../../data/watches.json';
 import { buildBriefing } from './briefing';
-import { buildFixtures, findVolcano, loadFixtures, replayStepsFor } from './fixtures';
+import {
+  RULE_DISCLAIMER as RULE_DISCLAIMER_FROM_FIXTURES,
+  WATCH_RULE_TEXT,
+  buildFixtures,
+  findVolcano,
+  loadFixtures,
+  membersOf,
+  replayStepsFor,
+} from './fixtures';
+import type { HotspotMember, Snapshot, Watch as WatchFromFixtures, WatchMeta } from './fixtures';
 import { deriveReview, parseUtcTimestamp, visibleObservations } from './reviewRules';
 import {
   RULE_DISCLAIMER,
@@ -144,26 +153,65 @@ describe('records', () => {
     }
   });
 
-  it('Merapi has its real thermal records: exactly the FIRMS rows within 5 km of the GVP summit', () => {
+  it('Merapi has its real thermal records: one per satellite overpass with FIRMS hotspots within 5 km of the GVP summit', () => {
     const merapi = watch('watch-merapi');
     const rows = (firmsJson as { rows: FirmsRow[] }).rows;
     const start = fx.snapshot.window.start;
-    const expected = rows.filter((r) => {
+    const near = rows.filter((r) => {
       const at = firmsObservedAt(r.acq_date, r.acq_time);
       return at !== null && at <= fx.snapshot.window.end && (utcDayIndex(at, start) ?? -1) >= 0 &&
         haversineKm(merapi.lat, merapi.lon, r.latitude, r.longitude) <= THERMAL_RADIUS_KM;
     });
+    const passKey = (r: FirmsRow) => `${r.satellite}|${r.acq_date}|${r.acq_time}`;
+    const passes = new Map<string, FirmsRow[]>();
+    for (const r of near) passes.set(passKey(r), [...(passes.get(passKey(r)) ?? []), r]);
+
     const thermal = fx.observations.filter((o) => o.incidentId === merapi.id && o.category === 'thermal');
     // The committed snapshot (13 Oct 2026) has Merapi hotspots. A later refresh with none is possible
     // (cloud): then update this line, not the rule.
     expect(thermal.length).toBeGreaterThan(0);
-    expect(thermal).toHaveLength(expected.length);
-    expect(thermal.filter((o) => o.anomaly)).toHaveLength(expected.filter((r) => firmsConfidence(r)?.passes).length);
+    expect(thermal).toHaveLength(passes.size);
+    const flaggedPasses = [...passes.values()].filter((list) => list.some((r) => firmsConfidence(r)?.passes));
+    expect(thermal.filter((o) => o.anomaly)).toHaveLength(flaggedPasses.length);
+    // Every hotspot is kept as a member of exactly one overpass record.
+    expect(thermal.reduce((n, o) => n + membersOf(fx, o.id).length, 0)).toBe(near.length);
     for (const o of thermal) {
+      const list = membersOf(fx, o.id);
       expect(o.unit).toBe('MW');
+      expect(o.value).toBe(Math.max(...list.map((m) => m.frp)));
       expect(o.sourceName).toMatch(/^NASA FIRMS /);
-      expect(o.summary).toMatch(/km from the summit/);
+      expect(o.summary).toMatch(/overpass: \d+ hotspots? .*km from the summit/);
+      expect(o.id).toMatch(/^merapi-firms-[a-z0-9]+-\d{8}T\d{4}Z$/);
+      if (o.anomaly) expect(o.anomalyReason).toMatch(new RegExp(`^${list.filter((m) => m.meetsRule).length} of ${list.length} FIRMS hotspots? `));
     }
+  });
+
+  it('keeps the hotspots of every grouped thermal record beside it, never inside the Observation', () => {
+    const thermal = fx.observations.filter((o) => o.category === 'thermal');
+    expect(Object.keys(fx.members).sort()).toEqual(thermal.map((o) => o.id).sort());
+    const memberIds = Object.values(fx.members).flat().map((m) => m.id);
+    expect(new Set(memberIds).size).toBe(memberIds.length);
+    for (const o of fx.observations) expect(o, o.id).not.toHaveProperty('members');
+    for (const o of thermal) {
+      const list = membersOf(fx, o.id);
+      expect(list.length, o.id).toBeGreaterThan(0);
+      for (const m of list) {
+        expect(m.observedAt, m.id).toMatch(/Z$/);
+        expect(m.id.startsWith(`${fx.watchMeta[o.incidentId].key}-firms-`), m.id).toBe(true);
+        expect(m.distanceKm === null || m.distanceKm <= THERMAL_RADIUS_KM, m.id).toBe(true);
+      }
+    }
+    expect(membersOf(fx, 'no-such-record')).toEqual([]);
+  });
+
+  it('timelines stay readable: far fewer volcano records than hotspots', () => {
+    for (const [id] of VOLCANO_WATCHES) {
+      const thermal = fx.observations.filter((o) => o.incidentId === id && o.category === 'thermal');
+      const hotspots = thermal.reduce((n, o) => n + membersOf(fx, o.id).length, 0);
+      expect(thermal.length, id).toBeLessThanOrEqual(hotspots);
+    }
+    const krakatau = fx.observations.filter((o) => o.incidentId === 'watch-anak-krakatau');
+    expect(krakatau.length).toBeLessThan(60);
   });
 
   it('every seismic record is within the stated radius or box (none were found in this snapshot window)', () => {
@@ -267,12 +315,29 @@ describe('snapshot metadata', () => {
     expect(collection.seismicRadiusKm).toBeGreaterThanOrEqual(SEISMIC_RADIUS_KM);
   });
 
-  it('gives every watch its plain-language rules', () => {
+  it('gives every watch its metadata: key, area in words, references and plain-language rules', () => {
+    expect(Object.keys(fx.watchMeta)).toEqual(fx.watches.map((w) => w.id));
     for (const w of fx.watches) {
-      const rules = fx.rulesByWatch[w.id];
-      expect(rules).toHaveLength(2);
-      expect(rules.every((r) => r.endsWith(RULE_DISCLAIMER))).toBe(true);
+      const meta: WatchMeta = fx.watchMeta[w.id];
+      expect(meta).toMatchObject({ id: w.id, key: w.key, area: w.area, references: w.references });
+      expect(meta.rules).toHaveLength(2);
+      expect(meta.rules.every((r) => r.endsWith(RULE_DISCLAIMER))).toBe(true);
     }
+    expect(fx.watchMeta['watch-merapi'].rules[0]).toBe(WATCH_RULE_TEXT.thermalVolcano);
+    expect(fx.watchMeta['watch-riau-haze'].areaText).toBe('Box: latitude -0.5 to 1.6, longitude 101 to 103.2');
+    expect(fx.watchMeta['watch-merapi'].areaText).toBe(
+      'Within 5 km (hotspots) and 30 km (earthquakes) of the Smithsonian GVP summit point, latitude -7.54, longitude 110.446',
+    );
+  });
+
+  it('exports the snapshot, watch, member and rule types from fixtures.ts for the UI', () => {
+    const snapshot: Snapshot = fx.snapshot;
+    const first: WatchFromFixtures = fx.watches[0];
+    const someMember: HotspotMember | undefined = Object.values(fx.members)[0]?.[0];
+    expect(snapshot.retrievedAt).toMatch(/Z$/);
+    expect(first.key).toBe('merapi');
+    expect(someMember?.sourceName).toMatch(/^NASA FIRMS /);
+    expect(RULE_DISCLAIMER_FROM_FIXTURES).toBe(RULE_DISCLAIMER);
   });
 });
 

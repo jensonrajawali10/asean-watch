@@ -1,5 +1,5 @@
-// Watch rules against synthetic raw rows: distance, confidence, daily aggregation, seismic radius and
-// magnitude, windowing, stable ids and reason text.
+// Watch rules against synthetic raw rows: distance, confidence, overpass grouping and members, daily
+// aggregation, seismic radius and magnitude, windowing, stable ids and reason text.
 import { describe, expect, it } from 'vitest';
 import {
   HAZE_MIN_DETECTIONS_PER_DAY,
@@ -8,6 +8,7 @@ import {
   THERMAL_RADIUS_KM,
   WATCH_RULE_TEXT,
   buildReplayDays,
+  describeWatchArea,
   firmsConfidence,
   firmsObservedAt,
   haversineKm,
@@ -173,51 +174,92 @@ describe('FIRMS confidence', () => {
   });
 });
 
-describe('thermal rule: volcano summit', () => {
-  it(`flags a confident hotspot within ${THERMAL_RADIUS_KM} km and drops one beyond it`, () => {
-    const rows = [firms({ northKm: 0.6 }), firms({ northKm: 4.9, acq_time: '1813' }), firms({ northKm: 5.1, acq_time: '1814' })];
-    const { observations, problems } = volcanoThermalObservations(VOLCANO, rows, CTX);
+describe('thermal rule: volcano summit, one record per satellite overpass', () => {
+  it(`groups hotspots within ${THERMAL_RADIUS_KM} km of one overpass and drops those beyond`, () => {
+    const rows = [
+      firms({ northKm: 4.9, frp: 1.25 }),
+      firms({ northKm: 0.6, frp: 5.76 }),
+      firms({ northKm: 5.1, frp: 99 }),
+    ];
+    const { observations, members, problems } = volcanoThermalObservations(VOLCANO, rows, CTX);
     expect(problems).toEqual([]);
-    expect(observations).toHaveLength(2);
-    expect(observations.every((o) => o.anomaly && o.category === 'thermal')).toBe(true);
-    const [near, edge] = observations;
-    expect(near.value).toBe(2.5);
-    expect(near.unit).toBe('MW');
-    expect(near.anomalyReason).toBe(
-      'FIRMS hotspot 0.6 km from the summit (rule: within 5 km) with VIIRS confidence nominal ' +
-        `(rule: VIIRS nominal or high, MODIS 50 or more). ${RULE_DISCLAIMER}`,
-    );
-    expect(edge.anomalyReason).toContain('4.9 km from the summit');
-  });
-
-  it('keeps low-confidence hotspots, not flagged, with the reason in the summary', () => {
-    const { observations } = volcanoThermalObservations(VOLCANO, [firms({ confidence: 'low', daynight: 'D', frp: 4.84 })], CTX);
     expect(observations).toHaveLength(1);
     const [o] = observations;
+    expect(o).toMatchObject({ id: 'testv-firms-n20-20261009T1812Z', category: 'thermal', value: 5.76, unit: 'MW', anomaly: true });
+    expect(o.summary).toBe(
+      'Night-time NOAA-20 VIIRS overpass: 2 hotspots 0.6 km to 4.9 km from the summit, max fire radiative power ' +
+        '5.76 MW, summed 7.01 MW; VIIRS confidence 2 nominal.',
+    );
+    expect(o.anomalyReason).toBe(
+      '2 of 2 FIRMS hotspots in this NOAA-20 VIIRS overpass met the rule (within 5 km of the summit with VIIRS ' +
+        `confidence nominal or high, or MODIS 50 or more); the nearest is 0.6 km from the summit. ${RULE_DISCLAIMER}`,
+    );
+    expect(members[o.id].map((m) => m.distanceKm)).toEqual([0.6, 4.9]);
+    expect(Object.keys(members)).toEqual([o.id]);
+  });
+
+  it('flags an overpass when any hotspot meets the rule, and says how many of N did', () => {
+    const rows = [
+      firms({ northKm: 0.4, confidence: 'low', frp: 9.61 }),
+      firms({ northKm: 1.3, confidence: 'nominal', frp: 2.83 }),
+      firms({ northKm: 2.2, confidence: 'low', frp: 2.83 }),
+    ];
+    const [o] = volcanoThermalObservations(VOLCANO, rows, CTX).observations;
+    expect(o.anomaly).toBe(true);
+    expect(o.value).toBe(9.61); // the highest FRP, whatever its confidence
+    expect(o.summary).toContain('VIIRS confidence 1 nominal, 2 low.');
+    expect(o.anomalyReason).toMatch(/^1 of 3 FIRMS hotspots in this NOAA-20 VIIRS overpass met the rule /);
+    expect(o.anomalyReason).toContain('the nearest is 1.3 km from the summit'); // nearest hotspot that met the rule
+  });
+
+  it('keeps an overpass with only low-confidence hotspots, not flagged, with the reason in the summary', () => {
+    const [o] = volcanoThermalObservations(VOLCANO, [firms({ confidence: 'low', daynight: 'D', frp: 4.84 })], CTX).observations;
     expect(o.anomaly).toBe(false);
     expect(o.anomalyReason).toBeNull();
     expect(o.summary).toBe(
-      'Daytime VIIRS hotspot (NOAA-20) 0 km from the summit, fire radiative power 4.84 MW, confidence low. ' +
-        'Not flagged: the watch rule needs VIIRS confidence nominal or high.',
+      'Daytime NOAA-20 VIIRS overpass: 1 hotspot 0 km from the summit, fire radiative power 4.84 MW; VIIRS confidence ' +
+        'low. Not flagged: no hotspot in this overpass has VIIRS confidence nominal or high.',
     );
-    expect(o.qualityNote).toContain('FIRMS VIIRS confidence low');
+    expect(o.qualityNote).toContain('FIRMS VIIRS confidence as given: low (FIRMS version 2.0NRT)');
   });
 
   it('MODIS uses the 0-100 confidence threshold and names the platform', () => {
     const rows = [
-      firms({ file: 'modis', satellite: 'A', confidence: 49, acq_time: '2029' }),
-      firms({ file: 'modis', satellite: 'T', confidence: 50, acq_time: '0128' }),
+      firms({ file: 'modis', satellite: 'A', confidence: 49, acq_time: '2029', northKm: 1 }),
+      firms({ file: 'modis', satellite: 'A', confidence: 23, acq_time: '2029', northKm: 2 }),
+      firms({ file: 'modis', satellite: 'T', confidence: 66, acq_time: '0128', northKm: 2.5 }),
+      firms({ file: 'modis', satellite: 'T', confidence: 23, acq_time: '0128', northKm: 0.7 }),
     ];
     const { observations } = volcanoThermalObservations(VOLCANO, rows, CTX);
-    const byPlatform = Object.fromEntries(observations.map((o) => [o.sourceName, o]));
-    expect(byPlatform['NASA FIRMS MODIS 1 km NRT (Aqua)'].anomaly).toBe(false);
-    expect(byPlatform['NASA FIRMS MODIS 1 km NRT (Aqua)'].summary).toContain('Not flagged: the watch rule needs MODIS confidence 50 or more.');
-    expect(byPlatform['NASA FIRMS MODIS 1 km NRT (Terra)'].anomaly).toBe(true);
+    const byName = Object.fromEntries(observations.map((o) => [o.sourceName, o]));
+    const aqua = byName['NASA FIRMS MODIS 1 km NRT (Aqua)'];
+    const terra = byName['NASA FIRMS MODIS 1 km NRT (Terra)'];
+    expect(aqua.anomaly).toBe(false);
+    expect(aqua.summary).toContain('MODIS confidence 49, 23. Not flagged: no hotspot in this overpass has MODIS confidence 50 or more.');
+    expect(terra.anomaly).toBe(true);
+    expect(terra.anomalyReason).toContain('1 of 2 FIRMS hotspots in this Terra MODIS overpass met the rule');
+    expect(terra.anomalyReason).toContain('the nearest is 2.5 km from the summit');
     // MODIS has no Last-Modified in META, so ingestedAt falls back to the retrieval time.
-    expect(byPlatform['NASA FIRMS MODIS 1 km NRT (Terra)'].ingestedAt).toBe(META.retrievedAt);
+    expect(terra.ingestedAt).toBe(META.retrievedAt);
   });
 
-  it('maps a FIRMS row to a real, labelled observation (times, source, mode, notes)', () => {
+  it('keeps satellites, times and dates apart', () => {
+    const rows = [
+      firms(),
+      firms({ satellite: 'N21', file: 'viirs-noaa21' }),
+      firms({ acq_time: '1813' }),
+      firms({ acq_date: '2026-10-10' }),
+    ];
+    const ids = volcanoThermalObservations(VOLCANO, rows, CTX).observations.map((o) => o.id).sort();
+    expect(ids).toEqual([
+      'testv-firms-n20-20261009T1812Z',
+      'testv-firms-n20-20261009T1813Z',
+      'testv-firms-n20-20261010T1812Z',
+      'testv-firms-n21-20261009T1812Z',
+    ]);
+  });
+
+  it('maps an overpass to a real, labelled observation (times, source, mode, notes)', () => {
     const [o] = volcanoThermalObservations(VOLCANO, [firms({ acq_date: '2026-10-07', acq_time: '1752' })], CTX).observations;
     expect(o).toMatchObject({
       incidentId: VOLCANO.id,
@@ -228,13 +270,15 @@ describe('thermal rule: volcano summit', () => {
       dataMode: 'historical',
       replayStep: 0,
     });
-    expect(o.qualityNote).toContain('FIRMS VIIRS confidence nominal (FIRMS version 2.0NRT)');
+    expect(o.qualityNote).toContain('One record per satellite overpass: 1 FIRMS hotspot within 5 km');
+    expect(o.qualityNote).toContain('FIRMS VIIRS confidence as given: nominal (FIRMS version 2.0NRT)');
     expect(o.qualityNote).toContain('can also be a vegetation fire or other hot ground'); // non-volcanic causes
     expect(o.qualityNote).toContain('Near-real-time (NRT) data are preliminary');
     expect(o.qualityNote).toContain('Cloud and thick smoke hide hotspots');
+    expect(o).not.toHaveProperty('members');
   });
 
-  it('puts each record on its UTC day and drops rows outside the window', () => {
+  it('puts each overpass on its UTC day and drops rows outside the window', () => {
     const rows = [
       firms({ acq_date: '2026-10-06', acq_time: '2359' }),
       firms({ acq_date: '2026-10-07', acq_time: '0000' }),
@@ -250,14 +294,33 @@ describe('thermal rule: volcano summit', () => {
     ]);
   });
 
-  it('gives stable ids from source + time + coordinates, independent of row order', () => {
-    const rows = [firms({ northKm: 1 }), firms({ northKm: 2 }), firms({ satellite: 'N', file: 'viirs-snpp', northKm: 1 })];
-    const a = volcanoThermalObservations(VOLCANO, rows, CTX).observations.map((o) => o.id);
-    const b = volcanoThermalObservations(VOLCANO, [...rows].reverse(), CTX).observations.map((o) => o.id);
-    expect(new Set(a).size).toBe(3);
-    expect([...a].sort()).toEqual([...b].sort());
-    expect(a[0]).toBe(`testv-firms-n20-20261009T1812Z-${Math.abs(rows[0].latitude).toFixed(5)}S-110.44600E`);
-    expect(a[2]).toMatch(/^testv-firms-snpp-20261009T1812Z-/);
+  it('gives stable ids and keeps every hotspot as a member, independent of row order', () => {
+    const rows = [firms({ northKm: 2 }), firms({ northKm: 1, frp: 3 }), firms({ satellite: 'N', file: 'viirs-snpp', northKm: 1 })];
+    const a = volcanoThermalObservations(VOLCANO, rows, CTX);
+    const b = volcanoThermalObservations(VOLCANO, [...rows].reverse(), CTX);
+    expect(a.observations.map((o) => o.id).sort()).toEqual(['testv-firms-n20-20261009T1812Z', 'testv-firms-snpp-20261009T1812Z']);
+    expect(a.members).toEqual(b.members);
+    const n20 = a.members['testv-firms-n20-20261009T1812Z'];
+    expect(n20.map((m) => m.id)).toEqual([
+      `testv-firms-n20-20261009T1812Z-${Math.abs(rows[1].latitude).toFixed(5)}S-110.44600E`,
+      `testv-firms-n20-20261009T1812Z-${Math.abs(rows[0].latitude).toFixed(5)}S-110.44600E`,
+    ]);
+    expect(n20[0]).toEqual({
+      id: n20[0].id,
+      observedAt: '2026-10-09T18:12:00Z',
+      latitude: rows[1].latitude,
+      longitude: 110.446,
+      distanceKm: 1,
+      frp: 3,
+      confidence: 'nominal',
+      confidenceLabel: 'VIIRS confidence nominal',
+      meetsRule: true,
+      daynight: 'N',
+      brightnessK: 330,
+      satellite: 'N20',
+      version: '2.0NRT',
+      sourceName: 'NASA FIRMS VIIRS 375 m NRT (NOAA-20)',
+    });
   });
 
   it('reports unreadable rows instead of guessing', () => {
@@ -281,9 +344,15 @@ describe('thermal rule: haze box, one record per sensor per UTC day', () => {
       firms({ latitude: 1.5, longitude: 102.5, acq_date: '2026-10-08' }), // outside the box
       ...Array.from({ length: 9 }, (_, i) => inBox(i, { satellite: 'N', file: 'viirs-snpp' })),
     ];
-    const { observations, problems } = hazeThermalObservations(BOX, rows, CTX);
+    const { observations, members, problems } = hazeThermalObservations(BOX, rows, CTX);
     expect(problems).toEqual([]);
     expect(observations).toHaveLength(2);
+    // Every hotspot in the box is kept as a member, including the low-confidence ones not counted.
+    const n20Members = members['testbox-firms-n20-20261008'];
+    expect(n20Members).toHaveLength(14);
+    expect(n20Members.filter((m) => m.meetsRule)).toHaveLength(12);
+    expect(n20Members.every((m) => m.distanceKm === null)).toBe(true);
+    expect(members['testbox-firms-snpp-20261008']).toHaveLength(9);
     const n20 = observations.find((o) => o.id === 'testbox-firms-n20-20261008');
     const snpp = observations.find((o) => o.id === 'testbox-firms-snpp-20261008');
     expect(n20).toMatchObject({ value: 12, unit: 'detections', anomaly: true, replayStep: 1, observedAt: '2026-10-08T18:30:00Z' });
@@ -402,8 +471,23 @@ describe('per watch', () => {
     ]);
   });
 
+  it('returns the hotspot members of grouped thermal records, and none for seismic records', () => {
+    const { observations, members } = observationsForWatch(VOLCANO, { firms: [firms(), firms({ northKm: 1 })], quakes: [quake()] }, CTX);
+    expect(observations.map((o) => o.category).sort()).toEqual(['seismic', 'thermal']);
+    expect(Object.keys(members)).toEqual(['testv-firms-n20-20261009T1812Z']);
+    expect(members['testv-firms-n20-20261009T1812Z']).toHaveLength(2);
+    expect(seismicObservations(VOLCANO, [quake()], CTX).members).toEqual({});
+  });
+
   it('a watch with no rows produces no records', () => {
-    expect(observationsForWatch(VOLCANO, { firms: [], quakes: [] }, CTX).observations).toEqual([]);
+    expect(observationsForWatch(VOLCANO, { firms: [], quakes: [] }, CTX)).toMatchObject({ observations: [], members: {} });
+  });
+
+  it('describes the watch area in plain words', () => {
+    expect(describeWatchArea(VOLCANO)).toBe(
+      'Within 5 km (hotspots) and 30 km (earthquakes) of the Smithsonian GVP summit point, latitude -7.54, longitude 110.446',
+    );
+    expect(describeWatchArea(BOX)).toBe('Box: latitude 0 to 1, longitude 102 to 103');
   });
 
   it('every rule text says it is illustrative, and each watch kind gets its own rules', () => {
@@ -411,6 +495,7 @@ describe('per watch', () => {
     expect(rulesForWatch(VOLCANO)).toEqual([WATCH_RULE_TEXT.thermalVolcano, WATCH_RULE_TEXT.seismicVolcano]);
     expect(rulesForWatch(BOX)).toEqual([WATCH_RULE_TEXT.thermalHaze, WATCH_RULE_TEXT.seismicBox]);
     expect(WATCH_RULE_TEXT.thermalVolcano).toContain('within 5 km of the summit');
+    expect(WATCH_RULE_TEXT.thermalVolcano).toContain('grouped per satellite overpass');
     expect(WATCH_RULE_TEXT.thermalHaze).toContain('10 or more');
     expect(WATCH_RULE_TEXT.seismicVolcano).toContain('within 30 km');
   });

@@ -24,9 +24,10 @@ export const SEISMIC_MIN_MAGNITUDE = 3.0;
 /** Plain-language rules, one per rule kind, for "Why this state?" and the brief. */
 export const WATCH_RULE_TEXT = {
   thermalVolcano:
-    `Thermal: a NASA FIRMS hotspot within ${THERMAL_RADIUS_KM} km of the summit (Smithsonian GVP point) ` +
-    `with VIIRS confidence nominal or high, or MODIS confidence ${MODIS_MIN_CONFIDENCE} or more, is an anomaly. ` +
-    `Low-confidence hotspots are shown but not flagged. ${RULE_DISCLAIMER}`,
+    `Thermal: NASA FIRMS hotspots within ${THERMAL_RADIUS_KM} km of the summit (Smithsonian GVP point) are grouped ` +
+    `per satellite overpass. An overpass is an anomaly when at least one of its hotspots has VIIRS confidence ` +
+    `nominal or high, or MODIS confidence ${MODIS_MIN_CONFIDENCE} or more. Overpasses with only low-confidence ` +
+    `hotspots are shown but not flagged. ${RULE_DISCLAIMER}`,
   thermalHaze:
     `Thermal: NASA FIRMS hotspots inside the watch box are totalled per sensor per UTC day. A day is an anomaly ` +
     `when one sensor has ${HAZE_MIN_DETECTIONS_PER_DAY} or more hotspots at VIIRS confidence nominal or high ` +
@@ -111,8 +112,42 @@ export interface RuleContext {
   retrievedAt: string;
 }
 
+/**
+ * One FIRMS hotspot inside a grouped thermal record (a volcano overpass or a haze daily total).
+ * Kept beside the Observation, never inside it, so the inspector can list the hotspots.
+ */
+export interface HotspotMember {
+  /** Stable id of the single hotspot: watch key + sensor + time + coordinates. */
+  id: string;
+  /** ISO 8601 UTC acquisition time. */
+  observedAt: string;
+  latitude: number;
+  longitude: number;
+  /** Distance to the GVP summit point; null for haze-box hotspots. */
+  distanceKm: number | null;
+  /** Fire radiative power, MW. */
+  frp: number;
+  /** FIRMS confidence as given: "low" / "nominal" / "high" (VIIRS) or 0 to 100 (MODIS). */
+  confidence: string | number;
+  /** e.g. "VIIRS confidence nominal", "MODIS confidence 62". */
+  confidenceLabel: string;
+  /** True when this hotspot meets the confidence part of the watch rule. */
+  meetsRule: boolean;
+  /** "D" or "N" as given by FIRMS. */
+  daynight: string;
+  /** Brightness temperature in kelvin: VIIRS I4 (bright_ti4) or MODIS (brightness); null if absent. */
+  brightnessK: number | null;
+  /** FIRMS satellite code, e.g. "N20". */
+  satellite: string;
+  /** FIRMS version, e.g. "2.0NRT". */
+  version: string;
+  sourceName: string;
+}
+
 export interface RuleOutput {
   observations: Observation[];
+  /** Hotspots of each grouped thermal record, keyed by observation id. Empty for seismic. */
+  members: Record<string, HotspotMember[]>;
   /** Raw rows that could not be read, with the reason, for the data-check notice. */
   problems: { index: number; message: string }[];
 }
@@ -330,25 +365,85 @@ function dayNightWord(dn: string): string {
   return dn === 'D' ? 'Daytime' : dn === 'N' ? 'Night-time' : 'Satellite';
 }
 
-function firmsQualityNote(sensor: FirmsSensor, row: FirmsRow, conf: ConfidenceVerdict, volcano: boolean): string {
+function thermalCaveats(volcano: boolean): string[] {
   return [
-    `FIRMS ${conf.label} (FIRMS version ${row.version || 'not given'}).`,
     volcano
       ? 'A hotspot near a volcano can also be a vegetation fire or other hot ground, so it needs contextual review.'
       : 'A hotspot can be a vegetation or peat fire, a gas flare or other hot ground, so it needs contextual review.',
     'Near-real-time (NRT) data are preliminary and can change.',
-    'Cloud and thick smoke hide hotspots, so a day without detections is not evidence of no heat.',
-    `Fire radiative power from one overpass is approximate; pixel size ${sensor.pixel} at nadir, larger toward the swath edge.`,
-  ].join(' ');
+  ];
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function compareMembers(a: HotspotMember, b: HotspotMember): number {
+  if (a.observedAt !== b.observedAt) return a.observedAt < b.observedAt ? -1 : 1;
+  const da = a.distanceKm ?? 0;
+  const db = b.distanceKm ?? 0;
+  if (da !== db) return da - db;
+  if (a.frp !== b.frp) return b.frp - a.frp;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/** The single-hotspot record kept beside a grouped Observation. */
+function hotspotMember(watch: Watch, row: FirmsRow, observedAt: string, distanceKm: number | null): HotspotMember {
+  const sensor = firmsSensor(row) as FirmsSensor;
+  const conf = firmsConfidence(row) as ConfidenceVerdict;
+  const time = row.acq_time.trim().padStart(4, '0');
+  const bright = row.bright_ti4 ?? row.brightness ?? null;
+  return {
+    id: `${watch.key}-firms-${sensor.short}-${row.acq_date.replace(/-/g, '')}T${time}Z-${coordKey(row.latitude, row.longitude)}`,
+    observedAt,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    distanceKm: distanceKm === null ? null : round(distanceKm, 2),
+    frp: row.frp,
+    confidence: row.confidence,
+    confidenceLabel: conf.label,
+    meetsRule: conf.passes,
+    daynight: row.daynight,
+    brightnessK: typeof bright === 'number' && Number.isFinite(bright) ? bright : null,
+    satellite: row.satellite,
+    version: row.version,
+    sourceName: sensor.sourceName,
+  };
+}
+
+/** "nominal" or "2 nominal, 1 low" (VIIRS); "62" or "62, 23" (MODIS). */
+function confidenceSummary(sensor: FirmsSensor, members: HotspotMember[]): string {
+  if (sensor.instrument === 'MODIS') return members.map((m) => String(m.confidence)).join(', ');
+  const counts = new Map<string, number>();
+  for (const m of members) {
+    const cls = m.confidenceLabel.replace('VIIRS confidence ', '');
+    counts.set(cls, (counts.get(cls) ?? 0) + 1);
+  }
+  const order = ['high', 'nominal', 'low'].filter((c) => counts.has(c));
+  if (members.length === 1) return order[0];
+  return order.map((c) => `${counts.get(c)} ${c}`).join(', ');
 }
 
 // ---------------------------------------------------------------------------
-// Thermal rule: volcano summit
+// Thermal rule: volcano summit, one record per satellite overpass
 
-/** One Observation per FIRMS hotspot within THERMAL_RADIUS_KM of the summit, inside the window. */
+/**
+ * One Observation per satellite overpass (sensor + acquisition date and time) with FIRMS hotspots
+ * within THERMAL_RADIUS_KM of the summit, inside the window. value = the highest FRP in the overpass.
+ * The overpass is an anomaly when at least one hotspot meets the confidence rule.
+ */
 export function volcanoThermalObservations(watch: Watch, rows: readonly FirmsRow[], ctx: RuleContext): RuleOutput {
-  const observations: Observation[] = [];
   const problems: RuleOutput['problems'] = [];
+  interface Pass {
+    sensor: FirmsSensor;
+    file: string;
+    date: string;
+    time: string;
+    observedAt: string;
+    step: number;
+    members: HotspotMember[];
+  }
+  const passes = new Map<string, Pass>();
   rows.forEach((row, index) => {
     const problem = firmsProblem(row);
     if (problem) {
@@ -361,34 +456,72 @@ export function volcanoThermalObservations(watch: Watch, rows: readonly FirmsRow
     const step = stepFor(observedAt, ctx);
     if (step === null) return;
     const sensor = firmsSensor(row) as FirmsSensor;
-    const conf = firmsConfidence(row) as ConfidenceVerdict;
     const time = row.acq_time.trim().padStart(4, '0');
+    const key = `${sensor.short}|${row.acq_date}|${time}`;
+    let pass = passes.get(key);
+    if (!pass) {
+      pass = { sensor, file: row.file, date: row.acq_date, time, observedAt, step, members: [] };
+      passes.set(key, pass);
+    }
+    pass.members.push(hotspotMember(watch, row, observedAt, distance));
+  });
+
+  const observations: Observation[] = [];
+  const members: Record<string, HotspotMember[]> = {};
+  for (const p of passes.values()) {
+    const list = [...p.members].sort(compareMembers);
+    const qualifying = list.filter((m) => m.meetsRule);
+    const n = list.length;
+    const maxFrp = Math.max(...list.map((m) => m.frp));
+    const sumFrp = list.reduce((sum, m) => sum + m.frp, 0);
+    const distances = list.map((m) => m.distanceKm as number);
+    const nearest = Math.min(...distances);
+    const farthest = Math.max(...distances);
+    const anomaly = qualifying.length > 0;
+    const { sensor } = p;
+    const pass = `${sensor.platform} ${sensor.instrument} overpass`;
+    const versions = [...new Set(list.map((m) => m.version || 'not given'))].join(', ');
+    const id = `${watch.key}-firms-${sensor.short}-${p.date.replace(/-/g, '')}T${p.time}Z`;
+    const ruleWords =
+      sensor.instrument === 'VIIRS' ? 'VIIRS confidence nominal or high' : `MODIS confidence ${MODIS_MIN_CONFIDENCE} or more`;
 
     const base =
-      `${dayNightWord(row.daynight)} ${sensor.instrument} hotspot (${sensor.platform}) ${km(distance)} from the summit, ` +
-      `fire radiative power ${mw(row.frp)}, ${conf.label.replace(`${sensor.instrument} `, '')}.`;
+      `${dayNightWord(list[0].daynight)} ${pass}: ${plural(n, 'hotspot', 'hotspots')} ` +
+      `${n === 1 ? km(nearest) : `${km(nearest)} to ${km(farthest)}`} from the summit, ` +
+      (n === 1 ? `fire radiative power ${mw(maxFrp)}` : `max fire radiative power ${mw(maxFrp)}, summed ${mw(sumFrp)}`) +
+      `; ${sensor.instrument} confidence ${confidenceSummary(sensor, list)}.`;
+
+    members[id] = list;
     observations.push({
-      id: `${watch.key}-firms-${sensor.short}-${row.acq_date.replace(/-/g, '')}T${time}Z-${coordKey(row.latitude, row.longitude)}`,
+      id,
       incidentId: watch.id,
-      observedAt,
-      ingestedAt: ingestedFor(ctx, `firms-${row.file}`),
+      observedAt: p.observedAt,
+      ingestedAt: ingestedFor(ctx, `firms-${p.file}`),
       category: 'thermal',
-      value: row.frp,
+      value: maxFrp,
       unit: 'MW',
       sourceName: sensor.sourceName,
       sourceUrl: sensor.sourceUrl,
       dataMode: 'historical',
-      qualityNote: firmsQualityNote(sensor, row, conf, true),
-      summary: conf.passes ? base : `${base} Not flagged: ${conf.shortfall}.`,
-      anomaly: conf.passes,
-      anomalyReason: conf.passes
-        ? `FIRMS hotspot ${km(distance)} from the summit (rule: within ${THERMAL_RADIUS_KM} km) with ${conf.label} ` +
-          `(rule: VIIRS nominal or high, MODIS ${MODIS_MIN_CONFIDENCE} or more). ${RULE_DISCLAIMER}`
+      qualityNote: [
+        `One record per satellite overpass: ${plural(n, 'FIRMS hotspot', 'FIRMS hotspots')} within ${THERMAL_RADIUS_KM} km at the same acquisition time; the value is the highest fire radiative power, and each hotspot is kept as a member of this record.`,
+        `FIRMS ${sensor.instrument} confidence as given: ${confidenceSummary(sensor, list)} (FIRMS version ${versions}).`,
+        ...thermalCaveats(true),
+        'Cloud and thick smoke hide hotspots, so a day without detections is not evidence of no heat.',
+        `Fire radiative power from one overpass is approximate; pixel size ${sensor.pixel} at nadir, larger toward the swath edge.`,
+      ].join(' '),
+      summary: anomaly ? base : `${base} Not flagged: no hotspot in this overpass has ${ruleWords}.`,
+      anomaly,
+      anomalyReason: anomaly
+        ? `${qualifying.length} of ${plural(n, 'FIRMS hotspot', 'FIRMS hotspots')} in this ${pass} met the rule ` +
+          `(within ${THERMAL_RADIUS_KM} km of the summit with VIIRS confidence nominal or high, or MODIS ` +
+          `${MODIS_MIN_CONFIDENCE} or more); the nearest is ${km(qualifying[0].distanceKm as number)} from the summit. ` +
+          RULE_DISCLAIMER
         : null,
-      replayStep: step,
+      replayStep: p.step,
     });
-  });
-  return { observations, problems };
+  }
+  return { observations, members, problems };
 }
 
 // ---------------------------------------------------------------------------
@@ -402,18 +535,14 @@ function insideBox(area: Extract<WatchArea, { kind: 'bbox' }>, lat: number, lon:
 export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[], ctx: RuleContext): RuleOutput {
   const problems: RuleOutput['problems'] = [];
   const area = watch.area;
-  if (area.kind !== 'bbox') return { observations: [], problems };
+  if (area.kind !== 'bbox') return { observations: [], members: {}, problems };
 
   interface Group {
     sensor: FirmsSensor;
     file: string;
     date: string;
     step: number;
-    confident: FirmsRow[];
-    low: FirmsRow[];
-    times: Set<string>;
-    lastObservedAt: string;
-    versions: Set<string>;
+    members: HotspotMember[];
   }
   const groups = new Map<string, Group>();
   rows.forEach((row, index) => {
@@ -430,33 +559,37 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
     const key = `${sensor.short}|${row.acq_date}`;
     let g = groups.get(key);
     if (!g) {
-      g = { sensor, file: row.file, date: row.acq_date, step, confident: [], low: [], times: new Set(), lastObservedAt: observedAt, versions: new Set() };
+      g = { sensor, file: row.file, date: row.acq_date, step, members: [] };
       groups.set(key, g);
     }
-    ((firmsConfidence(row) as ConfidenceVerdict).passes ? g.confident : g.low).push(row);
-    g.times.add(observedAt.slice(11, 16));
-    g.versions.add(row.version || 'not given');
-    if (observedAt > g.lastObservedAt) g.lastObservedAt = observedAt;
+    g.members.push(hotspotMember(watch, row, observedAt, null));
   });
 
   const observations: Observation[] = [];
+  const members: Record<string, HotspotMember[]> = {};
   for (const g of groups.values()) {
-    const count = g.confident.length;
-    const frpSum = g.confident.reduce((sum, r) => sum + r.frp, 0);
+    const list = [...g.members].sort(compareMembers);
+    const confident = list.filter((m) => m.meetsRule);
+    const low = list.length - confident.length;
+    const count = confident.length;
+    const frpSum = confident.reduce((sum, m) => sum + m.frp, 0);
     const anomaly = count >= HAZE_MIN_DETECTIONS_PER_DAY;
-    const times = [...g.times].sort();
+    const times = [...new Set(list.map((m) => m.observedAt.slice(11, 16)))].sort();
+    const lastObservedAt = list[list.length - 1].observedAt;
+    const versions = [...new Set(list.map((m) => m.version || 'not given'))].join(', ');
     const sensorText = `${g.sensor.platform} ${g.sensor.instrument}`;
     const confidentWords = g.sensor.instrument === 'VIIRS' ? 'nominal- or high-confidence' : `confidence ${MODIS_MIN_CONFIDENCE}+`;
-    const lowText =
-      g.low.length > 0 ? `; ${g.low.length} low-confidence ${g.low.length === 1 ? 'hotspot' : 'hotspots'} not counted` : '';
+    const lowText = low > 0 ? `; ${plural(low, 'low-confidence hotspot', 'low-confidence hotspots')} not counted` : '';
     const base =
       `${sensorText}: ${count} ${confidentWords} ${count === 1 ? 'hotspot' : 'hotspots'} in the watch box on ` +
       `${dayLabel(g.date)} (UTC), summed fire radiative power ${mw(frpSum)}${lowText}. ` +
       `Detection ${times.length === 1 ? 'time' : 'times'} (UTC): ${times.join(', ')}.`;
+    const id = `${watch.key}-firms-${g.sensor.short}-${g.date.replace(/-/g, '')}`;
+    members[id] = list;
     observations.push({
-      id: `${watch.key}-firms-${g.sensor.short}-${g.date.replace(/-/g, '')}`,
+      id,
       incidentId: watch.id,
-      observedAt: g.lastObservedAt,
+      observedAt: lastObservedAt,
       ingestedAt: ingestedFor(ctx, `firms-${g.file}`),
       category: 'thermal',
       value: count,
@@ -465,11 +598,10 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
       sourceUrl: g.sensor.sourceUrl,
       dataMode: 'historical',
       qualityNote: [
-        `Daily total for one sensor; the observed time is the last detection that day (FIRMS version ${[...g.versions].join(', ')}).`,
+        `Daily total for one sensor; the observed time is the last detection that day, and each hotspot is kept as a member of this record (FIRMS version ${versions}).`,
         'Each satellite is totalled separately, so one fire seen by two satellites is in both totals.',
-        'A hotspot can be a vegetation or peat fire, a gas flare or other hot ground, so it needs contextual review.',
+        ...thermalCaveats(false),
         'Cloud and thick smoke hide hotspots, so counts are a lower bound and days with different cloud cover are not comparable.',
-        'Near-real-time (NRT) data are preliminary and can change.',
       ].join(' '),
       summary: anomaly ? base : `${base} Not flagged: below the watch rule of ${HAZE_MIN_DETECTIONS_PER_DAY} per sensor per UTC day.`,
       anomaly,
@@ -480,7 +612,7 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
       replayStep: g.step,
     });
   }
-  return { observations, problems };
+  return { observations, members, problems };
 }
 
 // ---------------------------------------------------------------------------
@@ -572,11 +704,23 @@ export function seismicObservations(watch: Watch, quakes: readonly QuakeRow[], c
       replayStep: step,
     });
   });
-  return { observations, problems };
+  return { observations, members: {}, problems };
 }
 
 // ---------------------------------------------------------------------------
 // Per watch
+
+/** Plain words for a watch area, e.g. for the detail panel and the brief. */
+export function describeWatchArea(watch: Pick<Watch, 'area' | 'lat' | 'lon'>): string {
+  const a = watch.area;
+  if (a.kind === 'bbox') {
+    return `Box: latitude ${a.minLat} to ${a.maxLat}, longitude ${a.minLon} to ${a.maxLon}`;
+  }
+  return (
+    `Within ${THERMAL_RADIUS_KM} km (hotspots) and ${SEISMIC_RADIUS_KM} km (earthquakes) of the Smithsonian GVP ` +
+    `summit point, latitude ${watch.lat}, longitude ${watch.lon}`
+  );
+}
 
 /** The rule texts that apply to a watch, thermal first. */
 export function rulesForWatch(watch: Pick<Watch, 'area'>): string[] {
@@ -585,12 +729,20 @@ export function rulesForWatch(watch: Pick<Watch, 'area'>): string[] {
     : [WATCH_RULE_TEXT.thermalVolcano, WATCH_RULE_TEXT.seismicVolcano];
 }
 
-/** Every observation for one watch, oldest first (then by id). Problems are reported per input file. */
+/**
+ * Every observation for one watch, oldest first (then by id), the hotspot members of each grouped
+ * thermal record (keyed by observation id), and unreadable rows per input file.
+ */
 export function observationsForWatch(
   watch: Watch,
   snapshot: { firms: readonly FirmsRow[]; quakes: readonly QuakeRow[] },
   ctx: RuleContext,
-): { observations: Observation[]; firmsProblems: RuleOutput['problems']; quakeProblems: RuleOutput['problems'] } {
+): {
+  observations: Observation[];
+  members: Record<string, HotspotMember[]>;
+  firmsProblems: RuleOutput['problems'];
+  quakeProblems: RuleOutput['problems'];
+} {
   const thermal =
     watch.area.kind === 'bbox'
       ? hazeThermalObservations(watch, snapshot.firms, ctx)
@@ -599,7 +751,7 @@ export function observationsForWatch(
   const observations = [...thermal.observations, ...seismic.observations].sort((a, b) =>
     a.observedAt !== b.observedAt ? (a.observedAt < b.observedAt ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   );
-  return { observations, firmsProblems: thermal.problems, quakeProblems: seismic.problems };
+  return { observations, members: thermal.members, firmsProblems: thermal.problems, quakeProblems: seismic.problems };
 }
 
 /** True when a raw value is a usable watch area. */

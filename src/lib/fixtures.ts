@@ -13,12 +13,27 @@ import { parseUtcTimestamp, validateObservations } from './reviewRules';
 import {
   WATCH_HAZARDS,
   buildReplayDays,
+  describeWatchArea,
   isWatchArea,
   observationsForWatch,
   ruleContext,
   rulesForWatch,
 } from './watchRules';
-import type { FirmsRow, QuakeRow, Watch } from './watchRules';
+import type { FirmsRow, HotspotMember, QuakeRow, Watch, WatchArea } from './watchRules';
+
+// Everything the UI needs about watches and rules can be imported from this module.
+export type { HotspotMember, Watch, WatchArea } from './watchRules';
+export {
+  HAZE_MIN_DETECTIONS_PER_DAY,
+  MODIS_MIN_CONFIDENCE,
+  RULE_DISCLAIMER,
+  SEISMIC_MIN_MAGNITUDE,
+  SEISMIC_RADIUS_KM,
+  THERMAL_RADIUS_KM,
+  WATCH_RULE_TEXT,
+  describeWatchArea,
+  rulesForWatch,
+} from './watchRules';
 
 /** The shape the UI has always used. Unchanged so the UI keeps compiling. */
 export interface Fixtures {
@@ -55,16 +70,31 @@ export interface SnapshotSource {
   licence: string;
 }
 
-export interface SnapshotInfo {
-  /** ISO 8601 UTC time the snapshot was downloaded: "Data as of <time> UTC". */
+/** The real-data snapshot behind every record. */
+export interface Snapshot {
+  /** ISO 8601 UTC time the snapshot was downloaded: "Data as of <time> UTC". Empty if no snapshot loaded. */
   retrievedAt: string;
   /** Newest FIRMS file Last-Modified (ISO 8601 UTC): the satellite data time for the banner. Null if unknown. */
   satelliteAsOf: string | null;
-  /** The last 7 UTC days, start at 00:00Z of the first day, end at retrievedAt. */
+  /** The last 7 UTC days: start at 00:00Z of the first day, end at retrievedAt. */
   window: { start: string; end: string };
   sources: SnapshotSource[];
-  /** One attribution line per provider (FIRMS, USGS, BMKG), for the footer and the brief. */
+  /** One attribution line per provider (FIRMS, USGS, BMKG), for the footer and the brief. BMKG requires its credit. */
   attributions: string[];
+}
+
+/** Per-watch metadata for the detail panel and the brief. */
+export interface WatchMeta {
+  id: string;
+  /** Short key used as the prefix of observation ids, e.g. "merapi". */
+  key: string;
+  area: WatchArea;
+  /** Plain words for the area, e.g. "Box: latitude -0.5 to 1.6, longitude 101 to 103.2". */
+  areaText: string;
+  /** Official and independent pages to consult (link-outs; never fetched by the app). */
+  references: SourceRef[];
+  /** The watch rules that apply, in plain words, thermal first. Each ends "Illustrative watch rule, not an official threshold." */
+  rules: string[];
 }
 
 /** What loadFixtures returns: the unchanged Fixtures plus the real-data fields. */
@@ -73,9 +103,14 @@ export interface RealFixtures extends Fixtures {
   watches: Watch[];
   /** One step per UTC day of the snapshot, oldest first. Every watch replays over these. */
   replaySteps: ReplayStep[];
-  snapshot: SnapshotInfo;
-  /** Plain-language watch rules by watch id (thermal first, then seismic). */
-  rulesByWatch: Record<string, string[]>;
+  snapshot: Snapshot;
+  /** Metadata by watch id. */
+  watchMeta: Record<string, WatchMeta>;
+  /**
+   * The individual FIRMS hotspots of each grouped thermal record, keyed by observation id: one entry per
+   * volcano overpass and per haze daily total. Not part of Observation. Use `membersOf`.
+   */
+  members: Record<string, HotspotMember[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +208,7 @@ export function buildFixtures(raw: {
 
   const replaySteps = meta ? buildReplayDays(meta.window) : [];
   const generated: Observation[] = [];
+  const allMembers: Record<string, HotspotMember[]> = {};
   if (meta) {
     const ctx = ruleContext(meta);
     const firms = rowsOf(raw.firms) as FirmsRow[];
@@ -181,6 +217,7 @@ export function buildFixtures(raw: {
     for (const watch of watches) {
       const result = observationsForWatch(watch, { firms, quakes }, ctx);
       generated.push(...result.observations);
+      Object.assign(allMembers, result.members);
       // A bad raw row is reported once, not once per watch.
       for (const [file, list] of [
         ['data/real/firms.json', result.firmsProblems],
@@ -197,6 +234,9 @@ export function buildFixtures(raw: {
   }
 
   const validation = validateObservations(generated, new Set(watches.map((w) => w.id)));
+  // Members only for records that passed validation.
+  const members: Record<string, HotspotMember[]> = {};
+  for (const o of validation.valid) if (allMembers[o.id]) members[o.id] = allMembers[o.id];
   const firmsTimes = (meta?.sources ?? [])
     .filter((s) => s.id.startsWith('firms-') && typeof s.lastModified === 'string')
     .map((s) => s.lastModified as string)
@@ -220,8 +260,19 @@ export function buildFixtures(raw: {
       sources: meta?.sources ?? [],
       attributions: [...providers.values()],
     },
-    rulesByWatch: Object.fromEntries(watches.map((w) => [w.id, rulesForWatch(w)])),
+    watchMeta: Object.fromEntries(
+      watches.map((w): [string, WatchMeta] => [
+        w.id,
+        { id: w.id, key: w.key, area: w.area, areaText: describeWatchArea(w), references: w.references, rules: rulesForWatch(w) },
+      ]),
+    ),
+    members,
   };
+}
+
+/** The hotspots behind a grouped thermal record (nearest and earliest first); empty for any other record. */
+export function membersOf(fixtures: Pick<RealFixtures, 'members'>, observationId: string): HotspotMember[] {
+  return fixtures.members[observationId] ?? [];
 }
 
 export function loadFixtures(): RealFixtures {
