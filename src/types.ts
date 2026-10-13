@@ -139,6 +139,8 @@ export interface HazeReading {
   pm25OneHour: Record<string, number> | null;
   /** NEA PSI descriptor for the highest regional 24-hour PSI, e.g. "Unhealthy". */
   psiBand: string;
+  /** "live" when fetched this session; "historical" when taken from the bundled snapshot. */
+  dataMode?: 'live' | 'historical';
 }
 
 export interface NeaContext {

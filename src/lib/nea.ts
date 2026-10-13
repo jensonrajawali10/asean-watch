@@ -274,7 +274,12 @@ function latestItem(body: unknown): { timestamp: string | null; readings: Record
   return best;
 }
 
-function normaliseHaze(psiBody: unknown, pm25Body: unknown, fallbackTime: string): HazeReading | null {
+function normaliseHaze(
+  psiBody: unknown,
+  pm25Body: unknown,
+  fallbackTime: string,
+  dataMode: 'live' | 'historical',
+): HazeReading | null {
   const psiItem = latestItem(psiBody);
   const psi24h = psiItem ? regionValues(psiItem.readings.psi_twenty_four_hourly) : null;
   if (!psiItem || !psi24h) return null;
@@ -285,30 +290,59 @@ function normaliseHaze(psiBody: unknown, pm25Body: unknown, fallbackTime: string
     psi24h,
     pm25OneHour,
     psiBand: psiBand(Math.max(...Object.values(psi24h))),
+    dataMode,
   };
 }
 
-function attributionFor(haze: HazeReading | null, retrievedAt: string): string {
-  const names = ['Wind Direction across Singapore', 'Wind Speed across Singapore'];
-  if (haze) names.push('Pollutant Standards Index (PSI)');
-  if (haze?.pm25OneHour) names.push('PM2.5');
-  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
-  const date = /^\d{4}-\d{2}-\d{2}/.test(retrievedAt) ? retrievedAt.slice(0, 10) : retrievedAt;
+function joinNames(names: string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+}
+
+function dateOf(iso: string): string {
+  return /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : iso;
+}
+
+/** Singapore Open Data Licence notice; haze from the snapshot is credited with its own access date. */
+function attributionFor(haze: HazeReading | null, retrievedAt: string, hazeRetrievedAt: string): string {
+  const wind = ['Wind Direction across Singapore', 'Wind Speed across Singapore'];
+  const air: string[] = [];
+  if (haze) air.push('Pollutant Standards Index (PSI)');
+  if (haze?.pm25OneHour) air.push('PM2.5');
+  const date = dateOf(retrievedAt);
+  const hazeDate = dateOf(hazeRetrievedAt);
+  const tail = `from data.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 ${NEA_LICENCE_URL}`;
+  if (air.length === 0 || hazeDate === date) {
+    return `Contains information from ${joinNames([...wind, ...air])} accessed on ${date} ${tail}`;
+  }
   return (
-    `Contains information from ${list} accessed on ${date} from data.gov.sg which is made available ` +
-    `under the terms of the Singapore Open Data Licence version 1.0 ${NEA_LICENCE_URL}`
+    `Contains information from ${joinNames(wind)} accessed on ${date}, and ${joinNames(air)} accessed on ` +
+    `${hazeDate}, ${tail}`
   );
+}
+
+/** "2026-10-13T06:00:00Z" -> "2026-10-13 06:00". */
+function shortUtc(iso: string): string {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : iso;
+}
+
+export interface NormaliseOptions {
+  /** Haze to use (marked historical) when the live PSI response is missing or unusable. */
+  fallbackHaze?: HazeReading | null;
+  /** When the fallback haze was captured (for attribution and the quality note). */
+  fallbackRetrievedAt?: string;
 }
 
 /**
  * Pure: raw NEA responses -> NeaContext. Bad station values are dropped (and counted in the
  * quality note). Throws a readable Error only when the wind responses have no usable reading,
- * because wind is the core of the layer. psi/pm25 may be null or malformed: haze becomes null.
+ * because wind is the core of the layer. When psi is missing or malformed, haze is
+ * `options.fallbackHaze` (marked historical) or null.
  */
 export function normaliseNea(
   raw: NeaRawResponses,
   dataMode: NeaContext['dataMode'],
   retrievedAt: string,
+  options: NormaliseOptions = {},
 ): NeaContext {
   const direction = latestReading(raw.windDirection);
   if (!direction) throw new Error('NEA wind direction response has no readable reading');
@@ -337,8 +371,11 @@ export function normaliseNea(
   if (stations.length === 0) throw new Error('NEA wind direction response has no usable station readings');
 
   const wind = summariseWind(stations);
-  const haze = normaliseHaze(raw.psi, raw.pm25, direction.timestamp);
   const retrieved = toUtcIso(retrievedAt) ?? retrievedAt;
+  const ownHaze = normaliseHaze(raw.psi, raw.pm25, direction.timestamp, dataMode);
+  const borrowed = !ownHaze && options.fallbackHaze ? { ...options.fallbackHaze, dataMode: 'historical' as const } : null;
+  const haze = ownHaze ?? borrowed;
+  const hazeRetrieved = borrowed ? (toUtcIso(options.fallbackRetrievedAt) ?? options.fallbackRetrievedAt ?? retrieved) : retrieved;
 
   const notes = [
     'Wind measured at NEA Singapore stations (10-minute averages); it describes conditions over ' +
@@ -348,6 +385,12 @@ export function normaliseNea(
       : 'No NEA haze reading was available.',
     'Context, not evidence: it never changes a review state.',
   ];
+  if (borrowed) {
+    notes.push(
+      `Live PSI was unavailable, so PSI${borrowed.pm25OneHour ? ' and PM2.5' : ''} come from the saved ` +
+        `NEA snapshot (reading time ${borrowed.observedAt}), not live.`,
+    );
+  }
   if (dropped > 0) notes.push(`${dropped} station reading${dropped === 1 ? ' was' : 's were'} dropped as invalid.`);
   if (dataMode === 'historical') notes.push(`Bundled snapshot captured ${retrieved}; not current conditions.`);
 
@@ -360,7 +403,7 @@ export function normaliseNea(
     haze,
     sourceName: NEA_SOURCE_NAME,
     sourceUrl: NEA_SOURCE_URL,
-    attribution: attributionFor(haze, retrieved),
+    attribution: attributionFor(haze, retrieved, hazeRetrieved),
     qualityNote: notes.join(' '),
   };
 }
@@ -385,9 +428,14 @@ export function loadNeaSnapshot(): NeaContext | null {
 
 class FetchFailure extends Error {}
 
+/**
+ * Short reason for a failed request. data.gov.sg rate-limits keyless clients with HTTP 429, and a
+ * 429 carries no CORS header, so in the browser it surfaces as a fetch TypeError.
+ */
 function describeError(err: unknown, timeoutMs: number): string {
   if (err instanceof FetchFailure) return err.message;
   if (err instanceof Error && err.name === 'AbortError') return `timed out after ${timeoutMs} ms`;
+  if (err instanceof TypeError) return 'rate limited or offline';
   if (err instanceof Error) return `network error (${err.message})`;
   return `network error (${String(err)})`;
 }
@@ -395,6 +443,7 @@ function describeError(err: unknown, timeoutMs: number): string {
 async function fetchJson(fetchImpl: typeof fetch, url: string, signal: AbortSignal, aborted: Promise<never>): Promise<unknown> {
   const request = (async () => {
     const res = await fetchImpl(url, { signal, headers: { accept: 'application/json' } });
+    if (res.status === 429) throw new FetchFailure('rate limited');
     if (!res.ok) throw new FetchFailure(`HTTP ${res.status}`);
     const body: unknown = await res.json();
     if (isRecord(body) && 'code' in body && body.code !== 0) {
@@ -412,8 +461,118 @@ const ENDPOINT_LABELS: Record<keyof typeof NEA_ENDPOINTS, string> = {
   pm25: 'PM2.5',
 };
 
-/** Live first (5 s timeout), then the bundled snapshot. Never throws. */
+// --- In-flight dedupe and short cache (data.gov.sg rate-limits keyless clients hard) -----------
+
+/** sessionStorage key for the last successful live result. */
+export const NEA_CACHE_KEY = 'asean-watch:nea:v1';
+/** How long a successful live result is reused before fetching again. */
+export const NEA_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface CacheEntry {
+  storedAt: number;
+  context: NeaContext;
+  error: string | null;
+}
+
+let inflight: Promise<NeaLoadResult> | null = null;
+let memoryCache: CacheEntry | null = null;
+
+function sessionStore(): Storage | null {
+  try {
+    const s = (globalThis as { sessionStorage?: Storage }).sessionStorage;
+    return s ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isFresh(entry: CacheEntry, now: number): boolean {
+  const age = now - entry.storedAt;
+  return age >= 0 && age < NEA_CACHE_TTL_MS;
+}
+
+function readStoredEntry(): CacheEntry | null {
+  try {
+    const raw = sessionStore()?.getItem(NEA_CACHE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed) || typeof parsed.storedAt !== 'number' || !isRecord(parsed.context)) return null;
+    const ctx = parsed.context;
+    if (ctx.dataMode !== 'live' || typeof ctx.retrievedAt !== 'string' || !isRecord(ctx.wind) || !Array.isArray(ctx.stations)) {
+      return null;
+    }
+    return {
+      storedAt: parsed.storedAt,
+      context: ctx as unknown as NeaContext,
+      error: typeof parsed.error === 'string' ? parsed.error : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredEntry(entry: CacheEntry): void {
+  try {
+    sessionStore()?.setItem(NEA_CACHE_KEY, JSON.stringify(entry));
+  } catch {
+    // Storage full, blocked, or unavailable: the in-memory cache still works.
+  }
+}
+
+function cachedResult(now: number): NeaLoadResult | null {
+  if (memoryCache && isFresh(memoryCache, now)) {
+    return { context: memoryCache.context, fellBack: false, error: memoryCache.error };
+  }
+  const stored = readStoredEntry();
+  if (stored && isFresh(stored, now)) {
+    memoryCache = stored;
+    return { context: stored.context, fellBack: false, error: stored.error };
+  }
+  return null;
+}
+
+/** Clear the in-memory cache and in-flight request (and, unless keepStorage, the sessionStorage entry). */
+export function resetNeaCache(opts?: { keepStorage?: boolean }): void {
+  inflight = null;
+  memoryCache = null;
+  if (opts?.keepStorage) return;
+  try {
+    sessionStore()?.removeItem(NEA_CACHE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Live first (5 s timeout), then the bundled snapshot. Never throws.
+ * Concurrent calls share one set of four requests, and a successful live result is reused for
+ * NEA_CACHE_TTL_MS (memory and sessionStorage), keeping dataMode "live" and its original retrievedAt.
+ */
 export async function loadNeaContext(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }): Promise<NeaLoadResult> {
+  try {
+    const cached = cachedResult(Date.now());
+    if (cached) return cached;
+  } catch {
+    // fall through to a live fetch
+  }
+  if (inflight) return inflight;
+  const request = fetchLive(opts).then((result) => {
+    if (!result.fellBack && result.context) {
+      const entry: CacheEntry = { storedAt: Date.now(), context: result.context, error: result.error };
+      memoryCache = entry;
+      writeStoredEntry(entry);
+    }
+    return result;
+  });
+  inflight = request;
+  try {
+    return await request;
+  } finally {
+    if (inflight === request) inflight = null;
+  }
+}
+
+async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }): Promise<NeaLoadResult> {
   const timeoutMs = opts?.timeoutMs ?? 5000;
 
   const fallBack = (reason: string): NeaLoadResult => {
@@ -455,18 +614,21 @@ export async function loadNeaContext(opts?: { timeoutMs?: number; fetchImpl?: ty
       keyof typeof NEA_ENDPOINTS,
       PromiseSettledResult<unknown>
     >;
-    const failure = (k: keyof typeof NEA_ENDPOINTS): string | null => {
+    const reasonFor = (k: keyof typeof NEA_ENDPOINTS): string | null => {
       const r = result[k];
-      return r.status === 'rejected' ? `${ENDPOINT_LABELS[k]}: ${describeError(r.reason, timeoutMs)}` : null;
+      return r.status === 'rejected' ? describeError(r.reason, timeoutMs) : null;
     };
     const valueOf = (k: keyof typeof NEA_ENDPOINTS): unknown => {
       const r = result[k];
       return r.status === 'fulfilled' ? r.value : null;
     };
 
-    const windFailures = [failure('windDirection'), failure('windSpeed')].filter((f): f is string => f !== null);
+    const windFailures = (['windDirection', 'windSpeed'] as const)
+      .map((k) => (reasonFor(k) === null ? null : `${ENDPOINT_LABELS[k]}: ${reasonFor(k)}`))
+      .filter((f): f is string => f !== null);
     if (windFailures.length > 0) return fallBack(windFailures.join('; '));
 
+    const snapshot = loadNeaSnapshot();
     const retrievedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     let context: NeaContext;
     try {
@@ -474,16 +636,25 @@ export async function loadNeaContext(opts?: { timeoutMs?: number; fetchImpl?: ty
         { windDirection: valueOf('windDirection'), windSpeed: valueOf('windSpeed'), psi: valueOf('psi'), pm25: valueOf('pm25') },
         'live',
         retrievedAt,
+        { fallbackHaze: snapshot?.haze ?? null, fallbackRetrievedAt: snapshot?.retrievedAt },
       );
     } catch (err) {
       return fallBack(err instanceof Error ? err.message : String(err));
     }
 
-    const hazeFailures = [failure('psi'), failure('pm25')].filter((f): f is string => f !== null);
-    const error =
-      hazeFailures.length > 0
-        ? `Live NEA haze readings partly unavailable (${hazeFailures.join('; ')}); wind is live.`
-        : null;
+    const psiReason = context.haze?.dataMode === 'historical' || !context.haze ? (reasonFor('psi') ?? 'unreadable response') : null;
+    const pmReason = reasonFor('pm25');
+    let error: string | null = null;
+    if (psiReason !== null) {
+      const failed = pmReason !== null ? 'PSI and PM2.5' : 'PSI';
+      const reasons = [...new Set([psiReason, ...(pmReason !== null ? [pmReason] : [])])].join('; ');
+      error = context.haze
+        ? `Live ${failed} unavailable (${reasons}); showing saved NEA ` +
+          `${context.haze.pm25OneHour ? 'PSI and PM2.5' : 'PSI'} from ${shortUtc(context.haze.observedAt)} UTC.`
+        : `Live ${failed} unavailable (${reasons}); no saved NEA PSI is available.`;
+    } else if (pmReason !== null) {
+      error = `Live PM2.5 unavailable (${pmReason}); PSI is live and PM2.5 is not shown.`;
+    }
     return { context, fellBack: false, error };
   } catch (err) {
     return fallBack(err instanceof Error ? err.message : String(err));

@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import snapshotJson from '../../data/nea-snapshot.json';
 import type { Incident, NeaContext, NeaStationWind } from '../types';
 import { buildBriefing } from './briefing';
 import { loadFixtures } from './fixtures';
 import {
+  NEA_CACHE_KEY,
+  NEA_CACHE_TTL_MS,
   NEA_ENDPOINTS,
   NEA_RANGE_KM,
   NEA_SOURCE_NAME,
@@ -15,6 +17,7 @@ import {
   loadNeaSnapshot,
   normaliseNea,
   psiBand,
+  resetNeaCache,
   summariseWind,
   toUtcIso,
   type NeaRawResponses,
@@ -179,6 +182,10 @@ function fakeFetch(replies: Partial<Record<keyof typeof NEA_ENDPOINTS, Reply>>):
   }) as unknown as typeof fetch;
 }
 
+beforeEach(() => {
+  resetNeaCache(); // loadNeaContext caches across calls; every test starts clean
+});
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -225,6 +232,7 @@ describe('normaliseNea', () => {
       psi24h: { north: 124, south: 133, east: 153, west: 173, central: 166 },
       pm25OneHour: { north: 54, south: 85, east: 90, west: 122, central: 100 },
       psiBand: 'Unhealthy',
+      dataMode: 'live',
     });
   });
 
@@ -430,21 +438,172 @@ describe('loadNeaContext', () => {
     }
   });
 
-  it('keeps live wind with null haze when only PSI fails', async () => {
-    const r = await loadNeaContext({ fetchImpl: fakeFetch({ psi: { status: 500, body: {} } }) });
-    expect(r.fellBack).toBe(false);
-    expect(r.context?.dataMode).toBe('live');
-    expect(r.context?.stations).toHaveLength(4);
-    expect(r.context?.haze).toBeNull();
-    expect(r.error).toBe('Live NEA haze readings partly unavailable (PSI: HTTP 500); wind is live.');
+  it('keeps live wind and uses the SNAPSHOT haze, clearly marked, when PSI is rate limited', async () => {
+    const snap = loadNeaSnapshot() as NeaContext;
+    const savedTime = `${snap.haze?.observedAt.slice(0, 10)} ${snap.haze?.observedAt.slice(11, 16)} UTC`;
+    for (const psiReply of [{ status: 429, body: {} }, new TypeError('Failed to fetch')] as Reply[]) {
+      resetNeaCache();
+      const r = await loadNeaContext({ fetchImpl: fakeFetch({ psi: psiReply }) });
+      expect(r.fellBack).toBe(false);
+      expect(r.context?.dataMode).toBe('live');
+      expect(r.context?.stations).toHaveLength(4);
+      expect(r.context?.haze).toEqual({ ...snap.haze, dataMode: 'historical' });
+      expect(r.error).toMatch(/^Live PSI unavailable \(rate limited( or offline)?\); showing saved NEA PSI and PM2\.5 from /);
+      expect(r.error).toContain(`from ${savedTime}.`);
+      expect(r.context?.qualityNote).toContain('come from the saved NEA snapshot');
+      expect(r.context?.attribution).toContain('Pollutant Standards Index (PSI)');
+    }
   });
 
-  it('keeps PSI with null PM2.5 when only PM2.5 fails', async () => {
+  it('says when both PSI and PM2.5 fail, and gives null haze only if no snapshot haze exists', async () => {
+    const r = await loadNeaContext({ fetchImpl: fakeFetch({ psi: { status: 429, body: {} }, pm25: { status: 429, body: {} } }) });
+    expect(r.context?.haze?.dataMode).toBe('historical');
+    expect(r.error).toMatch(/^Live PSI and PM2\.5 unavailable \(rate limited\); showing saved NEA PSI and PM2\.5 from .* UTC\.$/);
+    const noFallback = normaliseNea({ ...RAW, psi: null }, 'live', '2026-10-13T06:45:00Z', { fallbackHaze: null });
+    expect(noFallback.haze).toBeNull();
+  });
+
+  it('keeps live PSI with null PM2.5 when only PM2.5 fails', async () => {
     const r = await loadNeaContext({ fetchImpl: fakeFetch({ pm25: new Error('offline') }) });
     expect(r.fellBack).toBe(false);
+    expect(r.context?.haze?.dataMode).toBe('live');
     expect(r.context?.haze?.psiBand).toBe('Unhealthy');
     expect(r.context?.haze?.pm25OneHour).toBeNull();
-    expect(r.error).toContain('PM2.5: network error (offline)');
+    expect(r.error).toBe('Live PM2.5 unavailable (network error (offline)); PSI is live and PM2.5 is not shown.');
+  });
+
+  it('reports HTTP 429 and a CORS-less 429 (fetch TypeError) on wind as rate limited', async () => {
+    const r429 = await loadNeaContext({ fetchImpl: fakeFetch({ windDirection: { status: 429, body: {} } }) });
+    expect(r429.fellBack).toBe(true);
+    expect(r429.error).toContain('wind direction: rate limited');
+    resetNeaCache();
+    const cors = await loadNeaContext({ fetchImpl: fakeFetch({ windSpeed: new TypeError('Failed to fetch') }) });
+    expect(cors.fellBack).toBe(true);
+    expect(cors.error).toContain('wind speed: rate limited or offline');
+  });
+});
+
+/** In-memory Storage stand-in. */
+function fakeStorage(opts: { throws?: boolean } = {}): Storage & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  const guard = () => {
+    if (opts.throws) throw new Error('SecurityError: storage is disabled');
+  };
+  return {
+    data,
+    get length() {
+      return data.size;
+    },
+    clear: () => (guard(), data.clear()),
+    getItem: (k: string) => (guard(), data.get(k) ?? null),
+    key: (i: number) => [...data.keys()][i] ?? null,
+    removeItem: (k: string) => (guard(), void data.delete(k)),
+    setItem: (k: string, v: string) => (guard(), void data.set(k, v)),
+  };
+}
+
+/** fakeFetch that counts calls. */
+function countingFetch(replies: Parameters<typeof fakeFetch>[0] = {}) {
+  const inner = fakeFetch(replies);
+  const counter = { calls: 0 };
+  const fn = ((url: string, init?: RequestInit) => {
+    counter.calls += 1;
+    return inner(url, init);
+  }) as unknown as typeof fetch;
+  return { fn, counter };
+}
+
+describe('loadNeaContext dedupe and cache', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('shares ONE set of four requests between concurrent calls (StrictMode double mount)', async () => {
+    const { fn, counter } = countingFetch();
+    const [a, b, c] = await Promise.all([
+      loadNeaContext({ fetchImpl: fn }),
+      loadNeaContext({ fetchImpl: fn }),
+      loadNeaContext({ fetchImpl: fn }),
+    ]);
+    expect(counter.calls).toBe(4);
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+    expect(a.context?.dataMode).toBe('live');
+  });
+
+  it('reuses a successful live result for 5 minutes, keeping dataMode live and the original retrievedAt', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T07:00:00Z'));
+    const { fn, counter } = countingFetch();
+    const first = await loadNeaContext({ fetchImpl: fn });
+    expect(first.context?.retrievedAt).toBe('2026-10-13T07:00:00Z');
+
+    vi.setSystemTime(new Date('2026-10-13T07:04:59Z'));
+    const second = await loadNeaContext({ fetchImpl: fn });
+    expect(counter.calls).toBe(4);
+    expect(second.context?.dataMode).toBe('live');
+    expect(second.context?.retrievedAt).toBe('2026-10-13T07:00:00Z');
+
+    vi.setSystemTime(new Date('2026-10-13T07:05:01Z'));
+    const third = await loadNeaContext({ fetchImpl: fn });
+    expect(counter.calls).toBe(8);
+    expect(third.context?.retrievedAt).toBe('2026-10-13T07:05:01Z');
+  });
+
+  it('does not cache a fallback, so the next call tries live again', async () => {
+    const failing = countingFetch({ windDirection: { status: 429, body: {} } });
+    expect((await loadNeaContext({ fetchImpl: failing.fn })).fellBack).toBe(true);
+    const ok = countingFetch();
+    const r = await loadNeaContext({ fetchImpl: ok.fn });
+    expect(ok.counter.calls).toBe(4);
+    expect(r.fellBack).toBe(false);
+  });
+
+  it('persists to sessionStorage and serves it after a reload (memory cleared)', async () => {
+    const storage = fakeStorage();
+    vi.stubGlobal('sessionStorage', storage);
+    const { fn, counter } = countingFetch();
+    const first = await loadNeaContext({ fetchImpl: fn });
+    expect(storage.data.has(NEA_CACHE_KEY)).toBe(true);
+
+    resetNeaCache({ keepStorage: true }); // simulates an HMR or page reload
+    const again = await loadNeaContext({ fetchImpl: fn });
+    expect(counter.calls).toBe(4);
+    expect(again.fellBack).toBe(false);
+    expect(again.context?.dataMode).toBe('live');
+    expect(again.context?.retrievedAt).toBe(first.context?.retrievedAt);
+    expect(again.context).toEqual(first.context);
+  });
+
+  it('ignores stale or corrupt sessionStorage entries', async () => {
+    const storage = fakeStorage();
+    vi.stubGlobal('sessionStorage', storage);
+    const { fn, counter } = countingFetch();
+    storage.data.set(NEA_CACHE_KEY, '{not json');
+    await loadNeaContext({ fetchImpl: fn });
+    expect(counter.calls).toBe(4);
+
+    const entry = JSON.parse(storage.data.get(NEA_CACHE_KEY) as string);
+    storage.data.set(NEA_CACHE_KEY, JSON.stringify({ ...entry, storedAt: entry.storedAt - NEA_CACHE_TTL_MS - 1 }));
+    resetNeaCache({ keepStorage: true });
+    await loadNeaContext({ fetchImpl: fn });
+    expect(counter.calls).toBe(8);
+  });
+
+  it('falls through cleanly when storage throws or is missing', async () => {
+    vi.stubGlobal('sessionStorage', fakeStorage({ throws: true }));
+    const { fn, counter } = countingFetch();
+    const r = await loadNeaContext({ fetchImpl: fn });
+    expect(r.fellBack).toBe(false);
+    expect(r.context?.dataMode).toBe('live');
+    const again = await loadNeaContext({ fetchImpl: fn }); // memory cache still works
+    expect(counter.calls).toBe(4);
+    expect(again.context).toBe(r.context);
+    expect(() => resetNeaCache()).not.toThrow();
+
+    vi.stubGlobal('sessionStorage', undefined);
+    const r2 = await loadNeaContext({ fetchImpl: fn });
+    expect(r2.context?.dataMode).toBe('live');
   });
 });
 
@@ -483,6 +642,18 @@ describe('brief NEA section', () => {
     expect(text).toContain(NEA_SOURCE_URL);
     expect(text).toContain(flat(nea.attribution));
     expect(text).toContain('SIMULATED DEMO DATA');
+  });
+
+  it('marks snapshot haze inside a live context', () => {
+    const snap = loadNeaSnapshot() as NeaContext;
+    const mixed = normaliseNea({ ...RAW, psi: null, pm25: null }, 'live', '2026-10-13T06:45:00Z', {
+      fallbackHaze: snap.haze,
+      fallbackRetrievedAt: snap.retrievedAt,
+    });
+    expect(mixed.haze?.dataMode).toBe('historical');
+    const text = flat(buildBriefing({ ...base, nea: mixed, drift: assessDrift(riau, mixed) }));
+    expect(text).toMatch(/Mode: LIVE/);
+    expect(text).toContain('24-hour PSI: HISTORICAL SNAPSHOT (live PSI unavailable):');
   });
 
   it('labels a snapshot as HISTORICAL SNAPSHOT', () => {
