@@ -31,6 +31,7 @@ import type {
   ReviewState,
 } from '../types';
 import type { GaugeReading } from '../lib/warnings';
+import { psiBand } from '../lib/nea';
 import './RegionMap.css';
 
 export interface RegionMapProps {
@@ -87,6 +88,17 @@ export interface HazeTransportView {
 
 /** Reference distances from a volcano's GVP summit point (km). Not a hazard zone. */
 const RING_KM = [3, 5, 10, 15];
+
+/** NEA PSI regions at NEA's own label points (from the data.gov.sg PSI API regionMetadata). */
+const NEA_PSI_REGIONS: ReadonlyArray<[string, number, number]> = [
+  ['north', 1.41803, 103.82],
+  ['south', 1.29587, 103.82],
+  ['east', 1.35735, 103.94],
+  ['west', 1.35735, 103.7],
+  ['central', 1.35735, 103.82],
+];
+/** Haze region labels appear only once the map is zoomed in near Singapore. */
+const HAZE_LABEL_MIN_K = 10;
 const MAGMA_URL = 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas';
 /** Wind arrows: at least this far apart on screen (px). */
 const ARROW_SPACING_PX = 44;
@@ -107,8 +119,8 @@ const HOME_VIEW: View = { k: 1, x: 0, y: 0 };
 const MIN_SPAN_DEG = 0.2;
 /** The view centre stays over the base frame plus this margin (viewBox units). */
 const PAN_MARGIN = 160;
-/** Selection fits: ±1.5° around a summit; a watch box with a 0.3° margin. */
-const SUMMIT_FIT_HALF_DEG = 1.5;
+/** Selection fits: ±0.3° around a summit (so the 15 km reference rings fill the view); a watch box with a 0.3° margin. */
+const SUMMIT_FIT_HALF_DEG = 0.3;
 const BOX_FIT_MARGIN_DEG = 0.3;
 /** Fit region inside the frame, clear of the top-left legend and the top-right inset column. */
 const FIT_FRAME = { x0: 0.1, x1: 0.66, y0: 0.14, y1: 0.92 };
@@ -1276,7 +1288,7 @@ export default function RegionMap({
     [kMax, clampView, animateTo, cancelAnim, commitSoon],
   );
 
-  /** The view a selection zooms to: ±1.5° around a summit, or the watch box with a margin. */
+  /** The view a selection zooms to: ±0.3° around a summit, or the watch box with a margin. */
   const selectedIncident = selected?.incident ?? null;
   const fitView = useMemo<View>(() => {
     if (!selectedIncident) return HOME_VIEW;
@@ -1689,6 +1701,21 @@ export default function RegionMap({
     }).filter((r) => r.d !== '');
   }, [ringIncident, layers.rings, layers.watch, basemap, toView]);
 
+  // NEA measured haze: 24-h PSI per NEA region, drawn as haze shading at NEA's region points (real data).
+  const hazeDrawing = useMemo(() => {
+    const haze = nea?.haze;
+    if (!haze || !layers.nea) return null;
+    const path = geoPath(basemap.projection);
+    const out: { region: string; psi: number; band: string; d: string; label: Point }[] = [];
+    for (const [region, lat, lon] of NEA_PSI_REGIONS) {
+      const psi = haze.psi24h[region];
+      if (typeof psi !== 'number' || !Number.isFinite(psi)) continue;
+      const d = path(geoCircle().center([lon, lat]).radius(0.07).precision(2)()) ?? '';
+      if (d) out.push({ region, psi, band: psiBand(psi), d, label: toView(project(basemap.projection, [lon, lat])) });
+    }
+    return out.length ? { regions: out, mode: haze.dataMode === 'historical' ? 'SNAPSHOT' : 'LIVE', time: haze.observedAt.slice(11, 16) } : null;
+  }, [nea, layers.nea, basemap, toView]);
+
   const chipText = neaShown && nea ? psiChipText(nea) : null;
   const windVariable = Boolean(nea && nea.wind.consistency < 0.5);
   const downwindKnown = neaDrawing?.cone != null;
@@ -1924,8 +1951,19 @@ export default function RegionMap({
               aria-hidden="true"
               transform={`translate(${view.x} ${view.y}) scale(${view.k})`}
             >
-              {ringDrawing.map((r) => (
-                <path key={r.km} d={r.d} />
+              {[...ringDrawing].reverse().map((r) => (
+                <path key={r.km} d={r.d} className="region-map__ring-band" />
+              ))}
+            </g>
+          )}
+          {hazeDrawing && (
+            <g
+              className="region-map__haze"
+              aria-hidden="true"
+              transform={`translate(${view.x} ${view.y}) scale(${view.k})`}
+            >
+              {hazeDrawing.regions.map((h) => (
+                <path key={h.region} d={h.d} className={`region-map__haze-blob is-${h.band.toLowerCase().replace(/\s+/g, '-')}`} />
               ))}
             </g>
           )}
@@ -1957,6 +1995,19 @@ export default function RegionMap({
               aria-hidden="true"
             >
               {r.km} km
+            </span>
+          ))}
+        {hazeDrawing &&
+          view.k >= HAZE_LABEL_MIN_K &&
+          hazeDrawing.regions.map((h) => (
+            <span
+              key={h.region}
+              className="region-map__haze-label"
+              style={{ left: pct(h.label[0], VIEW_W), top: pct(h.label[1], VIEW_H) }}
+            >
+              {h.region === 'central'
+                ? `PSI ${h.psi} · ${h.band} · NEA ${hazeDrawing.mode} ${hazeDrawing.time} UTC`
+                : `${h.region[0].toUpperCase()}${h.region.slice(1)} ${h.psi}`}
             </span>
           ))}
 

@@ -1213,16 +1213,21 @@
   pointer-events: none;
 }
 
+/* Reference distance bands: neutral slate, darker toward the summit as the discs stack.
+   Deliberately not red or amber: these are distances, not an official hazard zone. */
 .region-map__rings path {
-  fill: none;
-  stroke: var(--text-muted);
-  stroke-opacity: 0.75;
-  stroke-width: 1;
-  stroke-dasharray: 3 3;
+  fill: #33475b;
+  fill-opacity: 0.08;
+  stroke: #33475b;
+  stroke-opacity: 0.85;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
   vector-effect: non-scaling-stroke;
 }
 
 .region-map__ring-label {
+  font-size: 12px;
+  font-weight: 600;
   position: absolute;
   z-index: 1;
   transform: translate(-50%, -100%);
@@ -1281,4 +1286,34 @@
   .region-map__caption-summary {
     display: none;
   }
+}
+
+/* NEA measured haze over Singapore: brown-grey haze tint, denser with a worse NEA PSI band.
+   Real NEA readings (LIVE or snapshot); the label carries the band in text, never colour alone. */
+.region-map__haze {
+  pointer-events: none;
+}
+.region-map__haze-blob {
+  fill: #7a5c3a;
+  stroke: none;
+  fill-opacity: 0.12;
+}
+.region-map__haze-blob.is-good { fill-opacity: 0.05; }
+.region-map__haze-blob.is-moderate { fill-opacity: 0.14; }
+.region-map__haze-blob.is-unhealthy { fill-opacity: 0.28; }
+.region-map__haze-blob.is-very-unhealthy { fill-opacity: 0.42; }
+.region-map__haze-blob.is-hazardous { fill-opacity: 0.55; }
+.region-map__haze-label {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #4a3721;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
 }
