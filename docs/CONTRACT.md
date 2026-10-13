@@ -70,3 +70,20 @@ Secondary examples are static (`replayable: false`, every record at `replayStep:
 ## Briefing
 
 Plain text, deterministic (no wall-clock time; the timestamp is the replay clock). Contents: incident name and location, coordinates and catalog source, replay step and clock, data mode notice, current review state and the rule, evidence references (id, category, value, observed and ingested times, mode, source name and URL, quality note, counted reason), validation issues if any, limitations, questions for an analyst, and the suggested next step: consult the relevant volcano observatory and corroborating ground measurements. Never a predicted eruption date, probability, or evacuation boundary.
+
+## NEA live context layer (wind direction and haze)
+
+Requested by Jenson: when the map zooms in near Singapore, show wind direction and haze from the NEA API.
+
+- Source: NEA real-time APIs on data.gov.sg, v2, no key, CORS open: `https://api-open.data.gov.sg/v2/real-time/api/{wind-direction,wind-speed,psi,pm25}`. Wind direction is degrees FROM (10-minute average), speed in knots, 18 Singapore stations; timestamps are `+08:00` and get normalised to UTC `Z`.
+- It is **context, not evidence**. It never changes a review state and never enters `deriveReview`.
+- `src/lib/nea.ts` owns fetching and normalising: `loadNeaContext()` tries live (5 s timeout) and on any failure falls back to the bundled real snapshot `data/nea-snapshot.json` (`dataMode: "historical"`, original timestamps kept). It never throws. The core demo still works fully offline.
+- `assessDrift(incident, ctx)` returns null when the incident is more than 600 km from Singapore (Merapi and Ayutthaya show "No NEA station coverage here"). For the Riau example it returns distance, bearing, downwind direction and whether Singapore is within ±45° of downwind.
+- Labels: LIVE or HISTORICAL SNAPSHOT plus the reading time; "Wind measured at NEA Singapore stations"; drift is "Illustrative haze drift using Singapore station wind, not a dispersion model"; PSI bands are NEA's own descriptors with their source and time. Attribution follows the Singapore Open Data Licence.
+- Types: `NeaContext`, `WindSummary`, `HazeReading`, `DriftAssessment` in `src/types.ts`.
+
+| Owner | Files |
+|---|---|
+| Logic | `src/lib/nea.ts`, `src/lib/nea.test.ts`, `scripts/capture-nea-snapshot.mjs`, `data/nea-snapshot.json`, the optional NEA section in `briefing.ts` |
+| Map | `RegionMap` optional props `nea?: NeaContext \| null` and `drift?: DriftAssessment \| null`, drawn in the zoomed view |
+| UI shell | Calls `loadNeaContext()` once on mount, passes `nea` and `drift` to the map, detail panel and brief |

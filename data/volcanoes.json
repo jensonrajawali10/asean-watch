@@ -4,10 +4,13 @@
     "gvpNumber": "263250",
     "name": "Merapi",
     "country": "Indonesia",
-    "region": "Java",
+    "region": "Sunda Volcanic Arc (Sunda-Banda Volcanic Regions)",
     "lat": -7.54,
     "lon": 110.446,
-    "elevationM": null,
-    "catalogSource": { "name": "Smithsonian Global Volcanism Program", "url": "https://volcano.si.edu/volcano.cfm?vn=263250" }
+    "elevationM": 2910,
+    "catalogSource": {
+      "name": "Smithsonian Institution Global Volcanism Program, Volcanoes of the World: Merapi (263250)",
+      "url": "https://volcano.si.edu/volcano.cfm?vn=263250"
+    }
   }
 ]

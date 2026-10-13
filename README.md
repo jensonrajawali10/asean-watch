@@ -1,32 +1,115 @@
-# React + TypeScript + Vite
+# ASEAN Watch
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+ASEAN Watch is a regional environmental intelligence prototype for Southeast Asia. It turns scattered environmental observations into one incident review workflow: an analyst selects an incident on a regional map, replays the observations as they arrive, sees why the incident needs attention, inspects the record behind every statement, and exports a plain-text briefing. Volcanoes are the first module, with a simulated scenario at Merapi in Central Java as the flagship demo. Wildfire and haze, flooding, deforestation, and marine pollution are planned as later modules on the same evidence model.
 
-Currently, two official plugins are available:
+> **Prototype notice.** This is a hackathon prototype running on **simulated data**. It is **not** a validated eruption forecast, an official alert service, or a public warning system. It does not predict eruptions, estimate probabilities, or advise on evacuation. Review states are illustrative workflow labels, not official volcano alert levels. The real volcano's location is used; the scenario does not describe its current activity.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Quick start
 
-## React Compiler
+Requires Node.js 22.12 or later and npm. (Vite itself runs on Node 20.19+, but the test runner, Vitest 5, needs 22.12+.)
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev          # development server; Vite prints the local URL
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Offline demo build (recommended for presenting):
+
+```bash
+npm run build        # type-checks, then bundles the app, map, and fixtures
+npm run preview      # serves the built app locally
+```
+
+After `npm run preview` is running, the app needs no network: the map geometry and all fixtures are bundled. Source and reference links open in a new tab and are never fetched by the app.
+
+Other scripts:
+
+| Command | What it does |
+|---|---|
+| `npm test` | Runs unit tests for validation, review rules, and briefing output |
+| `npm run typecheck` | TypeScript project check |
+| `npm run build:region` | Regenerates `data/region.geojson` from the Natural Earth data in the installed `world-atlas` package (only needed if the map extent changes) |
+
+## Demo flow
+
+1. **Open the regional view.** The ASEAN map, the Merapi marker, the incident queue, and the persistent DEMO REPLAY banner are visible.
+2. **Select Merapi** on the map or in the queue. Both routes open the same incident: location, coordinates, catalog source, baseline records, and the state **Monitoring**.
+3. **Replay the observations** with the replay bar (Next step, Play, Reset). Step 1 adds thermal anomalies and the state becomes **Check observation**; step 2 adds a sulfur dioxide anomaly and the state becomes **Review needed**, because two distinct evidence categories are now present.
+4. **Trace the evidence.** "Why this state?" shows the rule and why each record was or was not counted. The record inspector shows each record's source link, observation time, ingestion time, data mode, and quality note.
+5. **Export and reset.** Generate brief, then Download .txt saves a deterministic text briefing for the current step. Reset returns to Baseline and clears the brief; the sequence repeats with the same result.
+
+The full timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+
+## What is functional vs simulated
+
+| Part | Status | Notes |
+|---|---|---|
+| Regional map with country boundaries | Functional, published geometry | Natural Earth boundaries bundled locally; no map tiles or tile server |
+| Merapi identity and coordinates | Real | Smithsonian GVP volcano 263250, lat -7.54, lon 110.446 |
+| Incident queue and selection | Functional | Map and queue set the same selection; incidents never share records |
+| Observation values, timestamps, anomaly flags | **Simulated** | Every record is labelled SIMULATED and modelled on a public product type |
+| Scenario dates and replay clock | **Simulated** | Fictional scenario clock, not real satellite overpass times |
+| Wildfire and haze, flood examples | **Simulated**, static | Show the queue and rules on other hazards; they do not replay |
+| Fixture validation | Functional | Invalid records are dropped with a readable message; duplicate ids are ignored |
+| Review state derivation | Functional, illustrative rules | Rules are transparent and tested; they are not scientific thresholds |
+| Explanation and record inspector | Functional | Every state and statement traces to a record |
+| Brief generation and `.txt` download | Functional | Deterministic text, generated in the browser |
+| Offline operation | Functional | After `npm run build`; no runtime network call |
+| Live or historical data ingestion | Not built | First item on the [roadmap](docs/ROADMAP.md) |
+| Eruption prediction, alert levels, evacuation advice | Out of scope | Never generated by the app |
+
+## Architecture
+
+No server, database, model API, or runtime network call. Data flow:
+
+```
+data/*.json fixtures → validateObservations → visibleObservations(incident, replayIndex)
+  → deriveReview → map + queue + detail + timeline → buildBriefing → .txt download
+```
+
+The app component owns three pieces of state: the selected incident, the replay index, and the generated brief. Everything else is derived from them. Changing the incident or replay step clears the brief.
+
+| File or module | Responsibility |
+|---|---|
+| `src/types.ts` | Shared data contract: observation, incident, replay step, and review result types |
+| `data/volcanoes.json` | Volcano catalog entry: stable id, GVP number, name, coordinates, catalog source |
+| `data/incidents.json` | Incidents: hazard type, location, data mode, scenario window, whether it replays |
+| `data/demo-events.json` | Merapi replay steps (labels and scenario clock) and all observation records |
+| `data/SOURCES.md` | Source and attribution for every fixture |
+| `scripts/build-region.mjs`, `data/region.geojson` | Build and bundle the regional boundary geometry |
+| `src/lib/fixtures.ts` | Load and validate fixtures once at startup |
+| `src/lib/reviewRules.ts` | Validate records, select records visible at a replay step, derive the review state and a reason for each record (pure functions) |
+| `src/lib/briefing.ts` | Build the deterministic text brief, name the file, trigger the browser download |
+| `src/lib/*.test.ts` | Unit tests for validation, rules, and briefing |
+| `src/components/RegionMap.tsx` | Render the bundled map, incident markers, and selection highlight |
+| `src/App.tsx`, other `src/components/*` | App state, header and DEMO REPLAY banner, incident queue, detail panel, evidence timeline, replay bar, explanation, record inspector, brief panel |
+| `docs/CONTRACT.md`, `docs/ACCEPTANCE.md` | Implementation contract and demo acceptance checklist |
+
+## Review rules
+
+For the selected incident, using only the records visible at the current replay step:
+
+- Records observed outside the incident's scenario window are shown but not counted.
+- **Monitoring**: no counted record is marked anomalous.
+- **Check observation**: anomalies from one category (for example, thermal).
+- **Review needed**: anomalies from two or more distinct categories (for example, thermal and gas).
+- Only the first anomaly in each category counts. A second thermal reading is shown with the reason "not independent corroboration" and does not raise the state.
+- Anomaly flags are configured in the fixtures with a stated reason. The app never computes them from values.
+
+These are **illustrative workflow rules, not scientific thresholds or official alert levels**. They suggest which incidents an analyst should look at next; they say nothing about the likelihood of an eruption.
+
+## Data and attribution
+
+- **Merapi identity and coordinates:** Smithsonian Institution Global Volcanism Program, volcano number 263250, <https://volcano.si.edu/volcano.cfm?vn=263250>.
+- **Country boundaries:** [Natural Earth](https://www.naturalearthdata.com/) (public domain), redistributed as TopoJSON by the [world-atlas](https://github.com/topojson/world-atlas) package and bundled with the app.
+- **Simulated observations:** each record names the product type it is modelled on and links to that product's public description page, not to a specific scene or granule. The product types are satellite thermal detections (VIIRS or MODIS, as distributed by [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/content/active_fire/)), Sentinel-5P sulfur dioxide, and Sentinel-1 radar ([Copernicus Data Space Ecosystem](https://documentation.dataspace.copernicus.eu/Applications/Browser.html)). No acquisition identifier has been invented. The per-record list is in `data/SOURCES.md`.
+
+Full references and the label policy are in [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md).
+
+## Documentation
+
+- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md): four-minute script, pre-demo checklist, backup procedure, judging Q&A
+- [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md): signal types, label policy, limitations, requirements for operational use, references
+- [docs/ROADMAP.md](docs/ROADMAP.md): expansion modules and post-sprint priorities
+- [docs/CONTRACT.md](docs/CONTRACT.md): implementation contract
+- [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md): demo acceptance checklist
