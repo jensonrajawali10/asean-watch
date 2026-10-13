@@ -1,14 +1,15 @@
-// Incident detail: the selected incident's state and "Why this state?", plus an optional context card.
+// Watch-area detail: the selected area's properties, the relayed official level (reserved style,
+// apart from our state), our workflow state, "Why this state?", and an optional context card.
 // Records themselves live in the evidence timeline and the record inspector, not here.
 import type { ReactNode } from 'react';
-import type { Incident, ReviewResult, Volcano } from '../types';
+import type { Incident, OfficialWarning, ReviewResult, SourceRef, Volcano } from '../types';
 import { RULE_SUMMARY, RULE_TEXT } from '../lib/reviewRules';
-import { CountedPill, ExternalLink, ModeBadge, StateBadge } from './Badges';
+import { CountedPill, ExternalLink, OfficialLevelChip, OfficialTag, StateBadge } from './Badges';
 import { categoryLabel, formatCoords, formatUtc, hazardLabel } from './format';
 
 export interface IncidentDetailProps {
   incident: Incident | null;
-  /** Set when the selected id does not match any loaded incident. */
+  /** Set when the selected id does not match any loaded watch area. */
   missingId: string | null;
   review: ReviewResult | null;
   volcano: Volcano | null;
@@ -17,8 +18,17 @@ export interface IncidentDetailProps {
   onSelect: (incidentId: string) => void;
   onClearSelection: () => void;
   onInspect: (observationId: string) => void;
+  /** Official warnings near this area (already filtered and sorted); the first active one is cross-referenced. */
+  officialNear?: OfficialWarning[];
+  onInspectWarning?: (warningId: string) => void;
   /** Optional context card (NEA Singapore); null renders nothing. */
   context?: ReactNode;
+  /** Short display name (e.g. the volcano name); falls back to the title. */
+  placeName?: string;
+  /** Reference links for this watch area (official level page, independent monitoring). */
+  references?: SourceRef[];
+  /** Plain-language watch rules for this area (illustrative workflow rules, not official thresholds). */
+  watchRules?: string[];
 }
 
 export default function IncidentDetail(props: IncidentDetailProps) {
@@ -31,10 +41,10 @@ export default function IncidentDetail(props: IncidentDetailProps) {
       {missingId !== null ? (
         <div role="alert">
           <h2 id="detail-heading" className="detail-title">
-            Incident not found
+            Watch area not found
           </h2>
           <p>
-            No incident with the id <code>{missingId}</code> is in the loaded data.
+            No watch area with the id <code>{missingId}</code> is in the loaded data.
           </p>
           <button type="button" className="btn" onClick={onClearSelection}>
             Back to overview
@@ -43,14 +53,17 @@ export default function IncidentDetail(props: IncidentDetailProps) {
       ) : (
         <>
           <h2 id="detail-heading" className="detail-title">
-            Select an incident on the map or in the queue.
+            Select a watch area on the map or in the list.
           </h2>
           {scenarioIncident && (
             <button type="button" className="btn btn-primary" onClick={() => onSelect(scenarioIncident.id)}>
-              Open {scenarioIncident.title}
+              Open {props.placeName ?? scenarioIncident.title}
             </button>
           )}
-          <p className="muted small">States show analyst workflow urgency, not official alert levels.</p>
+          <p className="muted small">
+            Each area shows its official agency level (relayed verbatim) and our own workflow state, which is not an
+            alert level.
+          </p>
         </>
       )}
     </section>
@@ -63,7 +76,11 @@ function SelectedIncident({
   volcano,
   isScenario,
   onInspect,
+  officialNear = [],
+  onInspectWarning,
   context,
+  references = [],
+  watchRules = [],
 }: IncidentDetailProps & { incident: Incident }) {
   const location =
     incident.country && !incident.locationName?.includes(incident.country)
@@ -73,6 +90,8 @@ function SelectedIncident({
   // explanation[0] restates the rule (RULE_SUMMARY); the rule is shown once, as RULE_TEXT.
   const derivation =
     review && review.explanation[0] === RULE_SUMMARY ? review.explanation.slice(1) : (review?.explanation ?? []);
+  const official = officialNear.find((w) => w.authority === 'official' && !w.ended) ?? null;
+  const moreOfficial = officialNear.length - (official ? 1 : 0);
 
   return (
     <section className="detail" aria-labelledby="detail-heading">
@@ -80,20 +99,55 @@ function SelectedIncident({
         {incident.title}
       </h2>
       <p className="detail-meta">
-        {location || 'Location not recorded'} · {formatCoords(incident.lat, incident.lon)}
+        {location || 'Location not recorded'} · <span className="mono">{formatCoords(incident.lat, incident.lon)}</span>
       </p>
       <p className="detail-meta">
-        <ModeBadge mode={incident.dataMode} /> {hazardLabel(incident.hazard)} ·{' '}
-        {isScenario ? 'replay scenario' : 'static example'}
+        {hazardLabel(incident.hazard)}
+        {isScenario ? ' · 7-day replay' : ''}
         {volcano && catalogUrl && (
           <>
             {' · '}
             <span title={volcano.catalogSource.name}>
-              <ExternalLink href={catalogUrl}>{`${volcano.name} catalog entry (GVP ${volcano.gvpNumber})`}</ExternalLink>
+              <ExternalLink href={catalogUrl}>{`Smithsonian GVP ${volcano.gvpNumber}`}</ExternalLink>
             </span>
           </>
         )}
       </p>
+      {references.length > 0 && (
+        <p className="detail-meta detail-refs">
+          <span className="k">Also see</span>
+          {references.map((ref, i) => (
+            <span key={ref.url} title={ref.name}>
+              {i > 0 ? ' · ' : ' '}
+              <ExternalLink href={ref.url}>{shortRefName(ref.name)}</ExternalLink>
+            </span>
+          ))}
+        </p>
+      )}
+
+      {official && (
+        <div className="official-xref" lang={undefined}>
+          <p className="official-xref-head">
+            <OfficialTag issuer={official.issuer} authority="official" />
+          </p>
+          <p className="official-xref-level">
+            <OfficialLevelChip level={official.level} gloss={official.levelGloss} />
+          </p>
+          <p className="official-xref-actions">
+            {onInspectWarning && (
+              <button type="button" className="link-button" onClick={() => onInspectWarning(official.id)}>
+                Details
+              </button>
+            )}
+            <ExternalLink className="official-follow" href={official.issuerUrl}>
+              Follow {official.issuer}
+            </ExternalLink>
+          </p>
+          <p className="official-xref-note">
+            Relayed verbatim from the issuer{moreOfficial > 0 ? `; ${moreOfficial} more under Official warnings` : ''}.
+          </p>
+        </div>
+      )}
 
       {review ? (
         <div className="state-block">
@@ -103,10 +157,10 @@ function SelectedIncident({
               <span className="state-cats">{review.anomalyCategories.map(categoryLabel).join(' + ')}</span>
             )}
           </div>
-          <p className="state-note">Workflow state, not an official alert level.</p>
+          <p className="state-note">Our workflow state from stated watch rules, not an official alert level.</p>
         </div>
       ) : (
-        <p className="empty">The state could not be worked out for this incident.</p>
+        <p className="empty">The state could not be worked out for this watch area.</p>
       )}
 
       {review && (
@@ -114,16 +168,30 @@ function SelectedIncident({
           <summary>Why this state?</summary>
           <div className="disclosure-body">
             <p className="rule-text">{RULE_TEXT}</p>
+            {watchRules.length > 0 && (
+              <ul className="watch-rules">
+                {watchRules.map((rule) => (
+                  <li key={rule}>
+                    <span className="k">Watch rule</span> {rule}
+                  </li>
+                ))}
+              </ul>
+            )}
             {review.evidence.length > 0 ? (
               <ul className="why-records">
                 {review.evidence.map((e) => (
                   <li key={e.observation.id}>
                     <CountedPill counted={e.counted} />
-                    <span>
+                    <span className="why-text">
                       <button type="button" className="link-button" onClick={() => onInspect(e.observation.id)}>
                         {categoryLabel(e.observation.category)}: {e.observation.summary?.trim() || e.observation.id}
                       </button>{' '}
                       <span className="muted">{e.reason}</span>
+                      {e.observation.anomaly && e.observation.anomalyReason?.trim() && (
+                        <span className="why-rule">
+                          <span className="k">Watch rule</span> {e.observation.anomalyReason}
+                        </span>
+                      )}
                     </span>
                   </li>
                 ))}
@@ -146,12 +214,22 @@ function SelectedIncident({
       )}
 
       {context}
-
     </section>
   );
 }
 
-/** Secondary incident detail, collapsed: scenario window, the incident summary and data quality notes. */
+/** "PVMBG / MAGMA Indonesia volcano activity levels (official)" → "PVMBG / MAGMA Indonesia (official)". */
+function shortRefName(name: string): string {
+  const trimmed = name.trim();
+  const m = /^(.+?)(?:\s+(?:volcano activity levels|satellite monitoring)[^()]*)?(\s*\(.*\))?$/i.exec(trimmed);
+  if (!m) return trimmed;
+  const head = m[1].replace(/[:\s]+$/, '');
+  const paren = m[2]?.trim() ?? '';
+  const note = /official/i.test(paren) ? ' (official)' : /not official|independent/i.test(paren) ? ' (not official)' : '';
+  return `${head}${note}`;
+}
+
+/** Secondary detail, collapsed: watch window, the area summary and data quality notes. */
 export function IncidentExtras({ incident, review }: { incident: Incident | null; review: ReviewResult | null }) {
   if (!incident) return null;
   const qualityNotes = review
@@ -164,8 +242,9 @@ export function IncidentExtras({ incident, review }: { incident: Incident | null
       <summary>Details</summary>
       <div className="disclosure-body">
         <p>
-          <span className="k">Scenario window (fictional)</span> {formatUtc(incident.scenarioWindow?.start)} to{' '}
-          {formatUtc(incident.scenarioWindow?.end)}
+          <span className="k">Watch window</span>{' '}
+          <time dateTime={incident.scenarioWindow?.start}>{formatUtc(incident.scenarioWindow?.start)}</time> to{' '}
+          <time dateTime={incident.scenarioWindow?.end}>{formatUtc(incident.scenarioWindow?.end)}</time>
         </p>
         {incident.summary?.trim() && <p className="detail-summary">{incident.summary}</p>}
         {qualityNotes.length > 0 && (

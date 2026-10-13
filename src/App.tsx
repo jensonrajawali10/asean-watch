@@ -1,15 +1,19 @@
-// ASEAN Watch app shell. App is the single owner of the selected incident, the replay index and the
-// generated brief; everything else is derived from them and the fixtures loaded once below.
+// ASEAN Watch app shell. App is the single owner of the selected watch area, the replay index, the
+// generated brief and the inspected object; everything else is derived from them, the real-data
+// snapshot loaded once below, and the two context feeds (NEA Singapore, official warnings) loaded
+// once after mount. Every watch area replays over the same seven UTC days of the snapshot.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { DriftAssessment, Incident, ReplayStep, ReviewResult, ReviewState } from './types';
-import { findVolcano, loadFixtures, replayStepsFor } from './lib/fixtures';
-import type { Fixtures } from './lib/fixtures';
+import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
+import { findVolcano, loadFixtures } from './lib/fixtures';
+import type { HotspotMember, RealFixtures } from './lib/fixtures';
 import { deriveReview, visibleObservations } from './lib/reviewRules';
 import { buildBriefing, briefingFilename, downloadText } from './lib/briefing';
 import type { BriefingInput } from './lib/briefing';
 import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
+import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
+import type { OfficialWarningsResult } from './lib/warnings';
 import RegionMap from './components/RegionMap';
 import type { RegionMapProps } from './components/RegionMap';
 import AppHeader from './components/AppHeader';
@@ -22,23 +26,27 @@ import BriefPanel from './components/BriefPanel';
 import type { GeneratedBrief } from './components/BriefPanel';
 import DataCheckNotice from './components/DataCheckNotice';
 import NeaContextCard from './components/NeaContextCard';
+import OfficialWarningsPanel, { WarningInspector, feedForWarning, gaugeForWarning } from './components/OfficialWarnings';
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNearSingapore } from './components/format';
 import './App.css';
 
 // ---------------------------------------------------------------------------
-// Fixtures: loaded and validated once per page load.
+// Snapshot data: loaded and validated once per page load.
 
-const EMPTY_FIXTURES: Fixtures = {
+const EMPTY_FIXTURES = {
   volcanoes: [],
   incidents: [],
   scenario: { incidentId: '', replaySteps: [] },
   observations: [],
   issues: [],
   duplicatesIgnored: 0,
-};
+  watches: [],
+  replaySteps: [],
+  snapshot: { retrievedAt: '', satelliteAsOf: null, window: { start: '', end: '' }, sources: [], attributions: [] },
+} as unknown as RealFixtures;
 
-function load(): { fixtures: Fixtures; error: string | null } {
+function load(): { fixtures: RealFixtures; error: string | null } {
   try {
     return { fixtures: loadFixtures(), error: null };
   } catch (err) {
@@ -48,31 +56,101 @@ function load(): { fixtures: Fixtures; error: string | null } {
 
 const { fixtures: FIXTURES, error: LOAD_ERROR } = load();
 const INCIDENTS: Incident[] = Array.isArray(FIXTURES.incidents) ? FIXTURES.incidents : [];
-const SCENARIO_ID = FIXTURES.scenario?.incidentId ?? '';
-const SCENARIO_STEPS: ReplayStep[] = SCENARIO_ID ? replayStepsFor(FIXTURES, SCENARIO_ID) : [];
-const SCENARIO_INCIDENT: Incident | null =
-  SCENARIO_STEPS.length > 0 ? (INCIDENTS.find((i) => i.id === SCENARIO_ID) ?? null) : null;
-const FIRST_STEP = SCENARIO_STEPS[0]?.index ?? 0;
-/** Static incidents show every record, whatever the scenario replay index is. */
-const ALL_STEPS = Number.MAX_SAFE_INTEGER;
+/** The shared replay days (oldest first); every watch area replays over them. */
+const STEPS: ReplayStep[] = Array.isArray(FIXTURES.replaySteps) ? FIXTURES.replaySteps : [];
+const FIRST_STEP = STEPS[0]?.index ?? 0;
 const PLAY_INTERVAL_MS = 1500;
+/** Official warnings within this distance of a watch area are listed next to it. */
+const NEAR_KM = 150;
+/** The watch area the overview offers to open first. */
+const FIRST_INCIDENT: Incident | null = INCIDENTS[0] ?? null;
 
-/** Short place names for map labels, e.g. the volcano name. */
+const DATA_AS_OF: string | null = FIXTURES.snapshot?.retrievedAt || null;
+const ATTRIBUTIONS: string[] = Array.isArray(FIXTURES.snapshot?.attributions) ? FIXTURES.snapshot.attributions : [];
+/** False while any loaded record or watch area is still a simulated fixture. */
+const ALL_REAL =
+  !FIXTURES.observations.some((o) => o.dataMode === 'simulated') && !INCIDENTS.some((i) => i.dataMode === 'simulated');
+
+/**
+ * Short place names for the map and the rail. A short watch title ("Anak Krakatau") is used as is;
+ * a long one ("Riau peatland hotspots") is left to the map, which derives the place from the title.
+ */
 const PLACE_NAMES: Record<string, string> = Object.fromEntries(
   INCIDENTS.flatMap((i) => {
+    const title = i.title.trim();
+    if (title && title.length <= 16) return [[i.id, title]];
     const volcano = findVolcano(FIXTURES.volcanoes, i.volcanoId);
-    return volcano ? [[i.id, volcano.name]] : [];
+    return volcano?.name?.trim() ? [[i.id, volcano.name.trim()]] : [];
   }),
 );
 
+/** Per-watch metadata (references, rules) when the snapshot publishes it, read structurally so shape changes never break the UI. */
+const WATCH_META: Record<string, { references?: unknown; rules?: unknown }> = (() => {
+  const raw = (FIXTURES as Partial<{ watchMeta: unknown }>).watchMeta;
+  return raw && typeof raw === 'object' ? (raw as Record<string, { references?: unknown; rules?: unknown }>) : {};
+})();
+
+function isSourceRef(v: unknown): v is SourceRef {
+  return typeof v === 'object' && v !== null && typeof (v as SourceRef).name === 'string' && typeof (v as SourceRef).url === 'string';
+}
+
+/** Reference links per watch (official level page, MOUNTS, ASMC): from watchMeta, else from the watch record. */
+const REFERENCES: Record<string, SourceRef[]> = Object.fromEntries(
+  INCIDENTS.map((i) => {
+    const fromMeta = WATCH_META[i.id]?.references;
+    const fromWatch = (FIXTURES.watches ?? []).find((w) => w.id === i.id) as { references?: unknown } | undefined;
+    const refs = Array.isArray(fromMeta) ? fromMeta : Array.isArray(fromWatch?.references) ? fromWatch.references : [];
+    return [i.id, refs.filter(isSourceRef)];
+  }),
+);
+
+/** Plain-language watch rules per watch id, when the snapshot publishes them. */
+const RULES_BY_WATCH: Record<string, string[]> = (() => {
+  const out: Record<string, string[]> = {};
+  const legacy = (FIXTURES as Partial<{ rulesByWatch: unknown }>).rulesByWatch;
+  for (const i of INCIDENTS) {
+    const fromMeta = WATCH_META[i.id]?.rules;
+    const fromLegacy = legacy && typeof legacy === 'object' ? (legacy as Record<string, unknown>)[i.id] : undefined;
+    const rules = Array.isArray(fromMeta) ? fromMeta : Array.isArray(fromLegacy) ? fromLegacy : [];
+    out[i.id] = rules.filter((r): r is string => typeof r === 'string' && r.trim() !== '');
+  }
+  return out;
+})();
+
+/** Bundled official-warning snapshot, so the rail renders before any network reply (never throws). */
+const WARNINGS_SNAPSHOT: OfficialWarningsResult = (() => {
+  try {
+    return loadWarningsSnapshot();
+  } catch (err) {
+    console.error('Official warnings snapshot could not be read:', err);
+    return { warnings: [], feeds: [], gauges: [] };
+  }
+})();
+
 function reviewFor(incident: Incident, replayIndex: number): ReviewResult | null {
   try {
-    const index = incident.id === SCENARIO_INCIDENT?.id ? replayIndex : ALL_STEPS;
-    return deriveReview(visibleObservations(FIXTURES.observations, incident.id, index), incident.scenarioWindow);
+    return deriveReview(visibleObservations(FIXTURES.observations, incident.id, replayIndex), incident.scenarioWindow);
   } catch (err) {
     console.error(`Review could not be derived for ${incident.id}:`, err);
     return null;
   }
+}
+
+/** Individual hotspots behind a grouped thermal record, when the snapshot publishes them. */
+function membersFor(observationId: string): HotspotMember[] {
+  const members = (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members;
+  const list = members?.[observationId];
+  return Array.isArray(list) ? list : [];
+}
+
+/** Records per replay day for one watch area (for the timeline cells). */
+function countsByStep(incidentId: string): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const o of FIXTURES.observations) {
+    if (o.incidentId !== incidentId) continue;
+    out[o.replayStep] = (out[o.replayStep] ?? 0) + 1;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,28 +172,6 @@ function writeHashIncident(id: string | null): void {
   }
 }
 
-const SHORTCUT_EXCLUDED =
-  'input, textarea, select, pre, [contenteditable]:not([contenteditable="false"]), dialog, .region-map, ' +
-  '[role="slider"], [role="listbox"], [role="menu"], [role="grid"], [role="tablist"]';
-
-/** Shortcuts (→ next step, R reset) never fire under a dialog, while typing, in a scrollable region, or with a modifier. */
-function shortcutBlocked(e: KeyboardEvent): boolean {
-  if (e.defaultPrevented || e.repeat || e.isComposing) return true;
-  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return true;
-  if (document.querySelector('dialog[open]')) return true;
-  const target = e.target instanceof Element ? e.target : null;
-  if (!target || target === document.body || target === document.documentElement) return false;
-  if (target.closest(SHORTCUT_EXCLUDED)) return true;
-  if (target instanceof HTMLElement && target.isContentEditable) return true;
-  for (let el: Element | null = target; el && el !== document.body; el = el.parentElement) {
-    const style = window.getComputedStyle(el);
-    const scrollsY = /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight;
-    const scrollsX = /(auto|scroll)/.test(style.overflowX) && el.scrollWidth > el.clientWidth;
-    if (scrollsY || scrollsX) return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 
 export default function App() {
@@ -124,8 +180,12 @@ export default function App() {
   const [brief, setBrief] = useState<GeneratedBrief | null>(null);
   const [playing, setPlaying] = useState(false);
   const [inspectedId, setInspectedId] = useState<string | null>(null);
+  const [inspectedWarningId, setInspectedWarningId] = useState<string | null>(null);
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
+  /** The snapshot until the live load settles. */
+  const [warningsResult, setWarningsResult] = useState<OfficialWarningsResult>(WARNINGS_SNAPSHOT);
+  const [warningsLoading, setWarningsLoading] = useState(true);
   const briefSeq = useRef(0);
 
   // --- Derived state -------------------------------------------------------
@@ -152,11 +212,11 @@ export default function App() {
   const missingId = selectedIncidentId !== null && incident === null ? selectedIncidentId : null;
   const review = incident ? (reviews[incident.id] ?? null) : null;
   const volcano = useMemo(() => (incident ? findVolcano(FIXTURES.volcanoes, incident.volcanoId) : null), [incident]);
-  const isScenario = incident !== null && incident.id === SCENARIO_INCIDENT?.id;
+  const replayEnabled = incident !== null && STEPS.length > 0;
 
-  const stepPos = SCENARIO_STEPS.findIndex((s) => s.index === replayIndex);
-  const currentStep = stepPos >= 0 ? SCENARIO_STEPS[stepPos] : null;
-  const briefStep = isScenario ? currentStep : null;
+  const stepPos = STEPS.findIndex((s) => s.index === replayIndex);
+  const currentStep = stepPos >= 0 ? STEPS[stepPos] : null;
+  const dayCounts = useMemo(() => (incident ? countsByStep(incident.id) : null), [incident]);
 
   const inspected = useMemo(
     () => (inspectedId && review ? (review.evidence.find((e) => e.observation.id === inspectedId) ?? null) : null),
@@ -173,6 +233,52 @@ export default function App() {
       return null;
     }
   }, [incident, nea]);
+
+  const allWarnings = warningsResult.warnings;
+  /** Warnings near the selected area, or every warning (APAC-wide) when nothing is selected. */
+  const nearWarnings = useMemo<OfficialWarning[]>(() => {
+    if (!incident) return allWarnings;
+    try {
+      return warningsNear(allWarnings, incident.lat, incident.lon, NEAR_KM);
+    } catch (err) {
+      console.error('Official warnings could not be filtered by distance:', err);
+      return [];
+    }
+  }, [allWarnings, incident]);
+
+  /** Warnings with no coordinates at all (e.g. JMA tsunami areas): never "near" anything, so listed apart. */
+  const elsewhereWarnings = useMemo<OfficialWarning[]>(() => {
+    if (!incident) return [];
+    return allWarnings.filter((w) => warningDistanceKm(w, incident.lat, incident.lon) === null);
+  }, [allWarnings, incident]);
+
+  const inspectedWarning = useMemo(
+    () => (inspectedWarningId ? (allWarnings.find((w) => w.id === inspectedWarningId) ?? null) : null),
+    [inspectedWarningId, allWarnings],
+  );
+  const inspectedGauge = useMemo(
+    () => (inspectedWarning ? gaugeForWarning(inspectedWarning, warningsResult.gauges) : null),
+    [inspectedWarning, warningsResult.gauges],
+  );
+  const inspectedFeed = useMemo(
+    () => (inspectedWarning ? feedForWarning(inspectedWarning, warningsResult.feeds) : null),
+    [inspectedWarning, warningsResult.feeds],
+  );
+
+  /**
+   * The context a brief is built from: the NEA reading (when it applies), the nearby official warnings
+   * and every feed's status. A brief generated under a different key is stale (a Riau brief generated
+   * before NEA arrived would lack that section); the brief bar then asks for a fresh one.
+   */
+  const contextKey = useMemo(
+    () =>
+      [
+        drift && nea ? `nea:${nea.dataMode}:${nea.retrievedAt}` : 'nea:none',
+        `w:${nearWarnings.map((w) => w.id).join(',')}`,
+        `f:${warningsResult.feeds.map((f) => `${f.feedId}=${f.status}`).join(',')}`,
+      ].join('|'),
+    [drift, nea, nearWarnings, warningsResult.feeds],
+  );
 
   // --- Actions -------------------------------------------------------------
 
@@ -196,7 +302,7 @@ export default function App() {
 
   const nextStep = () => {
     setPlaying(false);
-    const next = SCENARIO_STEPS[stepPos + 1];
+    const next = STEPS[stepPos + 1];
     if (next) goToStep(next.index);
   };
 
@@ -205,10 +311,10 @@ export default function App() {
       setPlaying(false);
       return;
     }
-    const next = SCENARIO_STEPS[stepPos + 1];
+    const next = STEPS[stepPos + 1];
     if (!next) return;
     goToStep(next.index); // advance at once, then every PLAY_INTERVAL_MS
-    setPlaying(stepPos + 2 < SCENARIO_STEPS.length);
+    setPlaying(stepPos + 2 < STEPS.length);
   };
 
   const reset = () => {
@@ -222,20 +328,27 @@ export default function App() {
     setInspectedId(id);
   };
 
+  const openWarning = (id: string) => {
+    setPlaying(false);
+    setInspectedWarningId(id);
+  };
+
   const generateBrief = () => {
     if (!incident || !review) return;
     setPlaying(false);
     briefSeq.current += 1;
-    // A variable, not an inline literal, so the optional NEA fields compile before and after
-    // BriefingInput gains them.
-    const input: BriefingInput & { nea: typeof nea; drift: DriftAssessment | null } = {
+    const input: BriefingInput = {
       incident,
       volcano,
-      step: briefStep,
+      step: currentStep,
       review,
       issues: FIXTURES.issues,
       nea,
       drift,
+      warnings: nearWarnings,
+      warningFeeds: warningsResult.feeds,
+      dataAsOf: DATA_AS_OF,
+      stepCount: STEPS.length || undefined,
     };
     let text: string;
     try {
@@ -243,12 +356,12 @@ export default function App() {
     } catch (err) {
       text = `ASEAN WATCH - INCIDENT BRIEF\n\nThe brief could not be generated: ${err instanceof Error ? err.message : String(err)}\n`;
     }
-    setBrief({ text, seq: briefSeq.current });
+    setBrief({ text, seq: briefSeq.current, contextKey });
   };
 
   const downloadBrief = () => {
     if (!brief || !incident) return;
-    downloadText(brief.text, briefingFilename(incident, briefStep));
+    downloadText(brief.text, briefingFilename(incident, currentStep));
   };
 
   // --- Effects -------------------------------------------------------------
@@ -257,20 +370,20 @@ export default function App() {
   useEffect(() => {
     if (!playing) return;
     const timer = window.setTimeout(() => {
-      const pos = SCENARIO_STEPS.findIndex((s) => s.index === replayIndex);
-      const next = SCENARIO_STEPS[pos + 1];
+      const pos = STEPS.findIndex((s) => s.index === replayIndex);
+      const next = STEPS[pos + 1];
       if (!next) {
         setPlaying(false);
         return;
       }
       setReplayIndex(next.index);
       setBrief(null);
-      if (pos + 2 >= SCENARIO_STEPS.length) setPlaying(false);
+      if (pos + 2 >= STEPS.length) setPlaying(false);
     }, PLAY_INTERVAL_MS);
     return () => window.clearTimeout(timer);
   }, [playing, replayIndex]);
 
-  // Hash changes (typed or pasted links) select the same way the map and queue do.
+  // Hash changes (typed or pasted links) select the same way the map and rail do.
   useEffect(() => {
     const onHashChange = () => {
       setSelectedIncidentId(readHashIncident());
@@ -281,6 +394,20 @@ export default function App() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+
+  // Esc with no dialog open clears the selection (back to the APAC-wide view). Dialogs handle their own Esc.
+  useEffect(() => {
+    if (selectedIncidentId === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (document.querySelector('dialog[open]')) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      selectIncident(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedIncidentId, selectIncident]);
 
   // NEA Singapore context: loaded once; loadNeaContext never throws and falls back to a snapshot.
   useEffect(() => {
@@ -297,51 +424,55 @@ export default function App() {
     };
   }, []);
 
-  // Keyboard shortcuts for the scenario: → next step, R reset (see shortcutBlocked for the guards).
+  // Official warnings: loaded once, live first with per-feed snapshot fallback; never throws.
   useEffect(() => {
-    if (!isScenario) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (shortcutBlocked(e)) return;
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        nextStep();
-      } else if (e.key === 'r' || e.key === 'R') {
-        e.preventDefault();
-        reset();
-      }
+    let alive = true;
+    loadOfficialWarnings()
+      .then((result) => {
+        if (!alive) return;
+        setWarningsResult(result);
+        setWarningsLoading(false);
+      })
+      .catch((err: unknown) => {
+        console.error('Official warnings could not be loaded:', err);
+        if (alive) setWarningsLoading(false);
+      });
+    return () => {
+      alive = false;
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  });
+  }, []);
 
-  // The state badge and the newest records sit at the top of the right column: show them after a change.
-  const rightScrollRef = useRef<HTMLDivElement>(null);
+  // The state badge and the newest records sit at the top of the review column: show them after a change.
+  const reviewScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    rightScrollRef.current?.scrollTo({ top: 0 });
+    reviewScrollRef.current?.scrollTo({ top: 0 });
   }, [replayIndex, selectedIncidentId]);
 
   // --- Render --------------------------------------------------------------
 
-  const scenarioName = SCENARIO_INCIDENT ? (PLACE_NAMES[SCENARIO_INCIDENT.id] ?? SCENARIO_INCIDENT.title) : null;
-  const disabledNote = !scenarioName
-    ? 'No replay scenario is configured.'
-    : isScenario
-      ? null
+  const firstName = FIRST_INCIDENT ? (PLACE_NAMES[FIRST_INCIDENT.id] ?? FIRST_INCIDENT.title) : null;
+  const disabledNote =
+    STEPS.length === 0
+      ? 'No replay days are loaded.'
       : incident
-        ? `Replay applies to ${scenarioName}.`
-        : `Select ${scenarioName} to replay.`;
+        ? null
+        : `Select a watch area to replay the last ${STEPS.length} days.`;
 
   const contextLabel =
-    isScenario && currentStep
-      ? `${currentStep.label}, step ${stepPos + 1} of ${SCENARIO_STEPS.length}`
-      : incident
-        ? 'static example'
-        : null;
+    incident && currentStep ? `${currentStep.label}, step ${stepPos + 1} of ${STEPS.length}` : incident ? 'all records' : null;
 
   const neaLoading = neaResult === null && incident !== null && isNearSingapore(incident.lat, incident.lon);
+  const selectedName = incident ? (PLACE_NAMES[incident.id] ?? incident.title) : null;
 
-  // Spread so the optional nea/drift props compile before and after RegionMap declares them.
-  const mapProps: RegionMapProps & { nea: typeof nea; drift: DriftAssessment | null } = {
+  // Spread so the optional context props compile before and after RegionMap declares them.
+  const mapProps: RegionMapProps & {
+    nea: typeof nea;
+    drift: DriftAssessment | null;
+    warnings: OfficialWarning[];
+    gauges: OfficialWarningsResult['gauges'];
+    selectedWarningId: string | null;
+    onSelectWarning: (id: string) => void;
+  } = {
     incidents: INCIDENTS,
     selectedId: incident?.id ?? null,
     states,
@@ -349,55 +480,63 @@ export default function App() {
     placeNames: PLACE_NAMES,
     nea,
     drift,
+    warnings: allWarnings,
+    gauges: warningsResult.gauges,
+    selectedWarningId: inspectedWarningId,
+    onSelectWarning: openWarning,
   };
 
   return (
     <div className="app">
-      <div className="topbar">
-        <AppHeader />
-        <ReplayBar
-          steps={SCENARIO_STEPS}
-          replayIndex={replayIndex}
-          enabled={isScenario}
-          playing={playing}
-          disabledNote={disabledNote}
-          onNext={nextStep}
-          onTogglePlay={togglePlay}
-          onReset={reset}
-        />
-      </div>
+      <AppHeader dataAsOf={DATA_AS_OF} allReal={ALL_REAL} />
 
       <main className="workspace">
-        <div className="col-left">
-          <section className="map-panel" aria-label="Regional map">
-            <div className="map-frame">
-              <ErrorBoundary
-                resetKey={selectedIncidentId}
-                fallback={(message) => (
-                  <div className="map-fallback" role="alert">
-                    <p>
-                      <strong>The map could not be drawn.</strong> Use the incident queue instead.
-                    </p>
-                    <p className="muted small">{message}</p>
-                  </div>
-                )}
-              >
-                <RegionMap {...mapProps} />
-              </ErrorBoundary>
-            </div>
-          </section>
+        <aside className="rail" aria-label="Watch areas and official warnings">
           <IncidentQueue
             incidents={INCIDENTS}
             reviews={reviews}
             selectedId={incident?.id ?? null}
-            scenarioIncidentId={SCENARIO_INCIDENT?.id ?? null}
+            scenarioIncidentId={null}
             onSelect={selectIncident}
+            placeNames={PLACE_NAMES}
+            onClearSelection={() => selectIncident(null)}
           />
+          <ErrorBoundary resetKey={selectedIncidentId} fallback={(message) => <PanelError message={message} />}>
+            <OfficialWarningsPanel
+              warnings={nearWarnings}
+              gauges={warningsResult.gauges}
+              feeds={warningsResult.feeds}
+              nearName={selectedName}
+              elsewhere={elsewhereWarnings}
+              onShowAll={() => selectIncident(null)}
+              loading={warningsLoading}
+              selectedWarningId={inspectedWarningId}
+              onInspect={openWarning}
+            />
+          </ErrorBoundary>
           <DataCheckNotice issues={FIXTURES.issues} duplicatesIgnored={FIXTURES.duplicatesIgnored} loadError={LOAD_ERROR} />
-        </div>
+        </aside>
 
-        <div className="col-right">
-          <div className="right-scroll" ref={rightScrollRef}>
+        <section className="map-panel" aria-label="Regional map">
+          <div className="map-frame">
+            <ErrorBoundary
+              resetKey={selectedIncidentId}
+              fallback={(message) => (
+                <div className="map-fallback" role="alert">
+                  <p>
+                    <strong>The map could not be drawn.</strong> Use the watch-area list instead.
+                  </p>
+                  <p className="muted small">{message}</p>
+                </div>
+              )}
+            >
+              <RegionMap {...mapProps} />
+            </ErrorBoundary>
+          </div>
+        </section>
+
+        <div className="col-review">
+          <div className="right-scroll" ref={reviewScrollRef}>
             <ErrorBoundary
               resetKey={`${selectedIncidentId}|${replayIndex}`}
               fallback={(message) => <PanelError message={message} />}
@@ -407,11 +546,16 @@ export default function App() {
                 missingId={missingId}
                 review={review}
                 volcano={volcano}
-                isScenario={isScenario}
-                scenarioIncident={SCENARIO_INCIDENT}
+                isScenario={replayEnabled}
+                scenarioIncident={FIRST_INCIDENT}
+                placeName={firstName ?? undefined}
                 onSelect={selectIncident}
                 onClearSelection={() => selectIncident(null)}
                 onInspect={openInspector}
+                officialNear={nearWarnings}
+                onInspectWarning={openWarning}
+                references={incident ? REFERENCES[incident.id] : undefined}
+                watchRules={incident ? RULES_BY_WATCH[incident.id] : undefined}
                 context={
                   incident && (neaLoading || drift) ? (
                     <NeaContextCard
@@ -433,29 +577,65 @@ export default function App() {
                 incident={incident}
                 missingId={missingId}
                 review={review}
-                isScenario={isScenario}
+                isScenario={replayEnabled}
                 replayIndex={replayIndex}
                 onInspect={openInspector}
               />
               <IncidentExtras incident={incident} review={review} />
             </ErrorBoundary>
+            {ATTRIBUTIONS.length > 0 && (
+              <div className="data-attribution">
+                {ATTRIBUTIONS.filter((line) => line.length <= 120).map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+                {ATTRIBUTIONS.some((line) => line.length > 120) && (
+                  <details className="data-attribution-more">
+                    <summary>Data acknowledgements</summary>
+                    {ATTRIBUTIONS.filter((line) => line.length > 120).map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                  </details>
+                )}
+              </div>
+            )}
           </div>
           <BriefPanel
             incident={incident}
             contextLabel={contextLabel}
             brief={brief}
-            filename={incident ? briefingFilename(incident, briefStep) : null}
+            contextKey={contextKey}
+            filename={incident ? briefingFilename(incident, currentStep) : null}
             onGenerate={generateBrief}
             onDownload={downloadBrief}
           />
         </div>
       </main>
 
+      <ReplayBar
+        steps={STEPS}
+        replayIndex={replayIndex}
+        enabled={replayEnabled}
+        playing={playing}
+        disabledNote={disabledNote}
+        counts={dayCounts}
+        visibleCount={review?.observationCount ?? null}
+        onNext={nextStep}
+        onTogglePlay={togglePlay}
+        onReset={reset}
+      />
+
       <RecordInspector
         item={inspected}
         incidentTitle={incident?.title ?? null}
-        steps={SCENARIO_STEPS}
+        steps={STEPS}
+        members={inspected ? membersFor(inspected.observation.id) : []}
         onClose={() => setInspectedId(null)}
+      />
+      <WarningInspector
+        warning={inspectedWarning}
+        gauge={inspectedGauge}
+        feed={inspectedFeed}
+        onClose={() => setInspectedWarningId(null)}
       />
     </div>
   );
@@ -464,7 +644,7 @@ export default function App() {
 function PanelError({ message }: { message: string }): ReactNode {
   return (
     <p className="empty panel-error" role="alert">
-      This part could not be shown ({message}). Try another incident or Reset.
+      This part could not be shown ({message}). Try another watch area or Reset.
     </p>
   );
 }

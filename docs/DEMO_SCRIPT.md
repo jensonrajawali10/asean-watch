@@ -42,7 +42,7 @@ Presenter notes:
 - [ ] Open MAGMA's public level list (https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas) in a browser. The app's MAGMA records were recorded at 2026-10-13 06:52 UTC and are not updated by any refresh script. If a level has changed, say so during the demo.
 - [ ] Network-off check: turn Wi-Fi off and reload. The app should load, the feeds should fall back to HISTORICAL snapshots, the feed footer should show snapshot or unavailable status, no screen should say "no warnings" or "all clear", and the full path (select, Next step, Play, Why this state?, inspector, Generate brief, Download .txt, Reset) should complete without errors.
 - [ ] Decide whether to present online or offline, and present in the mode you rehearsed. Offline guarantees that the warnings match rehearsal. Online may show LIVE items that differ.
-- [ ] Download the day-7 Merapi brief in advance (`asean-watch-brief_watch-merapi_step-6.txt`) and open it once in a text editor. Keep the editor ready.
+- [ ] Download the day-7 Merapi brief in advance (`asean-watch-brief_watch-merapi_day-7.txt`) and open it once in a text editor. Keep the editor ready.
 - [ ] Record the backup video after the refresh, so it matches today's data. Play it once offline.
 
 **At the venue:**

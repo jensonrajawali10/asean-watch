@@ -265,7 +265,7 @@ describe('replay over the real last 7 days', () => {
     for (const w of fx.watches) {
       for (const s of fx.replaySteps) {
         const r = reviewAt(w, s.index);
-        expect(r.evidence.filter((e) => e.reason === 'Outside scenario window, not counted')).toEqual([]);
+        expect(r.evidence.filter((e) => e.reason === 'Outside watch window, not counted')).toEqual([]);
         const anomalyCategories = new Set(r.evidence.filter((e) => e.observation.anomaly).map((e) => e.observation.category));
         expect(r.anomalyCategories.length).toBe(anomalyCategories.size);
       }

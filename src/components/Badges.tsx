@@ -1,8 +1,10 @@
 // Text-first badges. Colour is secondary: every badge carries its meaning in words.
+// Families (docs/DESIGN.md section 3): review state, data mode, rule treatment, official (reserved),
+// impact estimate. They differ in shape, case and wording, not only in colour.
 import type { ReactNode } from 'react';
 import type { DataMode, ReviewState } from '../types';
 import { REVIEW_LABELS } from '../lib/reviewRules';
-import { modeLabel, safeHttpUrl, shortSourceName } from './format';
+import { formatUtc, modeLabel, safeHttpUrl } from './format';
 
 export function StateBadge({
   state,
@@ -11,7 +13,7 @@ export function StateBadge({
 }: {
   state: ReviewState;
   label?: string;
-  size?: 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg';
 }) {
   const known = state in REVIEW_LABELS;
   const text = label ?? (known ? REVIEW_LABELS[state] : String(state));
@@ -23,10 +25,25 @@ export function StateBadge({
   );
 }
 
-export function ModeBadge({ mode }: { mode: DataMode }) {
+/**
+ * Data mode. HISTORICAL SNAPSHOT and LIVE always carry a time when one is given; MODELLED means
+ * context from a model (never evidence). Unknown modes render their name in uppercase.
+ */
+export function ModeBadge({ mode, time, title }: { mode: DataMode | string; time?: string | null; title?: string }) {
+  const m = String(mode);
+  const text = m === 'historical' ? 'HISTORICAL SNAPSHOT' : modeLabel(m);
   return (
-    <span className={`badge badge-mode badge-mode--${mode}`} title="Data mode">
-      {modeLabel(mode)}
+    <span className={`badge badge-mode badge-mode--${m}`} title={title ?? 'Data mode'}>
+      {m === 'live' && <span className="badge-dot" aria-hidden="true" />}
+      {text}
+      {time && (
+        <>
+          {' '}
+          <time className="badge-time" dateTime={time}>
+            {formatUtc(time)}
+          </time>
+        </>
+      )}
     </span>
   );
 }
@@ -63,27 +80,26 @@ export function ExternalLink({
   );
 }
 
-/** Source badge: short "Modelled on …" name and an external link; the full name is in the title. */
+/** Source badge: the real source name and an external link to its public description page. */
 export function SourceBadge({ name, url }: { name: string; url: string }) {
   const full = name?.trim() ? name.trim() : 'Unnamed source';
-  const label = shortSourceName(full);
   if (!safeHttpUrl(url)) {
     return (
       <span className="source-badge source-badge--nolink" title={full}>
-        {label} (no link)
+        {full} (no link)
       </span>
     );
   }
   return (
     <a className="source-badge" href={safeHttpUrl(url) ?? undefined} target="_blank" rel="noopener noreferrer" title={full}>
-      {label}
+      {full}
       <span aria-hidden="true"> ↗</span>
       <span className="visually-hidden"> (source, opens in a new tab)</span>
     </a>
   );
 }
 
-/** NEA context data mode. Calm outline styles: never the red alarm colour or the simulated purple. */
+/** NEA context data mode. Calm outline styles: never the alarm colour, never the modelled violet. */
 export function NeaModeBadge({ mode }: { mode: 'live' | 'historical' }) {
   return mode === 'live' ? (
     <span className="badge badge-nea badge-nea--live">
@@ -92,5 +108,59 @@ export function NeaModeBadge({ mode }: { mode: 'live' | 'historical' }) {
     </span>
   ) : (
     <span className="badge badge-nea badge-nea--historical">HISTORICAL SNAPSHOT</span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Official warnings: reserved styles. Never used for our own review states.
+
+/** "OFFICIAL · <issuer>" eyebrow, or the aggregator form for impact estimates. */
+export function OfficialTag({ issuer, authority }: { issuer: string; authority: 'official' | 'aggregator' }) {
+  return authority === 'aggregator' ? (
+    <span className="official-tag official-tag--estimate">
+      <span className="official-word">Impact estimate</span> · <span className="official-issuer">{issuer}</span>{' '}
+      <span className="official-issuer-note">(aggregator, not a warning)</span>
+    </span>
+  ) : (
+    <span className="official-tag">
+      <span className="official-word">OFFICIAL</span> · <span className="official-issuer">{issuer}</span>
+    </span>
+  );
+}
+
+/** The issuer's verbatim level in a square chip; a reviewed English gloss follows in plain text. */
+export function OfficialLevelChip({
+  level,
+  gloss,
+  ended,
+  authority = 'official',
+}: {
+  level: string;
+  gloss?: string | null;
+  ended?: boolean;
+  authority?: 'official' | 'aggregator';
+}) {
+  const text = level?.trim() || 'Level not stated';
+  return (
+    <span className="official-level">
+      <span
+        className={`official-chip${ended ? ' official-chip--ended' : ''}${authority === 'aggregator' ? ' official-chip--estimate' : ''}`}
+        lang={undefined}
+      >
+        {text}
+      </span>
+      {gloss?.trim() && <span className="official-gloss">{gloss.trim()}</span>}
+    </span>
+  );
+}
+
+/** EXPIRED with the issuer's expiry time when one was given; ENDED when the issuer ended or cancelled it. */
+export function EndedChip({ at }: { at: string | null }) {
+  return at ? (
+    <span className="official-chip official-chip--ended">
+      EXPIRED <time dateTime={at}>{formatUtc(at)}</time>
+    </span>
+  ) : (
+    <span className="official-chip official-chip--ended">ENDED</span>
   );
 }

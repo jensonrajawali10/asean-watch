@@ -554,7 +554,7 @@ function analystQuestions(input: BriefingInput): string[] {
   }
   const outside = evidence.filter((e) => e.reason === REASONS.outsideWindow);
   if (outside.length > 0) {
-    questions.push(`${idsOf(outside)} fall outside the scenario window. Should they be reviewed separately?`);
+    questions.push(`${idsOf(outside)} fall outside the watch window. Should they be reviewed separately?`);
   }
   if (issues.length > 0) {
     questions.push(
@@ -644,10 +644,10 @@ function safeSegment(text: string, fallback: string): string {
   return cleaned === '' ? fallback : cleaned;
 }
 
-/** e.g. "asean-watch-brief_inc-merapi-demo_step-2.txt" */
+/** e.g. "asean-watch-brief_watch-merapi_day-5.txt" (day is 1-based, matching "Step 5 of 7" in the UI) */
 export function briefingFilename(incident: Incident, step: ReplayStep | null): string {
   const s = effectiveStep(incident, step);
-  const stepPart = s && Number.isInteger(s.index) && s.index >= 0 ? `step-${s.index}` : 'static';
+  const stepPart = s && Number.isInteger(s.index) && s.index >= 0 ? `day-${s.index + 1}` : 'static';
   return `asean-watch-brief_${safeSegment(incident.id, 'incident')}_${stepPart}.txt`;
 }
 

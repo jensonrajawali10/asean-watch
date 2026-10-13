@@ -97,7 +97,7 @@ describe('deriveReview state transitions', () => {
     expect(r.anomalyCategories).toEqual([]);
     const item = r.evidence.find((e) => e.observation.id === 't-old');
     expect(item?.counted).toBe(false);
-    expect(item?.reason).toBe('Outside scenario window, not counted');
+    expect(item?.reason).toBe('Outside watch window, not counted');
     expect(r.observationCount).toBe(2);
   });
 

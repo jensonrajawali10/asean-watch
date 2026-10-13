@@ -1,12 +1,16 @@
 // Regional map: locally bundled Natural Earth boundaries (data/region.geojson), drawn as
-// pure SVG with d3-geo. No tiles and no network requests. Incident markers, labels, the
-// location callout, the legend and the zoomed inset are HTML overlays positioned in viewBox
-// percentages, so text and hit areas keep a fixed pixel size at any container width.
+// pure SVG with d3-geo. No tiles and no network requests. Watch-area markers, their name tags,
+// the selected-area callout, official warning and water-level gauge markers, the legend, the
+// layers control and the zoomed inset are HTML overlays positioned in viewBox percentages, so
+// text and hit areas keep a fixed pixel size at any container width.
 //
-// Overlay text is laid out for a ~700×420 container (1366×768 windowed browser). Below
-// 600 px container width, CSS container queries switch to a compact arrangement.
-import { useId, useMemo } from 'react';
-import type { CSSProperties, ReactElement } from 'react';
+// Overlay placement (marker declutter, tags, callout, country labels) runs a small collision
+// model in stage pixels. The stage is measured with a ResizeObserver, so the model follows the
+// real map size (about 570×365 inside the 1366 layout, 531×340 at 1024, 355×227 at 375); before
+// the first measurement it assumes the historical 656×420 stage. Below 600 px container width a
+// compact arrangement applies (name-only tags, compact callout, layers card bottom-left).
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactElement } from 'react';
 import { geoBounds, geoGraticule, geoMercator, geoPath } from 'd3-geo';
 import type { GeoProjection } from 'd3-geo';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
@@ -16,9 +20,11 @@ import type {
   HazardType,
   Incident,
   NeaContext,
+  OfficialWarning,
   ReviewLabel,
   ReviewState,
 } from '../types';
+import type { GaugeReading } from '../lib/warnings';
 import './RegionMap.css';
 
 export interface RegionMapProps {
@@ -38,6 +44,20 @@ export interface RegionMapProps {
   placeNames?: Record<string, string>;
   /** Optional extra class on the root element. */
   className?: string;
+  /**
+   * Official warnings relayed verbatim. Every warning with a `location` is drawn: official ones
+   * as diamonds (dashed when ended), aggregator impact estimates as hollow dashed circles.
+   */
+  warnings?: OfficialWarning[] | null;
+  /** The warning open in the inspector; its marker gets the static select ring. */
+  selectedWarningId?: string | null;
+  onSelectWarning?: (id: string) => void;
+  /**
+   * Water-level gauges. Drawn as squares only when the reading is at or above the issuer's lowest
+   * threshold (or, without thresholds, when the issuer gives a situation and a drawn warning cites
+   * the gauge), so routine gauges never clutter the map.
+   */
+  gauges?: GaugeReading[] | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -65,15 +85,19 @@ interface Rect {
   w: number;
   h: number;
 }
+interface Size {
+  w: number;
+  h: number;
+}
 
 /** Fixed frame. scripts/build-region.mjs mirrors these numbers to choose context countries. */
 const VIEW_W = 1000;
 const VIEW_H = 640;
 const VIEW_PAD = 28;
-/** Stage pixels per viewBox unit in a ~700×420 container; used to estimate label collisions. */
-const REF_PX = 0.656;
-const REF_W = VIEW_W * REF_PX;
-const REF_H = VIEW_H * REF_PX;
+/** Stage pixels per viewBox unit before the first measurement (the historical ~656×420 stage). */
+const FALLBACK_PX = 0.656;
+/** Container width at or below which the compact arrangement applies (mirrors the CSS container query). */
+const NARROW_MAX = 520;
 
 /** NEA reference point for Singapore (also used for the main-map dot). */
 const SINGAPORE: LonLat = [103.8198, 1.3521];
@@ -89,6 +113,9 @@ const NEA_PAD = 8;
 const DRIFT_LENGTH_DEG = 1.0;
 const DRIFT_HALF_ANGLE_DEG = 15;
 const WIND_HALF_LENGTH_DEG = 0.32;
+
+const MAX_WARNING_MARKERS = 60;
+const MAX_GAUGE_MARKERS = 40;
 
 interface CountryShape {
   key: string;
@@ -273,9 +300,9 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 /** Greedy label placement: try 8 directions around the anchor and keep the least-overlapping box. */
 function placeBox(
   anchor: Point,
-  size: { w: number; h: number },
+  size: Size,
   gap: number,
-  bounds: { w: number; h: number },
+  bounds: Size,
   obstacles: { points: Point[]; rects: Rect[] },
   axis: Point | null,
 ): Rect {
@@ -309,8 +336,10 @@ interface NeaDrawing {
   driftLabel: Rect | null;
 }
 
-const CHIP_SIZE = { w: 170, h: 40 };
-const DRIFT_LABEL_SIZE = { w: 150, h: 38 };
+/** Inset units. At the 1366 layout the NEA inset is about 221 px for 300 units, so the PSI chip
+    ("Singapore 24-hr PSI 121–172 · Unhealthy (NEA)", 12 px) wraps to two lines in 215 units. */
+const CHIP_SIZE = { w: 215, h: 54 };
+const DRIFT_LABEL_SIZE = { w: 160, h: 46 };
 
 function drawNea(view: InsetView, downwindDeg: number | null): NeaDrawing | null {
   const sg = view.singapore;
@@ -438,6 +467,10 @@ function formatUtc(iso: string): string {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
 }
 
+function formatValue(value: number): string {
+  return Number.isFinite(value) ? String(Number(value.toFixed(2))) : String(value);
+}
+
 function psiChipText(nea: NeaContext): string | null {
   if (!nea.haze) return null;
   const values = Object.values(nea.haze.psi24h).filter((v) => Number.isFinite(v));
@@ -454,10 +487,17 @@ function windLine(nea: NeaContext): string {
   return `${label}${variable}`;
 }
 
+/** BCP 47 tag for an issuer's verbatim text, so screen readers switch voice; undefined when unknown. */
+function issuerLang(issuer: string): string | undefined {
+  if (/thaiwater|hydro-informatics/i.test(issuer)) return 'th';
+  if (/dsda|dinas|magma|pvmbg|bmkg/i.test(issuer)) return 'id';
+  return undefined;
+}
+
 const pct = (value: number, total: number) => `${((value / total) * 100).toFixed(3)}%`;
 
 // ---------------------------------------------------------------------------------------------
-// Marker symbol (shared by markers, inset and legend), drawn in a 32×32 box
+// Marker symbols (shared by markers, inset and legend)
 
 const GLYPHS: Record<HazardType, () => ReactElement> = {
   volcano: () => (
@@ -482,6 +522,7 @@ const GLYPHS: Record<HazardType, () => ReactElement> = {
   ),
 };
 
+/** Round watch-area symbol in a 32×32 box: ring in the state colour, hazard glyph, optional "!" disc. */
 function MarkerSymbol({
   hazard,
   state,
@@ -512,6 +553,35 @@ function MarkerSymbol({
   );
 }
 
+type OfficialKind = 'official' | 'ended' | 'estimate' | 'gauge';
+
+/**
+ * Reserved official-style symbols in a 20×20 box. Distinct from watch areas by shape alone:
+ * diamond = official warning (dashed when ended), hollow dashed circle = aggregator impact
+ * estimate, square = water-level gauge.
+ */
+function OfficialSymbol({ kind, selected = false }: { kind: OfficialKind; selected?: boolean }) {
+  return (
+    <>
+      {selected && <circle className="region-map__select-ring" cx="10" cy="10" r="9" />}
+      {kind === 'estimate' ? (
+        <circle className="region-map__wcircle" cx="10" cy="10" r="4.5" />
+      ) : kind === 'gauge' ? (
+        <rect className="region-map__gsquare" x="5" y="5" width="10" height="10" />
+      ) : (
+        <rect
+          className={`region-map__wdiamond${kind === 'ended' ? ' is-ended' : ''}`}
+          x="4"
+          y="4"
+          width="12"
+          height="12"
+          transform="rotate(45 10 10)"
+        />
+      )}
+    </>
+  );
+}
+
 function NeaSwatch({ kind, variable = false }: { kind: 'wind' | 'drift' | 'both'; variable?: boolean }) {
   return (
     <svg className="region-map__nea-swatch" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
@@ -529,14 +599,11 @@ function NeaSwatch({ kind, variable = false }: { kind: 'wind' | 'drift' | 'both'
 const stateClass = (state: ReviewState | undefined) => `is-${state ?? 'unknown'}`;
 
 // ---------------------------------------------------------------------------------------------
-// Overview layout: always-visible marker tags and country labels without collisions
-
-type TagSide = 'right' | 'left' | 'below' | 'above';
-type Side = 'is-left' | 'is-right';
-type Dir = 'is-up' | 'is-down';
+// Overlay layout model (stage pixels)
 
 interface PlacedIncident {
   incident: Incident;
+  /** True position in viewBox units. */
   x: number;
   y: number;
   state: ReviewState | undefined;
@@ -544,43 +611,416 @@ interface PlacedIncident {
   name: string;
 }
 
-/** Overlay zones in stage reference pixels at ~700×420 (legend top-left, inset top-right). */
-const LEGEND_ZONE: Rect = { x: 0, y: 0, w: 150, h: 150 };
-const insetZone = (nea: boolean): Rect =>
-  nea ? { x: REF_W - 320, y: 0, w: 320, h: 315 } : { x: REF_W - 215, y: 0, w: 215, h: 200 };
-
-function calloutZone(p: PlacedIncident, side: Side, dir: Dir): Rect {
-  const mx = p.x * REF_PX;
-  const my = p.y * REF_PX;
-  const w = side === 'is-left' ? Math.min(240, mx - 34) : 240;
-  const h = 105;
-  return {
-    x: side === 'is-left' ? mx - 24 - w : mx + 24,
-    y: dir === 'is-up' ? my + 12 - h : my - 12,
-    w,
-    h,
-  };
+interface PlacedWarning {
+  warning: OfficialWarning;
+  x: number;
+  y: number;
 }
 
-function tagRect(p: PlacedIncident, side: TagSide, w: number): Rect {
-  const mx = p.x * REF_PX;
-  const my = p.y * REF_PX;
-  const h = 22;
-  switch (side) {
+interface PlacedGauge {
+  gauge: GaugeReading;
+  x: number;
+  y: number;
+  /** Reading minus the lowest threshold; null when the issuer gives no thresholds. */
+  excess: number | null;
+}
+
+/** Measured geometry of the stage and the chrome cards, all in stage pixels. */
+interface StageGeom {
+  /** Stage pixels per viewBox unit. */
+  px: number;
+  /** The visible container; its origin is negative when the stage is letterboxed inside it. */
+  frame: Rect;
+  /** Legend, layers card, inset column and attribution, as rendered. */
+  chrome: Rect[];
+  /** The selected-area callout, as rendered. */
+  callout: Rect | null;
+  /** Container width <= NARROW_MAX: compact arrangement. */
+  narrow: boolean;
+}
+
+/** Before the first measurement: the historical stage with estimated chrome boxes. */
+function fallbackGeom(hasSelection: boolean, neaActive: boolean, insetAtBottom: boolean): StageGeom {
+  const px = FALLBACK_PX;
+  const w = VIEW_W * px;
+  const h = VIEW_H * px;
+  const chrome: Rect[] = [{ x: 10, y: 10, w: 300, h: 170 }];
+  if (hasSelection) {
+    const side: Rect = neaActive ? { x: w - 330, y: 10, w: 320, h: 300 } : { x: w - 225, y: 10, w: 215, h: 200 };
+    chrome.push(insetAtBottom ? { ...side, y: h - side.h - 30 } : side);
+  }
+  return { px, frame: { x: 0, y: 0, w, h }, chrome, callout: null, narrow: false };
+}
+
+const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
+const rectEq = (a: Rect, b: Rect) => near(a.x, b.x) && near(a.y, b.y) && near(a.w, b.w) && near(a.h, b.h);
+
+function geomEqual(a: StageGeom | null, b: StageGeom): boolean {
+  if (!a) return false;
+  if (Math.abs(a.px - b.px) > 0.0005 || a.narrow !== b.narrow || !rectEq(a.frame, b.frame)) return false;
+  if (a.chrome.length !== b.chrome.length || a.chrome.some((r, i) => !rectEq(r, b.chrome[i]))) return false;
+  if ((a.callout === null) !== (b.callout === null)) return false;
+  return a.callout === null || b.callout === null || rectEq(a.callout, b.callout);
+}
+
+/** Rough text width for Segoe UI / system sans: mixed-case text averages about 0.52 em (0.56 em at weight 600). */
+function textWidth(text: string, fontPx: number, semibold = false): number {
+  return text.length * fontPx * (semibold ? 0.56 : 0.52);
+}
+
+const box = (cx: number, cy: number, r: number): Rect => ({ x: cx - r, y: cy - r, w: 2 * r, h: 2 * r });
+
+interface Obstacles {
+  frame: Rect;
+  /** Chrome cards and the callout: weight 2. */
+  chrome: Rect[];
+  /** Watch-area marker boxes (own marker excluded): weight 3. */
+  markers: Rect[];
+  /** Small fixed marks (Singapore dot, leader dots, warning and gauge symbols): weight 2. */
+  points: Rect[];
+  /** Tags already placed: weight 3. */
+  tags: Rect[];
+  /** Movable boxes (provisional tags while placing the callout): weight 0.1. */
+  soft?: Rect[];
+  /** Weight of a marker overlap; the callout uses 5 so it never prefers a marker over a tag. */
+  markerWeight?: number;
+}
+
+function outOfFrame(r: Rect, frame: Rect): number {
+  return r.w * r.h - overlapArea(r, frame);
+}
+
+function scoreRect(r: Rect, o: Obstacles, ownMarker: number): number {
+  const mw = o.markerWeight ?? 3;
+  let s = outOfFrame(r, o.frame) * 3;
+  for (const c of o.chrome) s += overlapArea(r, c) * 2;
+  o.markers.forEach((m, i) => {
+    if (i !== ownMarker) s += overlapArea(r, m) * mw;
+  });
+  for (const p of o.points) s += overlapArea(r, p) * 2;
+  for (const t of o.tags) s += overlapArea(r, t) * 3;
+  if (o.soft) for (const t of o.soft) s += overlapArea(r, t) * 0.1;
+  return s;
+}
+
+/** Minimum centre distance between two watch-area symbols so each 36 px button stays clickable. */
+const MIN_MARKER_DISTANCE = 40;
+
+/**
+ * Push overlapping markers apart along the line between them (stage px). The selected marker
+ * stays on its true position; the others move. A leader line shows each true position.
+ */
+function declutter(points: Point[], anchored: number): Point[] {
+  const out = points.map((p): Point => [p[0], p[1]]);
+  for (let iter = 0; iter < 16; iter++) {
+    let moved = false;
+    for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        let dx = out[j][0] - out[i][0];
+        let dy = out[j][1] - out[i][1];
+        let d = Math.hypot(dx, dy);
+        if (d >= MIN_MARKER_DISTANCE) continue;
+        if (d < 0.01) {
+          dx = 1;
+          dy = 0;
+          d = 1;
+        }
+        const push = (MIN_MARKER_DISTANCE - d) / d;
+        const wi = i === anchored ? 0 : j === anchored ? 1 : 0.5;
+        const wj = 1 - wi;
+        out[i] = [out[i][0] - dx * push * wi, out[i][1] - dy * push * wi];
+        out[j] = [out[j][0] + dx * push * wj, out[j][1] + dy * push * wj];
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return out;
+}
+
+type TagPos =
+  | 'right'
+  | 'left'
+  | 'below'
+  | 'above'
+  | 'below-right'
+  | 'above-right'
+  | 'below-left'
+  | 'above-left';
+const TAG_POSITIONS: TagPos[] = [
+  'right',
+  'left',
+  'below',
+  'above',
+  'below-right',
+  'above-right',
+  'below-left',
+  'above-left',
+];
+/** Marker centre to tag edge for the four cardinal positions (ring radius 16 + 4), and the diagonal tuck. */
+const TAG_GAP = 20;
+const TAG_DIAG = 12;
+/** Cost of dropping the state text from a tag (px², against overlap areas). */
+const SHORT_PENALTY = 60;
+
+/** Where a tag of `size` sits for a marker centred at (mx, my). Mirrors the .region-map__tag.is-* rules. */
+function tagRectAt(mx: number, my: number, pos: TagPos, size: Size): Rect {
+  const { w, h } = size;
+  switch (pos) {
     case 'right':
-      return { x: mx + 20, y: my - h / 2, w, h };
+      return { x: mx + TAG_GAP, y: my - h / 2, w, h };
     case 'left':
-      return { x: mx - 20 - w, y: my - h / 2, w, h };
+      return { x: mx - TAG_GAP - w, y: my - h / 2, w, h };
     case 'below':
-      return { x: mx - w / 2, y: my + 20, w, h };
+      return { x: mx - w / 2, y: my + TAG_GAP, w, h };
     case 'above':
-      return { x: mx - w / 2, y: my - 20 - h, w, h };
+      return { x: mx - w / 2, y: my - TAG_GAP - h, w, h };
+    case 'below-right':
+      return { x: mx + TAG_DIAG, y: my + TAG_DIAG, w, h };
+    case 'above-right':
+      return { x: mx + TAG_DIAG, y: my - TAG_DIAG - h, w, h };
+    case 'below-left':
+      return { x: mx - TAG_DIAG - w, y: my + TAG_DIAG, w, h };
+    case 'above-left':
+      return { x: mx - TAG_DIAG - w, y: my - TAG_DIAG - h, w, h };
   }
 }
 
-function outOfFrame(r: Rect): number {
-  const inside = overlapArea(r, { x: 0, y: 0, w: REF_W, h: REF_H });
-  return r.w * r.h - inside;
+function tagSize(p: PlacedIncident, fontPx: number, short: boolean): Size {
+  const text = textWidth(p.name, fontPx, true) + (short ? 0 : textWidth(` · ${p.stateLabel}`, fontPx));
+  return { w: text + 14, h: Math.round(fontPx * 1.4) + 4 };
+}
+
+interface TagChoice {
+  pos: TagPos;
+  short: boolean;
+  rect: Rect;
+}
+
+function chooseTag(
+  mx: number,
+  my: number,
+  ownMarker: number,
+  variants: { short: boolean; size: Size }[],
+  obstacles: Obstacles,
+): TagChoice {
+  let best: TagChoice | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const { short, size } of variants) {
+    TAG_POSITIONS.forEach((pos, order) => {
+      const rect = tagRectAt(mx, my, pos, size);
+      const score = scoreRect(rect, obstacles, ownMarker) + order * 0.5 + (short ? SHORT_PENALTY : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { pos, short, rect };
+      }
+    });
+  }
+  return best ?? { pos: 'right', short: false, rect: tagRectAt(mx, my, 'right', variants[0].size) };
+}
+
+type HAnchor = 'left' | 'right' | 'center';
+type VAnchor = 'top' | 'bottom' | 'middle';
+
+interface CalloutChoice {
+  rect: Rect;
+  hx: HAnchor;
+  hy: VAnchor;
+  /** Constrain the box width so the text wraps as modelled. */
+  maxWidth: number | null;
+  /** Show the location text after the name (dropped when the box is squeezed). */
+  withRest: boolean;
+}
+
+/** Anchor-based CSS position so the rendered box hugs the marker whatever its real text width. */
+function anchorStyle(choice: CalloutChoice, px: number, mx: number, my: number): CSSProperties {
+  const { rect, hx, hy } = choice;
+  const style: CSSProperties = {};
+  if (choice.maxWidth !== null) style.maxWidth = `${Math.round(choice.maxWidth)}px`;
+  if (hx === 'left') style.left = pct(rect.x / px, VIEW_W);
+  else if (hx === 'right') style.right = pct(VIEW_W - (rect.x + rect.w) / px, VIEW_W);
+  else style.left = pct(mx / px, VIEW_W);
+  if (hy === 'top') style.top = pct(rect.y / px, VIEW_H);
+  else if (hy === 'bottom') style.bottom = pct(VIEW_H - (rect.y + rect.h) / px, VIEW_H);
+  else style.top = pct(my / px, VIEW_H);
+  if (hx === 'center' || hy === 'middle') {
+    style.transform = `translate(${hx === 'center' ? '-50%' : '0'}, ${hy === 'middle' ? '-50%' : '0'})`;
+  }
+  return style;
+}
+
+const CALLOUT_MAX_W = 256;
+/** Horizontal padding (8 + 8) plus the 3 px rail. */
+const CALLOUT_PAD_X = 19;
+const CALLOUT_GAP = 18;
+const CALLOUT_MIN_W = 110;
+/** Below this width the location text is dropped from the title (the review column has it). */
+const CALLOUT_REST_MIN_W = 180;
+
+type CalloutPos =
+  | 'right-down'
+  | 'right-up'
+  | 'left-down'
+  | 'left-up'
+  | 'below-left'
+  | 'below-right'
+  | 'above-left'
+  | 'above-right'
+  | 'below'
+  | 'above';
+const CALLOUT_POSITIONS: CalloutPos[] = [
+  'right-down',
+  'right-up',
+  'left-down',
+  'left-up',
+  'below-left',
+  'below-right',
+  'above-left',
+  'above-right',
+  'below',
+  'above',
+];
+
+interface CalloutText {
+  name: string;
+  rest: string;
+  coords: string;
+  stateLabel: string;
+}
+
+function calloutSize(t: CalloutText, avail: number): { w: number; h: number; withRest: boolean; natural: number } | null {
+  const nameW = textWidth(t.name, 14, true);
+  const restW = t.rest ? textWidth(` · ${t.rest}`, 14) : 0;
+  const coordsW = t.coords.length * 7.8;
+  const chipW = textWidth(t.stateLabel, 13, true) + 12;
+  const natural = Math.max(nameW + restW, coordsW, chipW) + CALLOUT_PAD_X;
+  const w = Math.min(CALLOUT_MAX_W, natural, avail);
+  if (w < CALLOUT_MIN_W) return null;
+  const withRest = t.rest !== '' && w >= CALLOUT_REST_MIN_W;
+  const inner = w - CALLOUT_PAD_X;
+  const lines = Math.ceil((nameW + (withRest ? restW : 0)) / inner) + Math.ceil(coordsW / inner);
+  return { w, h: 41 + 18 * lines, withRest, natural };
+}
+
+/** Wide callout: ten candidate positions around the selected marker, least-overlapping wins. */
+function placeCallout(
+  mx: number,
+  my: number,
+  ownMarker: number,
+  text: CalloutText,
+  obstacles: Obstacles,
+): CalloutChoice | null {
+  const { frame } = obstacles;
+  const frameRight = frame.x + frame.w;
+  // Chrome to the right or left of the marker within a generous vertical band limits the width
+  // of side placements, so a tall inset column squeezes the callout instead of overlapping it.
+  const band = (c: Rect) => c.y < my + 170 && c.y + c.h > my - 170;
+  const rightLimit = Math.min(frameRight, ...obstacles.chrome.filter((c) => band(c) && c.x > mx).map((c) => c.x));
+  const leftLimit = Math.max(frame.x, ...obstacles.chrome.filter((c) => band(c) && c.x + c.w < mx).map((c) => c.x + c.w));
+  const clampX = (x: number, w: number) => clamp(x, frame.x + 4, frameRight - w - 4);
+
+  // A chrome card whose edge sits just beyond the usual 22 px gap (the legend column next to
+  // Sumatra, say) pushes the side placements past it, up to 30 px further from the marker.
+  const rightStarts = [mx + CALLOUT_GAP];
+  const leftEnds = [mx - CALLOUT_GAP];
+  for (const c of obstacles.chrome.filter(band)) {
+    const edgeR = c.x + c.w + 4;
+    if (edgeR > rightStarts[0] && edgeR - rightStarts[0] <= 30) rightStarts.push(edgeR);
+    const edgeL = c.x - 4;
+    if (edgeL < leftEnds[0] && leftEnds[0] - edgeL <= 30) leftEnds.push(edgeL);
+  }
+
+  let best: CalloutChoice | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  CALLOUT_POSITIONS.forEach((pos, order) => {
+    const right = pos.startsWith('right');
+    const left = pos.startsWith('left');
+    const variants: { avail: number; edge: number }[] = right
+      ? rightStarts.flatMap((x0) => [frameRight, rightLimit].map((lim) => ({ avail: lim - x0 - 4, edge: x0 })))
+      : left
+        ? leftEnds.flatMap((x1) => [frame.x, leftLimit].map((lim) => ({ avail: x1 - lim - 4, edge: x1 })))
+        : [{ avail: frame.w - 8, edge: mx }];
+    for (const { avail, edge } of variants) {
+      const size = calloutSize(text, avail);
+      if (!size) continue;
+      const { w, h } = size;
+      let rect: Rect;
+      let hx: HAnchor = 'left';
+      let hy: VAnchor = 'top';
+      switch (pos) {
+        case 'right-down':
+          rect = { x: edge, y: my - 12, w, h };
+          break;
+        case 'right-up':
+          rect = { x: edge, y: my + 12 - h, w, h };
+          hy = 'bottom';
+          break;
+        case 'left-down':
+          rect = { x: edge - w, y: my - 12, w, h };
+          hx = 'right';
+          break;
+        case 'left-up':
+          rect = { x: edge - w, y: my + 12 - h, w, h };
+          hx = 'right';
+          hy = 'bottom';
+          break;
+        case 'below-left':
+          rect = { x: clampX(mx + 18 - w, w), y: my + 24, w, h };
+          break;
+        case 'below-right':
+          rect = { x: clampX(mx - 18, w), y: my + 24, w, h };
+          break;
+        case 'above-left':
+          rect = { x: clampX(mx + 18 - w, w), y: my - 24 - h, w, h };
+          hy = 'bottom';
+          break;
+        case 'above-right':
+          rect = { x: clampX(mx - 18, w), y: my - 24 - h, w, h };
+          hy = 'bottom';
+          break;
+        case 'below':
+          rect = { x: clampX(mx - w / 2, w), y: my + 24, w, h };
+          break;
+        case 'above':
+          rect = { x: clampX(mx - w / 2, w), y: my - 24 - h, w, h };
+          hy = 'bottom';
+          break;
+      }
+      const detached = right ? edge - (mx + CALLOUT_GAP) : left ? mx - CALLOUT_GAP - edge : 0;
+      const score =
+        scoreRect(rect, obstacles, ownMarker) + order * 0.5 + Math.max(0, size.natural - w) * 0.3 + detached * 2;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { rect, hx, hy, maxWidth: w, withRest: size.withRest };
+      }
+    }
+  });
+  return best;
+}
+
+/** Warning marker callout side: flip near the right edge and near the bottom. */
+function hoverSide(x: number, y: number): string {
+  return `${x / VIEW_W > 0.62 ? 'is-left' : 'is-right'} ${y / VIEW_H > 0.72 ? 'is-up' : 'is-down'}`;
+}
+
+function warningTime(w: OfficialWarning): number {
+  const t = Date.parse(w.issuedAt ?? '');
+  return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
+}
+
+/** Official before aggregator, then newest issuedAt first (no issue time last). */
+function compareWarningMarkers(a: OfficialWarning, b: OfficialWarning): number {
+  if (a.authority !== b.authority) return a.authority === 'official' ? -1 : 1;
+  const ta = warningTime(a);
+  const tb = warningTime(b);
+  return ta === tb ? 0 : tb - ta;
+}
+
+function gaugeExcess(g: GaugeReading): number | null {
+  if (!g.thresholds) return null;
+  const values = Object.values(g.thresholds).filter((v) => Number.isFinite(v));
+  if (values.length === 0) return null;
+  return g.value - Math.min(...values);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -594,9 +1034,53 @@ export default function RegionMap({
   drift = null,
   placeNames,
   className,
+  warnings = null,
+  selectedWarningId = null,
+  onSelectWarning,
+  gauges = null,
 }: RegionMapProps) {
   const basemap = useMemo(() => getBasemap(), []);
   const calloutId = useId();
+  const layersTitleId = useId();
+  const [layers, setLayers] = useState({ watch: true, warnings: true, nea: true });
+  const [geom, setGeom] = useState<StageGeom | null>(null);
+  /** Roving tabindex for the official/gauge markers: index of the one tab stop. */
+  const [officialActive, setOfficialActive] = useState(0);
+  const officialRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
+  const compactRef = useRef<HTMLDetailsElement>(null);
+  const sideRef = useRef<HTMLDivElement>(null);
+  const calloutRef = useRef<HTMLDivElement>(null);
+  const attributionRef = useRef<HTMLParagraphElement>(null);
+
+  /** Read the stage and the chrome cards; store only when something moved by half a pixel or more. */
+  const measure = useCallback(() => {
+    const root = rootRef.current;
+    const stage = stageRef.current;
+    if (!root || !stage) return;
+    const s = stage.getBoundingClientRect();
+    if (s.width < 20) return;
+    const rel = (el: Element | null): Rect | null => {
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      return b.width > 0 && b.height > 0 ? { x: b.left - s.left, y: b.top - s.top, w: b.width, h: b.height } : null;
+    };
+    const r = root.getBoundingClientRect();
+    const chrome = [legendRef.current, compactRef.current, sideRef.current, attributionRef.current]
+      .map(rel)
+      .filter((x): x is Rect => x !== null);
+    const next: StageGeom = {
+      px: s.width / VIEW_W,
+      frame: { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height },
+      chrome,
+      callout: rel(calloutRef.current),
+      narrow: r.width <= NARROW_MAX,
+    };
+    setGeom((prev) => (geomEqual(prev, next) ? prev : next));
+  }, []);
 
   const placed = useMemo<PlacedIncident[]>(
     () =>
@@ -617,70 +1101,134 @@ export default function RegionMap({
     [basemap, incidents, states, placeNames],
   );
 
-  const selected = useMemo(() => placed.find((p) => p.incident.id === selectedId) ?? null, [placed, selectedId]);
+  const selectedIndex = placed.findIndex((p) => p.incident.id === selectedId);
+  const selected = selectedIndex >= 0 ? placed[selectedIndex] : null;
   const neaActive = Boolean(selected && nea && drift && drift.incidentId === selected.incident.id);
+  const neaShown = neaActive && layers.nea;
   const inset = selected ? getInset(selected.incident.lon, selected.incident.lat, neaActive) : null;
-  const neaDrawing = neaActive && inset && drift ? drawNea(inset, drift.downwindDeg) : null;
+  const neaDrawing = neaShown && inset && drift ? drawNea(inset, drift.downwindDeg) : null;
+  // A selection in the top-right quarter would sit under the locator inset: move the inset down.
+  const insetAtBottom =
+    selected !== null && !neaActive && selected.x / VIEW_W > 0.58 && selected.y / VIEW_H < 0.55;
 
-  // Callout placement. Wide maps: NEA selections on the left half go left-up so the large NEA
-  // panel keeps the top-right; otherwise right unless near the right edge, up only near the
-  // bottom. Narrow maps (n-* classes): right unless near the right edge; up when the NEA strip
-  // is docked at the bottom.
-  const sx = selected ? selected.x / VIEW_W : 0;
-  const sy = selected ? selected.y / VIEW_H : 0;
-  const side: Side = neaActive && sx < 0.5 && sx > 0.22 ? 'is-left' : sx > 0.58 ? 'is-left' : 'is-right';
-  const dir: Dir = neaActive && side === 'is-left' ? 'is-up' : sy > 0.75 ? 'is-up' : 'is-down';
-  const narrowSide = sx > 0.55 ? 'n-left' : 'n-right';
-  const narrowDir = (neaActive && sy > 0.35) || sy > 0.75 ? 'n-up' : 'n-down';
-  const insetAtBottom = selected !== null && !neaActive && sx > 0.58 && sy < 0.55;
+  const live = geom ?? fallbackGeom(selected !== null, neaActive, insetAtBottom);
+  const { px, frame, narrow } = live;
 
+  // Official warning markers: whole symbol inside the frame, official first, newest first, capped.
+  const warningMarkers = useMemo<PlacedWarning[]>(() => {
+    if (!warnings || warnings.length === 0) return [];
+    const inset = 12 / px;
+    const fx0 = frame.x / px + inset;
+    const fy0 = frame.y / px + inset;
+    const fx1 = (frame.x + frame.w) / px - inset;
+    const fy1 = (frame.y + frame.h) / px - inset;
+    return warnings
+      .filter((w) => w.location && Number.isFinite(w.location.lat) && Number.isFinite(w.location.lon))
+      .sort(compareWarningMarkers)
+      .map((warning) => {
+        const loc = warning.location as { lat: number; lon: number };
+        const [x, y] = project(basemap.projection, [loc.lon, loc.lat]);
+        return { warning, x, y };
+      })
+      .filter((m) => m.x >= fx0 && m.x <= fx1 && m.y >= fy0 && m.y <= fy1)
+      .slice(0, MAX_WARNING_MARKERS);
+  }, [warnings, basemap, px, frame]);
+
+  // Gauge markers: only readings at or above the lowest threshold, or cited by a drawn warning.
+  const gaugeMarkers = useMemo<PlacedGauge[]>(() => {
+    if (!gauges || gauges.length === 0) return [];
+    const drawnIds = warningMarkers.map((m) => m.warning.id);
+    const inset = 12 / px;
+    const fx0 = frame.x / px + inset;
+    const fy0 = frame.y / px + inset;
+    const fx1 = (frame.x + frame.w) / px - inset;
+    const fy1 = (frame.y + frame.h) / px - inset;
+    const rank = (g: PlacedGauge) => g.excess ?? Number.NEGATIVE_INFINITY;
+    return gauges
+      .filter((g) => Number.isFinite(g.lat) && Number.isFinite(g.lon) && Number.isFinite(g.value))
+      .map((gauge): PlacedGauge => {
+        const [x, y] = project(basemap.projection, [gauge.lon, gauge.lat]);
+        return { gauge, x, y, excess: gaugeExcess(gauge) };
+      })
+      .filter((m) =>
+        m.excess !== null
+          ? m.excess >= 0
+          : m.gauge.situation !== null && drawnIds.some((id) => id.includes(m.gauge.id)),
+      )
+      .filter((m) => m.x >= fx0 && m.x <= fx1 && m.y >= fy0 && m.y <= fy1)
+      .sort((a, b) => {
+        const ra = rank(a);
+        const rb = rank(b);
+        return ra === rb ? 0 : rb - ra;
+      })
+      .slice(0, MAX_GAUGE_MARKERS);
+  }, [gauges, warningMarkers, basemap, px, frame]);
+
+  const selectedRest = selected ? locationRest(selected.name, selected.incident.locationName) : '';
+  const calloutText: CalloutText | null = selected
+    ? {
+        name: selected.name,
+        rest: selectedRest,
+        coords: formatLatLon(selected.incident.lat, selected.incident.lon),
+        stateLabel: selected.stateLabel,
+      }
+    : null;
+
+  // Declutter, callout, tags and country labels, all in stage pixels.
   const layout = useMemo(() => {
-    const blocked: Rect[] = [LEGEND_ZONE];
-    if (selected) {
-      blocked.push(insetAtBottom ? { ...insetZone(false), y: REF_H - 230 } : insetZone(neaActive));
-      blocked.push(calloutZone(selected, side, dir));
-    }
-    const markerRects = placed.map((p) => {
-      const r = p.incident.id === selectedId ? 22 : 18;
-      return { x: p.x * REF_PX - r, y: p.y * REF_PX - r, w: 2 * r, h: 2 * r };
+    const truePts: Point[] = placed.map((p) => [p.x * px, p.y * px]);
+    const shown = declutter(truePts, selectedIndex);
+    const markerRects = shown.map((pt, i) => box(pt[0], pt[1], i === selectedIndex ? 19 : 16));
+    const points: Rect[] = [box(basemap.singapore[0] * px, basemap.singapore[1] * px, 4)];
+    shown.forEach((pt, i) => {
+      if (Math.hypot(pt[0] - truePts[i][0], pt[1] - truePts[i][1]) > 1.5) points.push(box(truePts[i][0], truePts[i][1], 4));
     });
-    const sgRect: Rect = {
-      x: basemap.singapore[0] * REF_PX - 5,
-      y: basemap.singapore[1] * REF_PX - 5,
-      w: 10,
-      h: 10,
+    for (const m of warningMarkers) points.push(box(m.x * px, m.y * px, 8));
+    for (const g of gaugeMarkers) points.push(box(g.x * px, g.y * px, 7));
+
+    const base: Obstacles = { frame, chrome: live.chrome, markers: markerRects, points, tags: [] };
+
+    const fontPx = narrow ? 12 : 13;
+    const variants = placed.map((p) => {
+      const short = { short: true, size: tagSize(p, fontPx, true) };
+      return narrow ? [short] : [{ short: false, size: tagSize(p, fontPx, false) }, short];
+    });
+    // Wide maps: the selected marker gets the callout instead of a tag. Compact maps: it gets a
+    // name tag with the state rail, placed first so it never hides under a neighbour's tag.
+    const tagged = placed.map((_, i) => i).filter((i) => narrow || i !== selectedIndex);
+    const order = narrow && selectedIndex >= 0 ? [selectedIndex, ...tagged.filter((i) => i !== selectedIndex)] : tagged;
+    const tags = new Map<number, TagChoice>();
+    /** Greedy pass over every tagged marker, each avoiding the tags already fixed. */
+    const placeTags = (chrome: Rect[]) => {
+      for (const i of order) {
+        const others = order.filter((j) => j !== i && tags.has(j)).map((j) => (tags.get(j) as TagChoice).rect);
+        const [mx, my] = shown[i];
+        tags.set(i, chooseTag(mx, my, i, variants[i], { ...base, chrome, tags: others }));
+      }
     };
 
-    const tags = new Map<string, TagSide>();
-    const tagRects: Rect[] = [];
-    placed.forEach((p, i) => {
-      if (p.incident.id === selectedId) return;
-      const w = (p.name.length + 3 + p.stateLabel.length) * 6.6 + 16;
-      let best: TagSide = 'right';
-      let bestScore = Number.POSITIVE_INFINITY;
-      (['right', 'left', 'below', 'above'] as TagSide[]).forEach((sideName, order) => {
-        const r = tagRect(p, sideName, w);
-        let score = order * 0.5 + outOfFrame(r) * 3 + overlapArea(r, sgRect) * 4;
-        for (const b of blocked) score += overlapArea(r, b) * 2;
-        markerRects.forEach((m, j) => {
-          if (j !== i) score += overlapArea(r, m) * 3;
-        });
-        for (const t of tagRects) score += overlapArea(r, t) * 3;
-        if (score < bestScore) {
-          bestScore = score;
-          best = sideName;
-        }
-      });
-      tags.set(p.incident.id, best);
-      tagRects.push(tagRect(p, best, w));
-    });
+    // 1. Provisional tags without the callout. 2. The callout prefers spots that leave them
+    // alone (soft weight) and never trades a marker for a tag. 3. Tags are revised around the
+    // callout as rendered (measured) or as estimated, twice, so each ends with every other fixed.
+    placeTags(live.chrome);
+    let callout: CalloutChoice | null = null;
+    if (selected && calloutText && !narrow) {
+      const [mx, my] = shown[selectedIndex];
+      const soft = [...tags.values()].map((t) => t.rect);
+      callout = placeCallout(mx, my, selectedIndex, calloutText, { ...base, soft, markerWeight: 5 });
+    }
+    const calloutRect = !narrow ? (live.callout ?? callout?.rect ?? null) : null;
+    const chrome = calloutRect ? [...live.chrome, calloutRect] : live.chrome;
+    placeTags(chrome);
+    placeTags(chrome);
+    const tagRects = [...tags.values()].map((t) => t.rect);
 
     const labels: (CountryLabel & { x: number; y: number })[] = [];
     for (const label of COUNTRY_LABELS) {
       const [x, y] = project(basemap.projection, [label.lon, label.lat]);
-      const w = label.text.length * 9 + 8;
-      const r: Rect = { x: x * REF_PX - w / 2, y: y * REF_PX - 9, w, h: 18 };
-      const clash = [...blocked, ...markerRects, ...tagRects].some((o) => overlapArea(r, o) > 0);
+      const w = label.text.length * 9.6 + 8;
+      const r: Rect = { x: x * px - w / 2, y: y * px - 9, w, h: 18 };
+      const clash = [...chrome, ...markerRects, ...tagRects, ...points].some((o) => overlapArea(r, o) > 0);
       if (!clash) labels.push({ ...label, x, y });
     }
     if (!basemap.hasSingaporePolygon) {
@@ -688,30 +1236,182 @@ export default function RegionMap({
       const [x, y] = basemap.singapore;
       labels.push({ text: 'Singapore', lon: SINGAPORE[0], lat: SINGAPORE[1], x: x + 40, y: y + 14 });
     }
-    return { tags, labels };
-  }, [basemap, placed, selected, selectedId, insetAtBottom, neaActive, side, dir]);
+    return { shown, truePts, callout, tags, labels };
+  }, [placed, selectedIndex, selected, calloutText, px, frame, narrow, live.chrome, live.callout, basemap, warningMarkers, gaugeMarkers]);
 
-  const selectedRest = selected ? locationRest(selected.name, selected.incident.locationName) : '';
-  const chipText = neaActive && nea ? psiChipText(nea) : null;
+  const calloutKey = layout.callout
+    ? `${Math.round(layout.callout.rect.x)},${Math.round(layout.callout.rect.y)},${Math.round(layout.callout.rect.w)}`
+    : 'none';
+
+  // Measure after every commit that can move or resize an overlay, and whenever the container resizes.
+  useLayoutEffect(() => {
+    measure();
+  }, [measure, selectedId, neaActive, insetAtBottom, calloutKey, warningMarkers.length, gaugeMarkers.length, layers]);
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    for (const el of [
+      rootRef.current,
+      stageRef.current,
+      legendRef.current,
+      compactRef.current,
+      sideRef.current,
+      calloutRef.current,
+    ]) {
+      if (el) observer.observe(el);
+    }
+    return () => observer.disconnect();
+  }, [measure, selectedId, neaActive, insetAtBottom, narrow]);
+
+  const chipText = neaShown && nea ? psiChipText(nea) : null;
   const windVariable = Boolean(nea && nea.wind.consistency < 0.5);
   const downwindKnown = neaDrawing?.cone != null;
   const modeLabel = nea?.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT';
 
-  const calloutStyle = selected
-    ? ({
-        left: pct(selected.x, VIEW_W),
-        top: pct(selected.y, VIEW_H),
-        '--rm-x': pct(selected.x, VIEW_W),
-      } as CSSProperties)
-    : undefined;
+  const hasOfficial = layers.warnings && warningMarkers.some((m) => m.warning.authority === 'official');
+  const hasEstimate = layers.warnings && warningMarkers.some((m) => m.warning.authority === 'aggregator');
+  const hasGauge = layers.warnings && gaugeMarkers.length > 0;
+
+  const toggleLayer = (key: keyof typeof layers, on: boolean) => setLayers((prev) => ({ ...prev, [key]: on }));
+
+  // One tab stop for every official and gauge marker (the watch areas stay ordinary tab stops).
+  const officialCount = warningMarkers.length + gaugeMarkers.length;
+  const officialTabStop = officialCount === 0 ? -1 : Math.min(officialActive, officialCount - 1);
+  const focusOfficial = (index: number) => {
+    if (officialCount === 0) return;
+    const i = ((index % officialCount) + officialCount) % officialCount;
+    setOfficialActive(i);
+    officialRefs.current[i]?.focus();
+  };
+  const onOfficialKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = Number((event.target as HTMLElement).dataset.officialIndex ?? Number.NaN);
+    if (!Number.isFinite(current)) return;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        focusOfficial(current + 1);
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        focusOfficial(current - 1);
+        break;
+      case 'Home':
+        focusOfficial(0);
+        break;
+      case 'End':
+        focusOfficial(officialCount - 1);
+        break;
+      case 'Escape':
+        focusOfficial(0);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  };
+  const officialProps = (index: number) => ({
+    ref: (el: HTMLButtonElement | null) => {
+      officialRefs.current[index] = el;
+    },
+    tabIndex: index === officialTabStop ? 0 : -1,
+    'data-official-index': index,
+    onFocus: () => setOfficialActive(index),
+  });
+
+  const selectedShown = selected && selectedIndex >= 0 ? layout.shown[selectedIndex] : null;
+  const calloutStyle =
+    layout.callout && selectedShown ? anchorStyle(layout.callout, px, selectedShown[0], selectedShown[1]) : undefined;
+
+  // One card: states (left) and official symbols (right), the note, the NEA row when drawn, and
+  // the three layer toggles as a wrapping row of 24 px targets.
+  const legendBody = (
+    <>
+      <div className="region-map__legend-grid">
+        <ul className="region-map__legend-list">
+          {LEGEND_STATES.map((state) => (
+            <li key={state} className={`region-map__legend-item ${stateClass(state)}`}>
+              <svg className="region-map__swatch" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                <MarkerSymbol hazard={null} state={state} />
+              </svg>
+              <span>{STATE_LABEL[state]}</span>
+            </li>
+          ))}
+        </ul>
+        {(hasOfficial || hasEstimate || hasGauge) && (
+          <ul className="region-map__legend-list is-official">
+            {hasOfficial && (
+              <li className="region-map__legend-item">
+                <svg className="region-map__swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <OfficialSymbol kind="official" />
+                </svg>
+                <span>
+                  Official warning <span className="region-map__legend-sub">(issuer)</span>
+                </span>
+              </li>
+            )}
+            {hasEstimate && (
+              <li className="region-map__legend-item">
+                <svg className="region-map__swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <OfficialSymbol kind="estimate" />
+                </svg>
+                <span>
+                  Impact estimate <span className="region-map__legend-sub">(GDACS)</span>
+                </span>
+              </li>
+            )}
+            {hasGauge && (
+              <li className="region-map__legend-item">
+                <svg className="region-map__swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <OfficialSymbol kind="gauge" />
+                </svg>
+                <span>
+                  Water-level gauge <span className="region-map__legend-sub">(issuer)</span>
+                </span>
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+      <p className="region-map__legend-note">Workflow states, not official alert levels</p>
+      {neaShown && (
+        <p className="region-map__legend-nea">
+          <NeaSwatch kind="both" />
+          <span>Wind &amp; haze: NEA Singapore</span>
+        </p>
+      )}
+      <div className="region-map__layers" role="group" aria-labelledby={layersTitleId}>
+        <span id={layersTitleId} className="region-map__layers-title">
+          Layers
+        </span>
+        <label className="region-map__layer">
+          <input type="checkbox" checked={layers.watch} onChange={(e) => toggleLayer('watch', e.currentTarget.checked)} />
+          <span>Watch areas</span>
+        </label>
+        <label className="region-map__layer">
+          <input
+            type="checkbox"
+            checked={layers.warnings}
+            onChange={(e) => toggleLayer('warnings', e.currentTarget.checked)}
+          />
+          <span>Official warnings</span>
+        </label>
+        <label className="region-map__layer">
+          <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
+          <span>NEA wind and haze</span>
+        </label>
+      </div>
+    </>
+  );
 
   return (
     <div
+      ref={rootRef}
       className={className ? `region-map ${className}` : 'region-map'}
       role="group"
-      aria-label="Regional incident map"
+      aria-label="Regional map of watch areas and official warnings"
     >
-      <div className="region-map__stage">
+      <div ref={stageRef} className="region-map__stage">
         <svg
           className="region-map__svg"
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
@@ -751,6 +1451,19 @@ export default function RegionMap({
               rx={2}
             />
           )}
+          {layers.watch &&
+            placed.map((p, i) => {
+              const [sx, sy] = layout.shown[i];
+              const [tx, ty] = layout.truePts[i];
+              if (Math.hypot(sx - tx, sy - ty) <= 1.5) return null;
+              // Leader from the true position to the decluttered symbol.
+              return (
+                <g key={p.incident.id} className="region-map__leader">
+                  <line x1={p.x} y1={p.y} x2={sx / px} y2={sy / px} />
+                  <circle cx={p.x} cy={p.y} r={2.6 / px} />
+                </g>
+              );
+            })}
         </svg>
 
         {layout.labels.map((l) => (
@@ -764,73 +1477,144 @@ export default function RegionMap({
           </span>
         ))}
 
-        {placed.map((p) => {
-          const isSelected = p.incident.id === selectedId;
-          const tagSide = layout.tags.get(p.incident.id) ?? 'right';
-          return (
-            <button
-              key={p.incident.id}
-              type="button"
-              className={`region-map__marker ${stateClass(p.state)}${isSelected ? ' is-selected' : ''}`}
-              style={{ left: pct(p.x, VIEW_W), top: pct(p.y, VIEW_H) }}
-              aria-label={`${p.incident.title} — ${p.stateLabel}`}
-              aria-pressed={isSelected}
-              aria-describedby={isSelected ? calloutId : undefined}
-              onClick={() => onSelect(p.incident.id)}
-            >
-              <svg className="region-map__symbol" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-                <MarkerSymbol hazard={p.incident.hazard} state={p.state} selected={isSelected} />
-              </svg>
-              {!isSelected && (
-                <span className={`region-map__tag is-${tagSide}`} aria-hidden="true">
-                  <span className="region-map__tag-name">{p.name}</span>
-                  <span className="region-map__tag-state"> · {p.stateLabel}</span>
-                </span>
-              )}
-            </button>
-          );
-        })}
-
-        {selected && (
+        {layers.warnings && officialCount > 0 && (
           <div
+            className="region-map__official-layer"
+            role="group"
+            aria-label="Official warnings and water-level gauges on the map (arrow keys to move between them)"
+            onKeyDown={onOfficialKeyDown}
+          >
+            {warningMarkers.map(({ warning: w, x, y }, i) => {
+              const official = w.authority === 'official';
+              const isSelected = w.id === selectedWarningId;
+              const area = w.areaDescription.trim() || w.headline.trim();
+              const label = official
+                ? `Official warning: ${w.issuer} · ${w.level} · ${area}`
+                : `Impact estimate (GDACS, not a warning): ${w.issuer} · ${w.level} · ${area}`;
+              const kind: OfficialKind = !official ? 'estimate' : w.ended ? 'ended' : 'official';
+              return (
+                <button
+                  key={`${w.id}-${i}`}
+                  type="button"
+                  className={`region-map__wmarker is-${kind}${isSelected ? ' is-selected' : ''}`}
+                  style={{ left: pct(x, VIEW_W), top: pct(y, VIEW_H) }}
+                  aria-label={label}
+                  aria-pressed={isSelected}
+                  onClick={onSelectWarning ? () => onSelectWarning(w.id) : undefined}
+                  {...officialProps(i)}
+                >
+                  <svg className="region-map__wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                    <OfficialSymbol kind={kind} selected={isSelected} />
+                  </svg>
+                  <span className={`region-map__wcallout ${hoverSide(x, y)}`} aria-hidden="true">
+                    <strong>{w.issuer}</strong>
+                    <span lang={w.language || undefined}>{w.level}</span>
+                    {w.ended && <span className="region-map__wcallout-meta">Ended</span>}
+                    {!official && <span className="region-map__wcallout-meta">Impact estimate, not a warning</span>}
+                  </span>
+                </button>
+              );
+            })}
+
+            {gaugeMarkers.map(({ gauge: g, x, y }, i) => {
+              const reading = `${formatValue(g.value)} ${g.unit} (${g.datum})`;
+              const label = `Water level: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
+              const cited = warningMarkers.find((m) => m.warning.id.includes(g.id));
+              const isSelected = cited !== undefined && cited.warning.id === selectedWarningId;
+              return (
+                <button
+                  key={`${g.id}-${i}`}
+                  type="button"
+                  className={`region-map__wmarker is-gauge${isSelected ? ' is-selected' : ''}`}
+                  style={{ left: pct(x, VIEW_W), top: pct(y, VIEW_H) }}
+                  aria-label={label}
+                  aria-pressed={cited ? isSelected : undefined}
+                  onClick={onSelectWarning && cited ? () => onSelectWarning(cited.warning.id) : undefined}
+                  {...officialProps(warningMarkers.length + i)}
+                >
+                  <svg className="region-map__wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                    <OfficialSymbol kind="gauge" selected={isSelected} />
+                  </svg>
+                  <span className={`region-map__wcallout ${hoverSide(x, y)}`} aria-hidden="true">
+                    <strong>{g.issuer}</strong>
+                    <span className="mono">
+                      {g.name} · {reading}
+                    </span>
+                    {g.situation && <span lang={issuerLang(g.issuer)}>{g.situation}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {layers.watch &&
+          placed.map((p, i) => {
+            const isSelected = i === selectedIndex;
+            const [sx, sy] = layout.shown[i];
+            const tag = layout.tags.get(i);
+            return (
+              <button
+                key={p.incident.id}
+                type="button"
+                className={`region-map__marker ${stateClass(p.state)}${isSelected ? ' is-selected' : ''}`}
+                style={{ left: pct(sx / px, VIEW_W), top: pct(sy / px, VIEW_H) }}
+                aria-label={`${p.incident.title} — ${p.stateLabel}`}
+                aria-pressed={isSelected}
+                aria-describedby={isSelected && layout.callout ? calloutId : undefined}
+                onClick={() => onSelect(p.incident.id)}
+              >
+                <svg className="region-map__symbol" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+                  <MarkerSymbol hazard={p.incident.hazard} state={p.state} selected={isSelected} />
+                </svg>
+                {tag && (
+                  <span className={`region-map__tag is-${tag.pos}${isSelected ? ' is-selected' : ''}`} aria-hidden="true">
+                    <span className="region-map__tag-name">{p.name}</span>
+                    {!tag.short && <span className="region-map__tag-state"> · {p.stateLabel}</span>}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+        {layers.watch && selected && layout.callout && (
+          <div
+            ref={calloutRef}
             id={calloutId}
-            className={`region-map__callout ${side} ${dir} ${narrowSide} ${narrowDir} ${stateClass(selected.state)}`}
+            className={`region-map__callout ${stateClass(selected.state)}`}
             style={calloutStyle}
           >
             <p className="region-map__callout-title">
               <strong>{selected.name}</strong>
-              {selectedRest && <> · {selectedRest}</>}
+              {layout.callout.withRest && selectedRest && <> · {selectedRest}</>}
             </p>
-            <p className="region-map__callout-coords">
-              {formatLatLon(selected.incident.lat, selected.incident.lon)}
+            <p className="region-map__callout-coords mono">
+              <span>{formatCoordinate(selected.incident.lat, 'N', 'S')},</span>{' '}
+              <span>{formatCoordinate(selected.incident.lon, 'E', 'W')}</span>
             </p>
             <p className="region-map__callout-state">{selected.stateLabel}</p>
           </div>
         )}
       </div>
 
-      <div className="region-map__legend" role="group" aria-label="Map legend">
-        <ul className="region-map__legend-list">
-          {LEGEND_STATES.map((state) => (
-            <li key={state} className={`region-map__legend-item ${stateClass(state)}`}>
-              <svg className="region-map__swatch" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-                <MarkerSymbol hazard={null} state={state} />
-              </svg>
-              <span>{STATE_LABEL[state]}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="region-map__legend-note">Workflow states, not official alert levels</p>
-        {neaActive && (
-          <p className="region-map__legend-nea">
-            <NeaSwatch kind="both" />
-            <span>Wind &amp; haze: NEA Singapore</span>
-          </p>
-        )}
-      </div>
+      {narrow ? (
+        // Compact maps: one closed-by-default disclosure holds the legend and the layer toggles,
+        // so nothing covers the markers unless the presenter opens it.
+        <details ref={compactRef} className="region-map__compact">
+          <summary className="region-map__compact-summary">Legend and layers</summary>
+          <div className="region-map__legend is-inline" role="group" aria-label="Map legend and layers">
+            {legendBody}
+          </div>
+        </details>
+      ) : (
+        <div ref={legendRef} className="region-map__legend" role="group" aria-label="Map legend and layers">
+          {legendBody}
+        </div>
+      )}
 
       {selected && inset && (
         <div
+          ref={sideRef}
           className={`region-map__side${insetAtBottom ? ' is-bottom' : ''}${neaActive ? ' has-nea' : ''}`}
         >
           <figure className="region-map__inset">
@@ -841,9 +1625,11 @@ export default function RegionMap({
                 preserveAspectRatio="xMidYMid meet"
                 role="img"
                 aria-label={
-                  neaActive
+                  neaShown
                     ? `Zoomed view of ${selected.name} and Singapore with the NEA wind direction and an illustrative haze drift`
-                    : `Locator map, about ${INSET_HALF_SPAN} degrees around ${selected.name}`
+                    : neaActive
+                      ? `Zoomed view of ${selected.name} and Singapore`
+                      : `Locator map, about ${INSET_HALF_SPAN} degrees around ${selected.name}`
                 }
               >
                 <rect className="region-map__inset-water" width={inset.w} height={inset.h} />
@@ -920,10 +1706,11 @@ export default function RegionMap({
             )}
           </figure>
 
-          {neaActive && nea && (
+          {neaShown && nea && drift && (
             <div className="region-map__nea" title={nea.attribution}>
               <p className="region-map__nea-source">
-                <span>Wind: NEA Singapore stations</span>{' '}
+                <span className="region-map__only-wide">Wind: NEA Singapore stations</span>
+                <span className="region-map__only-narrow">NEA Singapore</span>{' '}
                 <span className={`region-map__mode is-${nea.dataMode}`}>{modeLabel}</span>{' '}
                 <time dateTime={nea.observedAt}>{formatUtc(nea.observedAt)}</time>
               </p>
@@ -934,7 +1721,9 @@ export default function RegionMap({
               {downwindKnown && (
                 <p className="region-map__nea-row is-drift">
                   <NeaSwatch kind="drift" />
-                  <span className="region-map__only-wide">Real Singapore wind applied to a simulated hotspot</span>
+                  <span className="region-map__only-wide">
+                    Singapore wind applied to the {selected.name} hotspot area, {Math.round(drift.distanceKm)} km away
+                  </span>
                   <span className="region-map__only-narrow">Illustrative drift, not a dispersion model</span>
                 </p>
               )}
@@ -943,7 +1732,7 @@ export default function RegionMap({
         </div>
       )}
 
-      <p className="region-map__attribution" title={REGION.attribution}>
+      <p ref={attributionRef} className="region-map__attribution" title={REGION.attribution}>
         Boundaries: Natural Earth (public domain)
       </p>
     </div>

@@ -22,7 +22,7 @@ export const REVIEW_LABELS: Record<ReviewState, ReviewLabel> = {
 /** Plain-language rule shown in the detail view. */
 export const RULE_TEXT =
   'Monitoring: no record is marked anomalous. Check observation: at least one anomaly. ' +
-  'Review needed: anomalies from at least two distinct categories inside the scenario window. ' +
+  'Review needed: anomalies from at least two distinct categories inside the watch window. ' +
   'Repeat readings from one category do not count as independent corroboration. ' +
   'These are illustrative workflow rules, not scientific thresholds or official alert levels.';
 
@@ -34,7 +34,7 @@ export const RULE_SUMMARY =
 
 /** Exact per-record reasons from docs/CONTRACT.md "Review rules". */
 export const REASONS = {
-  outsideWindow: 'Outside scenario window, not counted',
+  outsideWindow: 'Outside watch window, not counted',
   sameCategory: 'Same category as an earlier anomaly; not independent corroboration',
   baseline: 'Within configured baseline; not an anomaly',
 } as const;
@@ -42,7 +42,7 @@ export const REASONS = {
 /** Reason for a record that adds a new distinct anomaly category (the contract leaves this wording open). */
 export function countedReason(category: Category, windowApplied = true): string {
   return windowApplied
-    ? `First ${category} anomaly inside the scenario window; counted as a distinct category`
+    ? `First ${category} anomaly inside the watch window; counted as a distinct category`
     : `First ${category} anomaly; counted as a distinct category`;
 }
 
@@ -365,11 +365,11 @@ export function deriveReview(
   const explanation: string[] = [RULE_SUMMARY];
   if (windowApplied) {
     explanation.push(
-      `Scenario window: ${window.start} to ${window.end}. Records observed outside it are shown but not counted.`,
+      `Watch window: ${window.start} to ${window.end}. Records observed outside it are shown but not counted.`,
     );
   } else {
     explanation.push(
-      `Scenario window is invalid (start ${show(window?.start)}, end ${show(window?.end)}), so no ` +
+      `Watch window is invalid (start ${show(window?.start)}, end ${show(window?.end)}), so no ` +
         'window restriction was applied: every visible record was considered.',
     );
   }
@@ -397,7 +397,7 @@ export function deriveReview(
     );
   }
   if (outside.length > 0) {
-    explanation.push(`Outside scenario window, not counted: ${quoteIds(outside)}.`);
+    explanation.push(`Outside watch window, not counted: ${quoteIds(outside)}.`);
   }
   if (duplicates > 0) {
     explanation.push(

@@ -1,6 +1,6 @@
-// Brief bar (pinned under the detail column): Generate brief opens a read-only preview of the
+// Brief bar (pinned under the review column): Generate brief opens a read-only preview of the
 // buildBriefing(...) text; Download .txt saves exactly that text. App owns the brief and clears it
-// whenever the incident or replay step changes.
+// whenever the watch area, the replay step or the context data changes.
 import { useRef, useState } from 'react';
 import type { Incident } from '../types';
 import Dialog from './Dialog';
@@ -10,13 +10,17 @@ export interface GeneratedBrief {
   text: string;
   /** Increments on every generation, so a download confirmation never outlives its brief. */
   seq: number;
+  /** The context (NEA reading, nearby official warnings, feed statuses) the brief was built from. */
+  contextKey: string;
 }
 
 export interface BriefPanelProps {
   incident: Incident | null;
-  /** What the brief describes, e.g. "Gas observation, step 3 of 3". */
+  /** What the brief describes, e.g. "13 Oct, step 7 of 7". */
   contextLabel: string | null;
   brief: GeneratedBrief | null;
+  /** The current context key; when it differs from the brief's, the brief is stale (never silently downloadable). */
+  contextKey: string;
   filename: string | null;
   onGenerate: () => void;
   /** Starts the browser download of the current brief. May throw. */
@@ -29,17 +33,29 @@ interface DownloadStatus {
   message: string;
 }
 
-export default function BriefPanel({ incident, contextLabel, brief, filename, onGenerate, onDownload }: BriefPanelProps) {
+export default function BriefPanel({
+  incident,
+  contextLabel,
+  brief,
+  contextKey,
+  filename,
+  onGenerate,
+  onDownload,
+}: BriefPanelProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [status, setStatus] = useState<DownloadStatus | null>(null);
   const previewRef = useRef<HTMLPreElement>(null);
 
   if (!incident) return null;
 
+  const stale = brief !== null && brief.contextKey !== contextKey;
+  // A stale brief stays readable while its preview is open (never pulled from under the presenter),
+  // but from the bar it counts as no brief: Download .txt waits for a fresh one.
+  const usable = brief !== null && (!stale || previewOpen);
   const downloadStatus = brief && status && status.seq === brief.seq ? status : null;
 
   const download = () => {
-    if (!brief) return;
+    if (!brief || !usable) return;
     try {
       onDownload();
       setStatus({ seq: brief.seq, ok: true, message: `Download started: ${filename ?? 'brief.txt'}` });
@@ -54,6 +70,8 @@ export default function BriefPanel({ incident, contextLabel, brief, filename, on
 
   const statusText = downloadStatus ? (
     <span className={downloadStatus.ok ? 'download-ok' : 'download-error'}>{downloadStatus.message}</span>
+  ) : stale ? (
+    'Context data updated since this brief; generate it again.'
   ) : brief ? (
     `Brief ready${contextLabel ? ` for ${contextLabel}` : ''}.`
   ) : (
@@ -79,8 +97,8 @@ export default function BriefPanel({ incident, contextLabel, brief, filename, on
         <button
           type="button"
           className="btn"
-          aria-disabled={!brief || undefined}
-          title={brief ? undefined : 'Generate the brief first'}
+          aria-disabled={!brief || stale || undefined}
+          title={!brief ? 'Generate the brief first' : stale ? 'Context data updated; generate the brief again' : undefined}
           onClick={download}
         >
           Download .txt
@@ -119,9 +137,11 @@ export default function BriefPanel({ incident, contextLabel, brief, filename, on
               {brief.text}
             </pre>
             <p className="brief-dialog-status" aria-live="polite">
-              {downloadStatus && (
+              {downloadStatus ? (
                 <span className={downloadStatus.ok ? 'download-ok' : 'download-error'}>{downloadStatus.message}</span>
-              )}
+              ) : stale ? (
+                'Context data updated since this brief was generated. Close and generate it again for the latest context.'
+              ) : null}
             </p>
           </div>
         )}

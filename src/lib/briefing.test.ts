@@ -263,8 +263,8 @@ describe('real-data header and replay day', () => {
 
 describe('briefingFilename', () => {
   it('has the documented shape for replay and static incidents', () => {
-    expect(briefingFilename({ ...incident, id: 'inc-merapi-demo' }, step)).toBe(
-      'asean-watch-brief_inc-merapi-demo_step-2.txt',
+    expect(briefingFilename({ ...incident, id: 'watch-merapi' }, step)).toBe(
+      'asean-watch-brief_watch-merapi_day-3.txt',
     );
     expect(briefingFilename(incident, null)).toBe('asean-watch-brief_inc-test-volcano_static.txt');
     expect(briefingFilename({ ...incident, replayable: false }, step)).toBe(
@@ -275,7 +275,7 @@ describe('briefingFilename', () => {
   it('is filesystem-safe for hostile ids', () => {
     for (const id of ['../../etc/passwd', 'a:b*c?"<>|', 'CON', '   ', 'inc merapi/demo\\x']) {
       const name = briefingFilename({ ...incident, id }, step);
-      expect(name).toMatch(/^asean-watch-brief_[A-Za-z0-9._-]+_(step-\d+|static)\.txt$/);
+      expect(name).toMatch(/^asean-watch-brief_[A-Za-z0-9._-]+_(day-\d+|static)\.txt$/);
       expect(name).not.toContain('..');
     }
   });

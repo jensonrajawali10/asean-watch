@@ -1,71 +1,100 @@
-/* Design tokens shared by every component. Owned by the UI shell agent; token names are contract. */
+/* Design tokens shared by every component. Token names are contract: values change, names stay.
+   Light theme, projector-first (1366x768). Every text/background pair below is >= 4.5:1 and every
+   control border or focus ring >= 3:1; see docs/DESIGN.md section 2 for the measured table. */
 :root {
   color-scheme: light;
 
   --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, monospace;
 
-  --bg: #f3f4f6;
+  --bg: #eef0f3;
   --panel: #ffffff;
-  --panel-2: #f8f9fb;
-  --border: #c9cfd7;
-  --text: #19212b;
-  --text-muted: #5a6574;
-  --accent: #1f5fbf;
-  --focus: #1f5fbf;
+  --panel-2: #f5f6f8;
+  --border: #b7bfc9;
+  --text: #141a22;
+  --text-muted: #4e5967;
+  --accent: #1b58a8;
+  --focus: #1b58a8;
 
   /* Review states: workflow urgency only, never official alert levels. Always paired with text. */
   /* Neutral (Monitoring) -> amber outline (Check observation) -> solid amber (Review needed). */
-  --state-monitoring-bg: #eceff3;
-  --state-monitoring-fg: #47525f;
-  --state-check-bg: #fff6e5;
-  --state-check-fg: #8a5300;
-  --state-review-bg: #f2a83b;
-  --state-review-fg: #2b1900;
-  --state-review-strong: #b86e00;
+  --state-monitoring-bg: #e8ecf1;
+  --state-monitoring-fg: #3a4654;
+  --state-monitoring-border: #aab4c0;
+  --state-check-bg: #fff3d6;
+  --state-check-fg: #7a4a00;
+  --state-check-border: #b97a0e;
+  --state-review-bg: #f2a43a;
+  --state-review-fg: #241500;
+  --state-review-strong: #a35c00;
 
-  /* Data mode badges: text labels carry the meaning, colour is secondary. */
-  --mode-simulated-bg: #efe9fb;
-  --mode-simulated-fg: #5b3a9e;
-  --mode-historical-bg: #e5f3ee;
-  --mode-historical-fg: #1d6b4f;
-  --mode-live-bg: #fde8e8;
-  --mode-live-fg: #a12a2a;
+  /* Data modes: the text label carries the meaning, colour is secondary. */
+  /* "simulated" tokens are kept for compatibility; the same violet now means MODELLED (context only). */
+  --mode-simulated-bg: #ece6f9;
+  --mode-simulated-fg: #4a2f8d;
+  --mode-simulated-border: #c6b6ea;
+  --mode-modelled-bg: #ece6f9;
+  --mode-modelled-fg: #4a2f8d;
+  --mode-modelled-border: #c6b6ea;
+  --mode-historical-bg: #e3f1ea;
+  --mode-historical-fg: #1a5e44;
+  --mode-historical-border: #a4d0bf;
+  /* LIVE is an ink outline with a static dot: never red, never animated. */
+  --mode-live-bg: #ffffff;
+  --mode-live-fg: #141a22;
+  --mode-live-border: #141a22;
 
-  /* Demo banner */
-  --banner-bg: #19212b;
+  /* Official warnings: reserved. Never used for our own states or any other badge. */
+  --official: #8a1f1f;
+  --official-bg: #fdf2f2;
+  --official-border: #d9a3a3;
+  /* Aggregator impact estimates (GDACS): visibly not a warning. */
+  --estimate: #5b6573;
+
+  /* Header and bottom timeline: the dark frame around the light workspace. */
+  --banner-bg: #141a22;
   --banner-fg: #ffd27a;
+  --on-dark: #f3f5f8;
+  --on-dark-muted: #c6ceda;
+  --on-dark-border: #3a4654;
 
   /* Map */
-  --map-water: #dce6ee;
-  --map-land: #e7e4dd;
-  --map-land-asean: #f8f6f1;
-  --map-stroke: #b7b0a2;
-  --map-stroke-asean: #8f877a;
-  --map-marker: #47525f;
+  --map-water: #c9d7e2;
+  --map-land: #e4e1d9;
+  --map-land-asean: #f7f4eb;
+  --map-stroke: #b3ab9d;
+  --map-stroke-asean: #6f6756;
+  --map-marker: #3a4654;
 
-  --radius: 6px;
-  --shadow: 0 1px 2px rgba(25, 33, 43, 0.06), 0 1px 3px rgba(25, 33, 43, 0.08);
+  --radius: 4px;
+  --radius-sm: 3px;
+  --shadow: 0 1px 2px rgba(20, 26, 34, 0.08), 0 2px 6px rgba(20, 26, 34, 0.1);
 
-  /* Added by the UI shell */
-  --state-check-border: #e3a23a;
-  /* NEA context badges: calm, never the red live/alarm colour, never the simulated purple. */
-  --nea-live-fg: #19212b;
-  --nea-live-border: #19212b;
-  --nea-snapshot-fg: #47525f;
+  /* NEA context badges: calm, never the alarm colour, never the modelled violet. */
+  --nea-live-fg: #141a22;
+  --nea-live-border: #141a22;
+  --nea-snapshot-fg: #4e5967;
   --nea-snapshot-border: #9aa3ae;
-  --border-strong: #aeb6c1;
-  --accent-strong: #174b98;
+  --border-strong: #7f8a98;
+  --accent-strong: #154686;
   --selected-bg: #eef4fc;
-  --new-row: #f2f6fd;
-  --new-flash: #d7e5fa;
-  --counted-bg: #19212b;
+  --new-row: #edf3fc;
+  --new-flash: #edf3fc;
+  --counted-bg: #141a22;
   --counted-fg: #ffffff;
-  --ok-fg: #1d6b4f;
-  --danger-fg: #a12a2a;
+  --ok-fg: #1a5e44;
+  --danger-fg: #8a1f1f;
   --focus-on-dark: #ffd27a;
-  --backdrop: rgba(25, 33, 43, 0.28);
+  --backdrop: rgba(20, 26, 34, 0.28);
   --gap: 12px;
+
+  /* Layout */
+  --rail-w: 248px;
+  --review-w: 488px;
+  --header-h: 40px;
+  /* Measured header height, published by AppHeader for the drawers; never read by the header itself. */
+  --header-offset: 40px;
+  --timeline-h: 52px;
 }
 
 * {
@@ -113,8 +142,15 @@ a {
 
 code,
 kbd,
-pre {
+pre,
+time,
+.mono {
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+time {
+  font-size: 0.93em;
 }
 
 code {
@@ -127,8 +163,12 @@ code {
   outline-offset: 2px;
 }
 
+/* Anchored at the top-left of the nearest positioned ancestor, so hidden text inside a truncated or
+   scrolled element never widens the page (its static position could sit past the viewport edge). */
 .visually-hidden {
   position: absolute !important;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   padding: 0;
@@ -144,11 +184,7 @@ code {
 }
 
 .small {
-  font-size: 12px;
-}
-
-.mono {
-  font-family: var(--mono);
+  font-size: 13px;
 }
 
 @media (prefers-reduced-motion: reduce) {

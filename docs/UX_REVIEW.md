@@ -70,7 +70,7 @@ Legible from the back means: state labels at 20 px or more, controls at 15 px or
 | 1:05–1:35 | Next step → Thermal observation | Badge becomes **Check observation**. Two thermal records at the top of the timeline, tagged **New**. The first says **Counted**; the second says **Not counted: Same category as an earlier anomaly; not independent corroboration**, visible without opening anything (the backup recording holds on it). The map marker's ring style and label text change | Check observation; Counted / Not counted |
 | 1:35–2:00 | Next step → Gas observation | Badge becomes **Review needed** (amber, the strongest visual state on screen), with "Thermal + Gas" next to it and "Workflow state, not an official alert level." directly under it. The new gas record is tagged New and Counted. The marker is amber with a text label | Review needed; Thermal + Gas |
 | 2:00–2:50 | **Why this state?**, then the record inspector | One click opens Why in place: the rule in one sentence, then one line per visible record (Counted / Not counted, record name, reason). One click on the gas record opens the inspector, with **value, Observed, Ingested, SIMULATED, source name and link, quality note, review treatment** all visible without scrolling the drawer. DEMO REPLAY stays readable behind a light backdrop | Rule sentence; Observed vs Ingested; SIMULATED |
-| 2:50–3:25 | **Generate brief** → **Download .txt** | Preview dialog with the brief in monospace at 13 px or more, wrapped (no horizontal scroll). **Download .txt** sits in the dialog header and is never pushed off-screen by long lines. After the click, the status reads "Download started: asean-watch-brief_inc-merapi-demo_step-2.txt" | Download .txt; the status line |
+| 2:50–3:25 | **Generate brief** → **Download .txt** | Preview dialog with the brief in monospace at 13 px or more, wrapped (no horizontal scroll). **Download .txt** sits in the dialog header and is never pushed off-screen by long lines. After the click, the status reads "Download started: asean-watch-brief_watch-merapi_day-7.txt" | Download .txt; the status line |
 | 3:25–3:40 | **Reset** | Replay back to Baseline, state Monitoring, brief cleared ("No brief yet") | Monitoring |
 | 3:40–4:00 | **Select Riau** → zoomed view with NEA wind and haze | Riau selected. The zoomed inset (around Riau, with Singapore in frame) shows: the simulated hotspot marker; a **wind arrow** pointing downwind, labelled "Wind from SW (226°), 4.1 kn"; an **illustrative drift cone** from the hotspot, labelled on the map "Illustrative drift, not a dispersion model"; a **Singapore PSI chip** ("24-h PSI 52–60, Moderate · NEA"); and a **LIVE** or **HISTORICAL SNAPSHOT** tag with the reading time. The detail column shows the Riau incident (SIMULATED, Check observation) and the compact NEA context card with "Context only; does not change the review state." Replay controls disabled with "Replay applies to Merapi." | LIVE or HISTORICAL SNAPSHOT; the wind arrow; "not a dispersion model"; the PSI value |
 
@@ -219,6 +219,92 @@ P0 breaks the demo. P1 hurts legibility or trust. P2 is polish. "Straightforward
 4. Docs: `docs/DEMO_SCRIPT.md` needs the 3:25–4:00 split for the Riau and NEA beat (section 2).
 5. Confirm the presentation mode: F11 full screen (768 px tall) or windowed (about 650 px tall). I will design for windowed either way.
 
-## 7. Phase 2 log
+## 7. Phase 2 log (redesign, 13 October 2026)
 
-Filled in during phase 2: screenshots, changes per file, verification results, remaining issues.
+The product changed under this review twice during phase 2: all data became real (no DEMO REPLAY banner, no SIMULATED badges, five watch areas, a seven-day replay of real NASA FIRMS and USGS/BMKG records), and relayed official warnings became a core element. The design system and the chosen direction are in `docs/DESIGN.md`; this section records what was built and measured. Sections 0 to 6 above describe the earlier simulated build and are kept as history.
+
+### Screenshots
+
+Headless Chrome (the dependency-free harness in the session scratchpad, `aw-shots/`), real data, live feeds on unless stated.
+
+| Beat | Before (simulated build) | After (redesign) |
+|---|---|---|
+| Overview, 1366×680 | `aw-shots/before/1366x680_01-overview.png` | `aw-shots/after/1366x680_01-overview.png` |
+| Merapi, day 3, 1366×680 | `aw-shots/before/1366x680_04-gas.png` | `aw-shots/after/1366x680_04-gas.png` |
+| Why this state?, 1366×680 | `aw-shots/before/1366x680_05-why.png` | `aw-shots/after/1366x680_05-why.png` |
+| Record inspector, 1366×680 | `aw-shots/before/1366x680_06-inspector.png` | `aw-shots/after/1366x680_06-inspector.png` |
+| Brief preview, 1366×680 | `aw-shots/before/1366x680_07-brief-preview.png` | `aw-shots/after/1366x680_07-brief-preview.png` |
+| Riau with NEA, 1366×680 | `aw-shots/before/1366x680_11-riau-nea.png` | `aw-shots/after/1366x680_11-riau-nea.png` |
+| Merapi, 1024×700 | `aw-shots/before/1024x700_04-gas.png` | `aw-shots/after/1024x700_04-gas.png` |
+| Merapi, 375×812 | `aw-shots/before/375x812_04-gas.png` | `aw-shots/after/375x812_04-gas.png` |
+| Riau offline (snapshot), 1366×680 | — | `aw-shots/offline/1366x680_11-riau-nea.png` |
+| Keyboard path | — | `aw-shots/kbd/k1-merapi.png` … `k5-warning.png` |
+
+### What changed, per file
+
+| File | Change |
+|---|---|
+| `src/index.css` | New token values (validated contrast table in DESIGN.md §2), reserved `--official*` and `--estimate`, `--mode-modelled-*`, dark-frame `--on-dark*`, layout sizes; radii 4/3 px; mono + tabular figures on every `time`; `.visually-hidden` anchored at top-left so hidden text never widens the page. |
+| `src/App.css` | Rewritten: dark header, three-column console (rail 248 px · map · review 488 px), bottom timeline with day cells and counts, rail lists, compact evidence rows (title clamped to two lines, one-line source and reason), official cross-reference block, reserved official chip styles, drawer and brief dialog, narrow layouts (two-row at ≤1100 px, single column ≤700 px, compact header and sticky timeline ≤640/480 px). |
+| `src/App.tsx` | Three-column layout; every watch replays over the shared seven days (no scenario special case); snapshot time and attributions from `fixtures.snapshot`; `watchMeta` references and rules read structurally; official warnings loaded snapshot-first then live, filtered with `warningsNear` (150 km) plus an "elsewhere" list; warning inspector; per-day counts for the timeline; brief stamped with its context key (stale instead of cleared when NEA or feeds arrive, so an open preview is never pulled away); Esc clears the selection; window shortcuts removed. |
+| `src/components/AppHeader.tsx` | DEMO REPLAY → "Real data · data as of <time> UTC · official warnings relayed verbatim · not an official warning service" (short form ≤640 px); says "Demo data · simulated records" if any simulated record is ever loaded. Publishes its measured height as `--header-offset` (drawer inset only). The header's own `min-height` is a literal 40 px: the previous build fed the measured height back into `min-height`, so an unstyled first paint (before App.css applied) could lock the header at ~200 px (lead's P0 at 1366×680). |
+| `src/components/ReplayBar.tsx` | Bottom timeline: `ol` of day cells with `aria-current="step"` and per-day record counts, "Step n of 7 · <day> · <clock> · <n> records so far"; → and R only while focus is inside the bar. |
+| `src/components/IncidentQueue.tsx` | "Watch areas" rail list: name, count · hazard, state badge; "All APAC" action while a watch is selected. |
+| `src/components/IncidentDetail.tsx` | Title, location with mono coordinates, catalogue and "Also see" reference links, official cross-reference (reserved style, Details, Follow <issuer>), 22 px state badge with "Our workflow state from stated watch rules, not an official alert level", Why with the rule, the watch rules and per-record treatment plus the watch rule that fired; Details disclosure ("Watch window"). |
+| `src/components/EvidenceTimeline.tsx` | Compact rows: NEW · category · value · Observed time · Counted pill; title (2 lines); HISTORICAL SNAPSHOT + source; reason only when not counted. |
+| `src/components/RecordInspector.tsx` | Fields: value, observed, ingested, data mode, source + link, quality note, review treatment, watch rule; hotspot members table per overpass; All fields + raw record. |
+| `src/components/OfficialWarnings.tsx/.css` (new) | Official warnings panel (near / APAC, "Elsewhere in APAC" group, instruction collapsed, flood gauge line, EXPIRED/ENDED, impact-estimate styling, feed footer with the exact unavailable sentence, attribution line, "All APAC" action, APAC list capped at the newest 20 with "Show all n warnings") and the warning inspector drawer. |
+| `src/components/Badges.tsx` | `ModeBadge` with optional time (HISTORICAL SNAPSHOT / LIVE / MODELLED), `OfficialTag`, `OfficialLevelChip` (square, verbatim, gloss), `EndedChip` (EXPIRED <time> / ENDED), `SourceBadge` with the full real source name. |
+| `src/components/BriefPanel.tsx` | Context-stale handling and copy; Download .txt stays in the dialog header. |
+| `src/components/RegionMap.tsx/.css` | Tokens and 13 px labels, measured-stage collision placement, Layers control (Watch areas · Official warnings · NEA wind and haze), official diamond markers and gauge squares with callouts and legend rows, hit-testing and decluttering of the Java cluster, compact mode below 520 px (see "remaining issues" for what was still open at the time of writing). |
+| `index.html` | Title "ASEAN Watch · Environment", theme colour, description. |
+
+### Verification (measured)
+
+| Check | Result |
+|---|---|
+| `npx tsc -b`, `npx vite build`, `npm test` | pass (205 tests) |
+| Page scroll at 1366×680 on the whole path | document height 680 px at every beat (was up to 124 782 px when the APAC list's hidden text escaped the panel; fixed) |
+| Horizontal overflow at 375×812 | none (document width 375; was 472 before anchoring `.visually-hidden`) |
+| Sticky chrome at 375 px | header 70 px (two-line recency text) + bottom timeline ≤ 88 px; day cells hidden ≤ 480 px |
+| Evidence row height at 1366 | 97 px (counted) · 142 px (not counted, two-line title) · was 130–162 |
+| Evidence row height at 1024 | 79–100 px |
+| State badge | 22 px, the largest text in the review column |
+| Map share of the main area at 1366×680 | 582×564 px ≈ 46 % (was 775×405 ≈ 43 %) |
+| Console errors across the tours | 0 |
+| Offline (all https blocked) | map, watches, replay, warnings snapshot ("Feeds: 11 snapshot"), NEA "HISTORICAL SNAPSHOT 2026-10-13 06:49 UTC", brief all work; no "no warnings" wording anywhere |
+| Reduced motion | every transition 0.01 ms; zero CSS animations exist even with motion allowed |
+| Keyboard-only path | From the top of the page: Merapi row after 1 Tab, Next step after 34 Tabs (the official/gauge markers are one roving-tabindex group; it was 133 before), Why this state? after 27, the newest record after 9, Generate brief after 16, Download .txt after 2 inside the preview; every stop has a visible focus ring except the one-time remount noted below; Enter and Space activate; → and R change the step only while the timeline has focus; Esc closes dialogs and returns focus to the opener; warning Details opens the drawer; the Layers checkboxes are reachable and toggle with Space |
+
+### Accessibility audit (WCAG 2.1 AA, design review)
+
+| # | Finding | Criterion | Severity | Status |
+|---|---|---|---|---|
+| 1 | Every text/background pair in the token set ≥ 4.5:1; control borders and focus rings ≥ 3:1 (computed, DESIGN.md §2) | 1.4.3 / 1.4.11 | — | pass |
+| 2 | Review needed amber fill is 2.1:1 against white as a fill; its 5.1:1 border and the text label carry the meaning | 1.4.11 | minor | accepted, by design |
+| 3 | State, mode, rule-treatment and official families differ by shape, case and wording, not colour alone | 1.4.1 | — | pass |
+| 4 | Single-key shortcuts (→, R) scoped to the timeline bar | 2.1.4 | — | pass |
+| 5 | Dialogs: focus in on open, Esc closes, focus returns; page inert behind a native `<dialog>` | 2.1.2 / 2.4.3 | — | pass |
+| 6 | Focus visible on every control, 2 px ring with offset; amber ring on the dark bars | 2.4.7 | — | pass |
+| 7 | Layers checkboxes are 14×14 px (their labels enlarge the target); inline links are 17 px tall | 2.5.5 (AAA) / 2.5.8 | minor | open: pad the checkbox labels to ≥ 24 px |
+| 8 | Verbatim Indonesian/Thai/Japanese text carries `lang` attributes | 3.1.2 | — | pass |
+| 9 | Landmarks: header, `aside` rail, `main`, sections with headings; map markers are buttons with state in the name | 1.3.1 / 4.1.2 | — | pass |
+
+### Vibecoded-tells audit (final screens)
+
+Tells found: 0 structural, 1 visual (the uniform 1 px hairline card rhythm in the rail could read as a template; the official rail colour and the dark frame break it), 0 copy. Checked and absent: default favicon, pulse/radar motion, gradients, glassmorphism, emoji, icon grids, fake proof, Tailwind palette, 800-weight type, hover-scale cards, placeholder copy, "all clear".
+
+### Remaining issues
+
+| Priority | Issue | Owner |
+|---|---|---|
+| P2 | NEA inset at 1366: the PSI chip ("Singapore 24-hr PSI … (NEA)") and the "Illustrative drift, not a dispersion model" label overlap each other inside the inset (both readable, but untidy); requested from the map helper, verify after its last pass | map |
+| P2 | Phone map (355×300): the legend and Layers now collapse into a "Legend and layers" toggle; re-check that the NEA strip stays inside the inset for Riau after the helper's last pass | map |
+| P2 | Java cluster hit-testing: the helper offset the overlapping Merapi/Semeru/Anak Krakatau markers with pointer-events off on tags; the mouse tour selects Merapi reliably at all three widths, but a click on each of the three by the lead at the projector size is the real test | map / lead |
+| P1 | `WatchMeta.references` are labelled "Also see" with "(official)" / "(not official)" suffixes rather than "Independent monitoring", because the list includes the official MAGMA page | docs / lead decision |
+| done | Keyboard: the official diamond and gauge square markers are one roving-tabindex group (arrow keys inside); Next step is 34 Tabs from the top of the page with Merapi selected | map |
+| P2 | When the live feed result replaces the snapshot list a few seconds after load, the focused "Details" button is remounted and focus drops to the body once (warning ids include the retrieval time, so keys change). Harmless on stage; a stable key would fix it | lib (ids) / UI |
+| P2 | Layers checkboxes: enlarge the click area to ≥ 24 px | map |
+| done | Attribution: short credits (including "Sumber data: BMKG") stay visible under the review column; acknowledgements longer than 120 characters fold into "Data acknowledgements" | UI |
+| P2 | Hotspot members could also be drawn as small dots in the zoomed inset | map |
+| P2 | Ingested time is now only in the inspector (identical for every snapshot record); the row shows Observed | accepted |

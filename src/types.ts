@@ -184,7 +184,7 @@ export interface EvidenceItem {
 export interface ReviewResult {
   state: ReviewState;
   label: ReviewLabel;
-  /** Distinct anomaly categories inside the scenario window, in first-seen order. */
+  /** Distinct anomaly categories inside the watch window, in first-seen order. */
   anomalyCategories: Category[];
   /** Every visible observation, oldest first, each with its reason. */
   evidence: EvidenceItem[];
