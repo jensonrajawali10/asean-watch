@@ -1,7 +1,8 @@
 /* ASEAN Watch console layout and components. Tokens live in index.css; the design is in docs/DESIGN.md.
    Desktop target: a windowed browser at 1366x650 CSS px. A dark header and a dark bottom timeline frame a
-   light workspace of three columns (rail | map | review). Columns scroll internally; the page never scrolls
-   on the demo path at desktop widths. */
+   full-bleed map; the list (left) and the review (right) float over it, scroll internally and collapse to
+   slim tabs. The page never scrolls on the demo path at desktop widths; below 900 px the panels stack under
+   the map and the page scrolls. */
 
 /* ---------- Shell ------------------------------------------------------------------------- */
 
@@ -453,12 +454,170 @@
 
 /* ---------- Workspace: rail | map | review ------------------------------------------------- */
 
+/* The map fills the workspace edge to edge; the list and review panels float over it. */
 .workspace {
+  --float-inset: 12px;
+  --float-left-w: 300px;
+  --float-right-w: 400px;
+  position: relative;
   min-height: 0;
-  display: grid;
-  grid-template-columns: var(--rail-w) minmax(0, 1fr) minmax(420px, var(--review-w));
-  gap: var(--gap);
-  padding: var(--gap);
+  overflow: hidden;
+}
+
+/* ---------- Floating panels ---------------------------------------------------------------- */
+
+.float-panel {
+  position: absolute;
+  z-index: 20;
+  top: var(--float-inset);
+  bottom: var(--float-inset);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.float-left {
+  left: var(--float-inset);
+  width: var(--float-left-w);
+}
+
+.float-right {
+  right: var(--float-inset);
+  width: var(--float-right-w);
+}
+
+/* Collapsed: a slim vertical tab just below mid-height, clear of the map's corner controls (legend and
+   locator inset above, zoom and caption below at 1366x680). */
+.float-panel[data-collapsed] {
+  top: 56%;
+  bottom: auto;
+  width: auto;
+  transform: translateY(-50%);
+}
+
+.float-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 2px 4px 2px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.float-eyebrow {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.float-btn {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.float-btn:hover {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.float-tab {
+  position: relative;
+  display: block;
+  padding: 12px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+}
+
+.float-tab:hover {
+  background: var(--selected-bg);
+}
+
+.float-left .float-tab {
+  transform: rotate(180deg);
+}
+
+.float-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.float-body[hidden] {
+  display: none;
+}
+
+/* Inside a floating panel the list sections share one surface, divided by hairlines. */
+.float-panel .rail-watch,
+.float-panel .ow-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.float-panel .ow-panel {
+  border-top: 1px solid var(--border);
+}
+
+/* Shown at the top centre of the map while no watch area is selected (no review panel yet). */
+.float-hint {
+  position: absolute;
+  z-index: 20;
+  left: calc(var(--float-left-w) + 2 * var(--float-inset));
+  right: var(--float-inset);
+  top: var(--float-inset);
+  width: fit-content;
+  max-width: 440px;
+  margin-inline: auto;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+.workspace[data-left='collapsed'] .float-hint {
+  left: var(--float-inset);
+}
+
+.float-hint-note {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .rail {
@@ -466,7 +625,17 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--gap);
+}
+
+.rail > .panel-datacheck {
+  margin: 8px;
+}
+
+.rail > .data-attribution {
+  flex: none;
+  margin: 0;
+  padding: 6px 12px 8px;
+  font-size: 11.5px;
 }
 
 /* Positioned, so overflow:hidden also clips absolutely positioned descendants (visually-hidden text
@@ -487,7 +656,7 @@
 }
 
 .rail-watch {
-  max-height: 60%;
+  max-height: 40%;
 }
 
 /* The official warnings panel takes the rail's remaining height and scrolls inside. */
@@ -667,14 +836,25 @@
 
 /* ---------- Map ----------------------------------------------------------------------------- */
 
+/* Full-size map container. --overlay-left / --overlay-right give the width each open floating panel
+   covers (inset included), so map controls can offset themselves; 0 when a panel is collapsed (its
+   slim tab sits at mid-height, clear of the corners) or absent. */
 .map-panel {
-  position: relative;
+  --overlay-left: 0px;
+  --overlay-right: 0px;
+  position: absolute;
+  inset: 0;
   min-width: 0;
-  min-height: 200px;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   background: var(--map-water);
+}
+
+.workspace[data-left='open'] .map-panel {
+  --overlay-left: calc(var(--float-left-w) + 2 * var(--float-inset));
+}
+
+.workspace[data-right='open'] .map-panel {
+  --overlay-right: calc(var(--float-right-w) + 2 * var(--float-inset));
 }
 
 .map-frame {
@@ -707,9 +887,6 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--panel);
 }
 
 .right-scroll {
@@ -1531,17 +1708,26 @@ dialog::backdrop {
   font-size: 13px;
 }
 
-/* ---------- Medium widths ----------------------------------------------------------------- */
+/* ---------- Medium widths: slimmer floating panels ------------------------------------------ */
 
 @media (max-width: 1240px) {
   .workspace {
-    grid-template-columns: 216px minmax(0, 1fr) minmax(400px, 420px);
+    --float-left-w: 272px;
+    --float-right-w: 372px;
   }
 }
 
-/* ---------- Narrow: stacked in workflow order, page scrolls, timeline sticks to the bottom -- */
+@media (max-width: 1040px) {
+  .workspace {
+    --float-inset: 8px;
+    --float-left-w: 248px;
+    --float-right-w: 340px;
+  }
+}
 
-@media (max-width: 1100px) {
+/* ---------- Narrow: map on top (about 60vh), panels stacked below, page scrolls ------------- */
+
+@media (max-width: 899px) {
   .app {
     display: flex;
     flex-direction: column;
@@ -1557,17 +1743,64 @@ dialog::backdrop {
   }
 
   .workspace {
+    flex: 1 0 auto;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 10px;
+    padding: 0 0 10px;
+    overflow: visible;
   }
 
-  /* Rail panels side by side above the map. */
-  .rail {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: start;
+  .map-panel {
+    --overlay-left: 0px;
+    --overlay-right: 0px;
+    position: relative;
+    inset: auto;
+    flex: none;
+    height: 60vh;
+    min-height: 280px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .workspace[data-left='open'] .map-panel,
+  .workspace[data-right='open'] .map-panel {
+    --overlay-left: 0px;
+    --overlay-right: 0px;
+  }
+
+  .float-panel,
+  .float-panel[data-collapsed] {
+    position: relative;
+    inset: auto;
+    width: auto;
+    margin: 0 10px;
+    transform: none;
+    box-shadow: none;
+    background: var(--panel);
+  }
+
+  /* Scrolled into view after a pick from the list; stays clear of the sticky header. */
+  .float-right {
+    scroll-margin-top: calc(var(--header-offset) + 10px);
+  }
+
+  .float-tab {
+    width: 100%;
+    padding: 8px 12px;
+    text-align: left;
+    writing-mode: horizontal-tb;
+  }
+
+  .float-left .float-tab {
+    transform: none;
+  }
+
+  .float-hint {
+    position: static;
+    width: auto;
+    max-width: none;
+    margin: 0 10px;
+    box-shadow: none;
   }
 
   .rail-watch {
@@ -1576,11 +1809,6 @@ dialog::backdrop {
 
   .rail > .ow-panel {
     max-height: 300px;
-  }
-
-  .map-panel {
-    flex: none;
-    height: 340px;
   }
 
   .col-review {
@@ -1595,12 +1823,6 @@ dialog::backdrop {
     position: sticky;
     bottom: 0;
     z-index: 30;
-  }
-}
-
-@media (max-width: 700px) {
-  .rail {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -1624,10 +1846,6 @@ dialog::backdrop {
 
   .recency-short {
     display: inline;
-  }
-
-  .map-panel {
-    height: 300px;
   }
 
   .right-scroll {

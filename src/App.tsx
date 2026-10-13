@@ -240,6 +240,15 @@ export default function App() {
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
   const briefSeq = useRef(0);
+  /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  /** Each side renders one toggle at a time (header button or slim tab); after a toggle, focus follows it. */
+  const leftToggleRef = useRef<HTMLButtonElement>(null);
+  const rightToggleRef = useRef<HTMLButtonElement>(null);
+  const pendingFocus = useRef<'left' | 'right' | null>(null);
+  /** Narrow layout only: a pick from the list panel scrolls the review (stacked under the list) into view. */
+  const pendingReveal = useRef(false);
 
   // --- Derived state -------------------------------------------------------
 
@@ -342,6 +351,7 @@ export default function App() {
       setBrief(null);
       setPlaying(false);
       setInspectedId(null);
+      if (id !== null) setRightCollapsed(false);
       writeHashIncident(id);
     },
     [selectedIncidentId],
@@ -440,6 +450,7 @@ export default function App() {
   useEffect(() => {
     const onHashChange = () => {
       setSelectedIncidentId(readHashIncident());
+      setRightCollapsed(false);
       setBrief(null);
       setPlaying(false);
       setInspectedId(null);
@@ -456,6 +467,8 @@ export default function App() {
       if (document.querySelector('dialog[open]')) return;
       const target = e.target instanceof Element ? e.target : null;
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      // Esc closes the review panel; focus moves to the list panel instead of falling to the page.
+      if (document.activeElement?.closest('.float-right')) pendingFocus.current = 'left';
       selectIncident(null);
     };
     window.addEventListener('keydown', onKeyDown);
@@ -514,6 +527,44 @@ export default function App() {
     reviewScrollRef.current?.scrollTo({ top: 0 });
   }, [replayIndex, selectedIncidentId]);
 
+  // After a collapse, expand or close, focus the control that replaced the one just used.
+  useEffect(() => {
+    const side = pendingFocus.current;
+    pendingFocus.current = null;
+    if (side === 'left') leftToggleRef.current?.focus();
+    if (side === 'right') rightToggleRef.current?.focus();
+  }, [leftCollapsed, rightCollapsed, selectedIncidentId]);
+
+  useEffect(() => {
+    if (!pendingReveal.current) return;
+    pendingReveal.current = false;
+    if (!window.matchMedia?.('(max-width: 899px)').matches) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // After the map's own selection effects (which can move focus and cancel a smooth scroll).
+    const timer = window.setTimeout(() => {
+      document.querySelector('.float-right')?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [selectedIncidentId]);
+
+  const selectFromList = (id: string) => {
+    pendingReveal.current = true;
+    selectIncident(id);
+  };
+
+  const toggleLeft = () => {
+    pendingFocus.current = 'left';
+    setLeftCollapsed((c) => !c);
+  };
+  const toggleRight = () => {
+    pendingFocus.current = 'right';
+    setRightCollapsed((c) => !c);
+  };
+  const closeReview = () => {
+    pendingFocus.current = 'left';
+    selectIncident(null);
+  };
+
   // --- Render --------------------------------------------------------------
 
   const firstName = FIRST_INCIDENT ? (PLACE_NAMES[FIRST_INCIDENT.id] ?? FIRST_INCIDENT.title) : null;
@@ -529,6 +580,26 @@ export default function App() {
 
   const neaLoading = neaResult === null && incident !== null && isNearSingapore(incident.lat, incident.lon);
   const selectedName = incident ? (PLACE_NAMES[incident.id] ?? incident.title) : null;
+  /** The review panel floats in when a watch area is selected (or a #incident link names an unknown one). */
+  const showReview = incident !== null || missingId !== null;
+
+  /** Snapshot data acknowledgements: in the review panel, or the list panel while no review is open. */
+  const attribution =
+    ATTRIBUTIONS.length > 0 ? (
+      <div className="data-attribution">
+        {ATTRIBUTIONS.filter((line) => line.length <= 120).map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+        {ATTRIBUTIONS.some((line) => line.length > 120) && (
+          <details className="data-attribution-more">
+            <summary>Data acknowledgements</summary>
+            {ATTRIBUTIONS.filter((line) => line.length > 120).map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </details>
+        )}
+      </div>
+    ) : null;
 
   // Spread so the optional context props compile before and after RegionMap declares them.
   const mapProps: RegionMapProps & {
@@ -558,33 +629,13 @@ export default function App() {
     <div className="app">
       <AppHeader dataAsOf={DATA_AS_OF} allReal={ALL_REAL} />
 
-      <main className="workspace">
-        <aside className="rail" aria-label="Watch areas and official warnings">
-          <IncidentQueue
-            incidents={INCIDENTS}
-            reviews={reviews}
-            selectedId={incident?.id ?? null}
-            scenarioIncidentId={null}
-            onSelect={selectIncident}
-            placeNames={PLACE_NAMES}
-            onClearSelection={() => selectIncident(null)}
-          />
-          <ErrorBoundary resetKey={selectedIncidentId} fallback={(message) => <PanelError message={message} />}>
-            <OfficialWarningsPanel
-              warnings={nearWarnings}
-              gauges={warningsResult.gauges}
-              feeds={warningsResult.feeds}
-              nearName={selectedName}
-              elsewhere={elsewhereWarnings}
-              onShowAll={() => selectIncident(null)}
-              loading={warningsLoading}
-              selectedWarningId={inspectedWarningId}
-              onInspect={openWarning}
-            />
-          </ErrorBoundary>
-          <DataCheckNotice issues={FIXTURES.issues} duplicatesIgnored={FIXTURES.duplicatesIgnored} loadError={LOAD_ERROR} />
-        </aside>
-
+      <main
+        className="workspace"
+        data-left={leftCollapsed ? 'collapsed' : 'open'}
+        data-right={showReview ? (rightCollapsed ? 'collapsed' : 'open') : 'none'}
+      >
+        {/* The map is the base layer and fills the workspace; the panels float over it. Map controls can
+            read --overlay-left / --overlay-right (set on .map-panel) to stay clear of the open panels. */}
         <section className="map-panel" aria-label="Regional map">
           <div className="map-frame">
             <ErrorBoundary
@@ -603,80 +654,190 @@ export default function App() {
           </div>
         </section>
 
-        <div className="col-review">
-          <div className="right-scroll" ref={reviewScrollRef}>
-            <ErrorBoundary
-              resetKey={`${selectedIncidentId}|${replayIndex}`}
-              fallback={(message) => <PanelError message={message} />}
+        <aside
+          className="float-panel float-left"
+          data-collapsed={leftCollapsed || undefined}
+          aria-label="Watch areas and official warnings"
+        >
+          {leftCollapsed ? (
+            <button
+              ref={leftToggleRef}
+              type="button"
+              className="float-tab"
+              aria-expanded="false"
+              aria-controls="list-panel-body"
+              title="Show watch areas and official warnings"
+              onClick={toggleLeft}
             >
-              <IncidentDetail
-                incident={incident}
-                missingId={missingId}
-                review={review}
-                volcano={volcano}
-                isScenario={replayEnabled}
-                scenarioIncident={FIRST_INCIDENT}
-                placeName={firstName ?? undefined}
-                onSelect={selectIncident}
-                onClearSelection={() => selectIncident(null)}
-                onInspect={openInspector}
-                officialNear={nearWarnings}
-                onInspectWarning={openWarning}
-                references={incident ? REFERENCES[incident.id] : undefined}
-                watchRules={incident ? RULES_BY_WATCH[incident.id] : undefined}
-                context={
-                  incident && (neaLoading || drift) ? (
-                    <NeaContextCard
-                      loading={neaLoading}
-                      nea={nea}
-                      drift={drift}
-                      fellBack={neaResult?.fellBack ?? false}
-                      error={neaResult?.error ?? null}
-                    />
-                  ) : null
-                }
+              <span className="float-tab-label">Watches · Warnings</span>
+            </button>
+          ) : (
+            <div className="float-head">
+              <span className="float-eyebrow" aria-hidden="true">
+                Watches · Warnings
+              </span>
+              <button
+                ref={leftToggleRef}
+                type="button"
+                className="float-btn"
+                aria-expanded="true"
+                aria-controls="list-panel-body"
+                title="Collapse panel"
+                onClick={toggleLeft}
+              >
+                <span aria-hidden="true">‹</span>
+                <span className="visually-hidden">Collapse watch areas and official warnings</span>
+              </button>
+            </div>
+          )}
+          <div id="list-panel-body" className="float-body rail" hidden={leftCollapsed}>
+            <IncidentQueue
+              incidents={INCIDENTS}
+              reviews={reviews}
+              selectedId={incident?.id ?? null}
+              scenarioIncidentId={null}
+              onSelect={selectFromList}
+              placeNames={PLACE_NAMES}
+              onClearSelection={() => selectIncident(null)}
+            />
+            <ErrorBoundary resetKey={selectedIncidentId} fallback={(message) => <PanelError message={message} />}>
+              <OfficialWarningsPanel
+                warnings={nearWarnings}
+                gauges={warningsResult.gauges}
+                feeds={warningsResult.feeds}
+                nearName={selectedName}
+                elsewhere={elsewhereWarnings}
+                onShowAll={() => selectIncident(null)}
+                loading={warningsLoading}
+                selectedWarningId={inspectedWarningId}
+                onInspect={openWarning}
               />
             </ErrorBoundary>
-            <ErrorBoundary
-              resetKey={`${selectedIncidentId}|${replayIndex}`}
-              fallback={(message) => <PanelError message={message} />}
-            >
-              <EvidenceTimeline
-                incident={incident}
-                missingId={missingId}
-                review={review}
-                isScenario={replayEnabled}
-                replayIndex={replayIndex}
-                onInspect={openInspector}
-              />
-              <IncidentExtras incident={incident} review={review} />
-            </ErrorBoundary>
-            {ATTRIBUTIONS.length > 0 && (
-              <div className="data-attribution">
-                {ATTRIBUTIONS.filter((line) => line.length <= 120).map((line) => (
-                  <p key={line}>{line}</p>
-                ))}
-                {ATTRIBUTIONS.some((line) => line.length > 120) && (
-                  <details className="data-attribution-more">
-                    <summary>Data acknowledgements</summary>
-                    {ATTRIBUTIONS.filter((line) => line.length > 120).map((line) => (
-                      <p key={line}>{line}</p>
-                    ))}
-                  </details>
-                )}
+            <DataCheckNotice issues={FIXTURES.issues} duplicatesIgnored={FIXTURES.duplicatesIgnored} loadError={LOAD_ERROR} />
+            {!showReview && attribution}
+          </div>
+        </aside>
+
+        {showReview ? (
+          <aside
+            className="float-panel float-right"
+            data-collapsed={rightCollapsed || undefined}
+            aria-label={selectedName ? `Review: ${selectedName}` : 'Review'}
+          >
+            {rightCollapsed ? (
+              <button
+                ref={rightToggleRef}
+                type="button"
+                className="float-tab"
+                aria-expanded="false"
+                aria-controls="review-panel-body"
+                title="Show the review"
+                onClick={toggleRight}
+              >
+                <span className="float-tab-label">Review{selectedName ? ` · ${selectedName}` : ''}</span>
+              </button>
+            ) : (
+              <div className="float-head">
+                <span className="float-eyebrow" aria-hidden="true">
+                  Review{selectedName ? ` · ${selectedName}` : ''}
+                </span>
+                <button
+                  ref={rightToggleRef}
+                  type="button"
+                  className="float-btn"
+                  aria-expanded="true"
+                  aria-controls="review-panel-body"
+                  title="Collapse panel"
+                  onClick={toggleRight}
+                >
+                  <span aria-hidden="true">›</span>
+                  <span className="visually-hidden">Collapse the review</span>
+                </button>
+                <button type="button" className="float-btn" title="Close (Esc)" onClick={closeReview}>
+                  <span aria-hidden="true">×</span>
+                  <span className="visually-hidden">Close the review</span>
+                </button>
               </div>
             )}
+            <div id="review-panel-body" className="float-body col-review" hidden={rightCollapsed}>
+              <div className="right-scroll" ref={reviewScrollRef}>
+                <ErrorBoundary
+                  resetKey={`${selectedIncidentId}|${replayIndex}`}
+                  fallback={(message) => <PanelError message={message} />}
+                >
+                  <IncidentDetail
+                    incident={incident}
+                    missingId={missingId}
+                    review={review}
+                    volcano={volcano}
+                    isScenario={replayEnabled}
+                    scenarioIncident={FIRST_INCIDENT}
+                    placeName={firstName ?? undefined}
+                    onSelect={selectIncident}
+                    onClearSelection={() => selectIncident(null)}
+                    onInspect={openInspector}
+                    officialNear={nearWarnings}
+                    onInspectWarning={openWarning}
+                    references={incident ? REFERENCES[incident.id] : undefined}
+                    watchRules={incident ? RULES_BY_WATCH[incident.id] : undefined}
+                    context={
+                      incident && (neaLoading || drift) ? (
+                        <NeaContextCard
+                          loading={neaLoading}
+                          nea={nea}
+                          drift={drift}
+                          fellBack={neaResult?.fellBack ?? false}
+                          error={neaResult?.error ?? null}
+                        />
+                      ) : null
+                    }
+                  />
+                </ErrorBoundary>
+                <ErrorBoundary
+                  resetKey={`${selectedIncidentId}|${replayIndex}`}
+                  fallback={(message) => <PanelError message={message} />}
+                >
+                  <EvidenceTimeline
+                    incident={incident}
+                    missingId={missingId}
+                    review={review}
+                    isScenario={replayEnabled}
+                    replayIndex={replayIndex}
+                    onInspect={openInspector}
+                  />
+                  <IncidentExtras incident={incident} review={review} />
+                </ErrorBoundary>
+                {attribution}
+              </div>
+              <BriefPanel
+                incident={incident}
+                contextLabel={contextLabel}
+                brief={brief}
+                contextKey={contextKey}
+                filename={incident ? briefingFilename(incident, currentStep) : null}
+                onGenerate={generateBrief}
+                onDownload={downloadBrief}
+              />
+            </div>
+          </aside>
+        ) : (
+          <div className="float-hint">
+            <p>
+              Select a watch area on the map or in the list.
+              {FIRST_INCIDENT && (
+                <>
+                  {' '}
+                  <button type="button" className="link-button" onClick={() => selectFromList(FIRST_INCIDENT.id)}>
+                    Open {firstName ?? FIRST_INCIDENT.title}
+                  </button>
+                </>
+              )}
+            </p>
+            <p className="float-hint-note">
+              Official agency levels are relayed verbatim; our workflow state is not an alert level.
+            </p>
           </div>
-          <BriefPanel
-            incident={incident}
-            contextLabel={contextLabel}
-            brief={brief}
-            contextKey={contextKey}
-            filename={incident ? briefingFilename(incident, currentStep) : null}
-            onGenerate={generateBrief}
-            onDownload={downloadBrief}
-          />
-        </div>
+        )}
       </main>
 
       <ReplayBar

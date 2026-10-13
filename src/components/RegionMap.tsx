@@ -116,7 +116,30 @@ interface View {
 }
 const HOME_VIEW: View = { k: 1, x: 0, y: 0 };
 /** Deepest zoom: about 0.2° of longitude across the map frame. */
-const MIN_SPAN_DEG = 0.2;
+const MIN_SPAN_DEG = 0.006;
+
+// Street basemap: OpenStreetMap standard raster tiles (CARTO Positron now answers every keyless
+// request with an "API KEY REQUIRED" image), desaturated in CSS and drawn between the Natural Earth
+// land and every overlay. d3's geoMercator is spherical (Web) Mercator, so a tile is an axis-aligned
+// square in base units. Tiles fade in with zoom (absent at the APAC overview) and are positioned in
+// viewBox units computed in double precision, so they stay aligned at street level.
+const TILE_FADE_START = 2;
+const TILE_FADE_FULL = 6;
+const TILE_MAX_OPACITY = 0.9;
+const TILE_MIN_Z = 2;
+const TILE_MAX_Z = 18;
+/** Safety cap per zoom level (visible tiles plus a one-tile margin are far fewer). */
+const TILE_MAX_PER_LEVEL = 120;
+const tileUrl = (z: number, x: number, y: number) =>
+  `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+
+interface MapTile {
+  key: string;
+  href: string;
+  x: number;
+  y: number;
+  size: number;
+}
 /** The view centre stays over the base frame plus this margin (viewBox units). */
 const PAN_MARGIN = 160;
 /** Selection fits: ±0.3° around a summit (so the 15 km reference rings fill the view); a watch box with a 0.3° margin. */
@@ -1135,7 +1158,7 @@ export default function RegionMap({
   const toView = useCallback((p: Point): Point => [view.x + view.k * p[0], view.y + view.k * p[1]], [view]);
   const calloutId = useId();
   const layersTitleId = useId();
-  const [layers, setLayers] = useState({ watch: true, warnings: true, nea: true, transport: true, rings: true });
+  const [layers, setLayers] = useState({ watch: true, warnings: true, nea: true, transport: true, rings: true, tiles: true });
   const [geom, setGeom] = useState<StageGeom | null>(null);
   /** Roving tabindex for the official/gauge markers: index of the one tab stop. */
   const [officialActive, setOfficialActive] = useState(0);
@@ -1208,6 +1231,50 @@ export default function RegionMap({
 
   const live = geom ?? fallbackGeom(selected !== null, neaActive, insetAtBottom);
   const { px, frame, narrow } = live;
+
+  // Street tiles for the visible frame (plus a one-tile margin) at the zoom level matching the
+  // on-screen scale, with the next coarser level underneath so a zoom change never flashes blank.
+  const tileOpacity = layers.tiles
+    ? clamp((view.k - TILE_FADE_START) / (TILE_FADE_FULL - TILE_FADE_START), 0, 1) * TILE_MAX_OPACITY
+    : 0;
+  const tiles = useMemo<MapTile[]>(() => {
+    if (tileOpacity <= 0) return [];
+    const unit = px > 0 ? px : FALLBACK_PX;
+    const s0 = basemap.projection.scale();
+    const [t0x, t0y] = basemap.projection.translate();
+    const z = clamp(Math.round(Math.log2((view.k * s0 * unit * 2 * Math.PI) / 256)), TILE_MIN_Z, TILE_MAX_Z);
+    const bx0 = (frame.x / unit - view.x) / view.k;
+    const by0 = (frame.y / unit - view.y) / view.k;
+    const bx1 = ((frame.x + frame.w) / unit - view.x) / view.k;
+    const by1 = ((frame.y + frame.h) / unit - view.y) / view.k;
+    const ox = t0x - s0 * Math.PI;
+    const oy = t0y - s0 * Math.PI;
+    /** Half a screen pixel of overlap hides hairline seams between tiles. */
+    const overlap = 0.5 / unit;
+    const out: MapTile[] = [];
+    for (const level of z > TILE_MIN_Z ? [z - 1, z] : [z]) {
+      const n = 2 ** level;
+      const size = (s0 * 2 * Math.PI) / n;
+      const i0 = Math.floor((bx0 - ox) / size) - 1;
+      const i1 = Math.floor((bx1 - ox) / size) + 1;
+      const j0 = Math.max(0, Math.floor((by0 - oy) / size) - 1);
+      const j1 = Math.min(n - 1, Math.floor((by1 - oy) / size) + 1);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > TILE_MAX_PER_LEVEL) continue;
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const xi = ((i % n) + n) % n;
+          out.push({
+            key: `${level}/${i}/${j}`,
+            href: tileUrl(level, xi, j),
+            x: view.x + view.k * (ox + i * size),
+            y: view.y + view.k * (oy + j * size),
+            size: view.k * size + overlap,
+          });
+        }
+      }
+    }
+    return out;
+  }, [tileOpacity, px, basemap, view, frame]);
 
   // --- Free zoom and pan -------------------------------------------------------------------
   /** Zoom between the regional view and about 0.2° across; keep the view centre over APAC. */
@@ -1866,6 +1933,10 @@ export default function RegionMap({
           <input type="checkbox" checked={layers.rings} onChange={(e) => toggleLayer('rings', e.currentTarget.checked)} />
           <span>Distance rings</span>
         </label>
+        <label className="region-map__layer">
+          <input type="checkbox" checked={layers.tiles} onChange={(e) => toggleLayer('tiles', e.currentTarget.checked)} />
+          <span>Street map (OpenStreetMap)</span>
+        </label>
       </div>
     </>
   );
@@ -1932,6 +2003,21 @@ export default function RegionMap({
             />
           )}
           </g>
+          {tiles.length > 0 && (
+            <g className="region-map__tiles" style={{ opacity: tileOpacity }} aria-hidden="true">
+              {tiles.map((t) => (
+                <image
+                  key={t.key}
+                  href={t.href}
+                  x={t.x}
+                  y={t.y}
+                  width={t.size}
+                  height={t.size}
+                  preserveAspectRatio="none"
+                />
+              ))}
+            </g>
+          )}
           {layers.watch &&
             placed.map((p, i) => {
               const [sx, sy] = layout.shown[i];
@@ -2321,7 +2407,15 @@ export default function RegionMap({
         </div>
       )}
 
-      <p ref={attributionRef} className="region-map__attribution" title={REGION.attribution}>
+      <p ref={attributionRef} className="region-map__attribution" title={REGION.attribution} data-no-pan>
+        {tiles.length > 0 && (
+          <>
+            <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">
+              © OpenStreetMap contributors
+            </a>
+            {' · '}
+          </>
+        )}
         Boundaries: Natural Earth (public domain)
       </p>
     </div>

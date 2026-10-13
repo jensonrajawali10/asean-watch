@@ -1317,3 +1317,47 @@
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* Street tiles (OpenStreetMap standard tiles), partly desaturated so our state colours and the reserved
+   official red stay dominant. No pointer events, so panning and marker clicks are
+   unaffected; a failed tile (offline) simply draws nothing over the Natural Earth land. */
+.region-map__tiles {
+  pointer-events: none;
+  filter: saturate(0.45);
+}
+
+.region-map__attribution a {
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Over street tiles the country labels and ring labels keep a light halo. */
+.region-map__ring-label {
+  text-shadow: 0 0 2px var(--panel);
+}
+
+/* Floating panels (App.css) publish their footprint as --overlay-left / --overlay-right on the map
+   container; shift the map's own controls inward so a panel never covers them. Both default to 0. */
+.region-map__zoom,
+.region-map__legend {
+  left: calc(var(--overlay-left, 0px) + 10px);
+  transition: left 0.2s ease;
+}
+.region-map__side {
+  right: calc(var(--overlay-right, 0px) + 10px);
+  transition: right 0.2s ease;
+}
+.region-map__attribution {
+  right: calc(var(--overlay-right, 0px) + 6px);
+}
+.region-map__caption {
+  right: calc(var(--overlay-right, 0px) + 6px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .region-map__zoom,
+  .region-map__legend,
+  .region-map__side {
+    transition: none;
+  }
+}
