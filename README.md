@@ -4,6 +4,14 @@ ASEAN Watch is an Asia-Pacific environmental surveillance prototype that uses re
 
 > **Not an official warning service.** This is a hackathon prototype. It does not issue warnings, alert levels or evacuation advice, and it does not predict eruptions, fires or floods. Official warnings are copied verbatim from the issuing agency with a link to it: **follow that agency's instructions**. If a feed is unavailable or lists nothing, that is **never an all-clear**; check the issuer directly. Satellite and earthquake data come from a snapshot that can be hours or days old, and the header shows its time. The workflow states (Monitoring, Check observation, Review needed) come from illustrative rules and are not official alert levels.
 
+**Live site:** https://asean-watch.vercel.app
+
+## Demo video (30 s)
+
+[![ASEAN Watch demo video](docs/media/demo-poster.png)](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v2.mp4)
+
+[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v2.mp4) (1920×1080, 20 MB) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
+
 ## Quick start
 
 Requires Node.js 22.18 or later (24 recommended) and npm. Vitest 5 needs 22.12+, and `npm run refresh:warnings` imports a TypeScript module directly, which relies on Node's built-in type stripping (on by default from 22.18).
