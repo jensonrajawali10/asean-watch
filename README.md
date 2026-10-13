@@ -8,9 +8,9 @@ ASEAN Watch is an Asia-Pacific environmental surveillance prototype that uses re
 
 ## Demo video (30 s)
 
-[![ASEAN Watch demo video](docs/media/demo-poster.png)](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v2.mp4)
+[![ASEAN Watch demo video](docs/media/demo-poster.png)](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4)
 
-[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v2.mp4) (1920×1080, 20 MB) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
+[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4) (1920×1080, 27 MB) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
 
 ## Quick start
 
