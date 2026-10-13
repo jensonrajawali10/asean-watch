@@ -795,11 +795,11 @@ export function assessDrift(incident: Incident, ctx: NeaContext): DriftAssessmen
       ctx.wind.meanSpeedKnots === null ? 'speed not reported' : `${ctx.wind.meanSpeedKnots.toFixed(1)} kn`,
       ctx.wind.consistency < 0.5 ? 'low station agreement' : null,
     ].filter((p): p is string => p !== null);
-    const wind = `Real wind measured at NEA Singapore stations (${parts.join(', ')})`;
+    const wind = `Current wind measured at NEA Singapore stations (${parts.join(', ')}; the wind now, not on the replay day)`;
     text = singaporeDownwind
       ? `${wind} would carry haze from ${source} toward Singapore, ${distance} away. ${caveat}`
-      : `${wind} would not carry haze from ${source} toward Singapore, ${distance} away; it blows ` +
-        `toward ${compassName(downwindDeg)}. ${caveat}`;
+      : `${wind} blows toward ${compassName(downwindDeg)}, not from ${source} toward Singapore (${distance} away). ` +
+        `Haze can still reach Singapore from other fires; use NEA's measured PSI for air quality. ${caveat}`;
   }
 
   return {

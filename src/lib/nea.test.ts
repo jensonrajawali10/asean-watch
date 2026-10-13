@@ -384,8 +384,8 @@ describe('assessDrift', () => {
     expect(d?.downwindDeg).toBe(56);
     expect(d?.singaporeDownwind).toBe(true);
     expect(d?.text).toBe(
-      'Real wind measured at NEA Singapore stations (from SW, 4.1 kn) would carry haze from these FIRMS ' +
-        'hotspots toward Singapore, about 170 km away. Illustrative only; not a dispersion model.',
+      'Current wind measured at NEA Singapore stations (from SW, 4.1 kn; the wind now, not on the replay day) ' +
+        'would carry haze from these FIRMS hotspots toward Singapore, about 170 km away. Illustrative only; not a dispersion model.',
     );
   });
 
@@ -394,9 +394,9 @@ describe('assessDrift', () => {
     expect(d?.downwindDeg).toBe(236);
     expect(d?.singaporeDownwind).toBe(false);
     expect(d?.text).toBe(
-      'Real wind measured at NEA Singapore stations (from NE, 4.1 kn) would not carry haze from these ' +
-        'FIRMS hotspots toward Singapore, about 170 km away; it blows toward SW. Illustrative only; ' +
-        'not a dispersion model.',
+      'Current wind measured at NEA Singapore stations (from NE, 4.1 kn; the wind now, not on the replay day) ' +
+        'blows toward SW, not from these FIRMS hotspots toward Singapore (about 170 km away). Haze can still ' +
+        "reach Singapore from other fires; use NEA's measured PSI for air quality. Illustrative only; not a dispersion model.",
     );
   });
 
@@ -410,7 +410,7 @@ describe('assessDrift', () => {
 
   it('mentions low station agreement, snapshot mode, and missing wind', () => {
     expect(assessDrift(riau, ctxWith(236, { consistency: 0.3 }))?.text).toContain('low station agreement');
-    expect(assessDrift(riau, ctxWith(236, { dataMode: 'historical' }))?.text).toContain('(snapshot, from SW, 4.1 kn)');
+    expect(assessDrift(riau, ctxWith(236, { dataMode: 'historical' }))?.text).toContain('(snapshot, from SW, 4.1 kn; the wind now, not on the replay day)');
     const none = assessDrift(riau, ctxWith(null));
     expect(none?.downwindDeg).toBeNull();
     expect(none?.singaporeDownwind).toBeNull();

@@ -367,7 +367,7 @@ function evidenceSection(evidence: EvidenceItem[]): string[] {
       ...field(
         indent,
         'Anomaly flag',
-        o.anomaly ? `yes (configured in fixture): ${o.anomalyReason ?? 'no reason recorded'}` : 'no',
+        o.anomaly ? `yes (${o.dataMode === 'simulated' ? 'configured in fixture' : 'stated watch rule'}): ${o.anomalyReason ?? 'no reason recorded'}` : 'no',
         w,
       ),
       ...field(indent, 'Counted', `${e.counted ? 'YES' : 'NO'} - ${e.reason}`, w),
@@ -660,5 +660,6 @@ export function downloadText(text: string, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Revoke later: Safari and older Firefox can cancel a download whose URL is revoked immediately.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
