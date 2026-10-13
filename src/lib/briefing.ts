@@ -1,10 +1,13 @@
 // Deterministic plain-text incident brief. Owned by the logic builder.
-// No wall-clock time anywhere: the only timestamp is the replay step clock (or "static example").
+// No wall-clock time anywhere: timestamps come only from the data (the replay step clock or
+// "static example", and, in the optional NEA section, the NEA reading and capture times).
 import type {
   Category,
+  DriftAssessment,
   EvidenceItem,
   HazardType,
   Incident,
+  NeaContext,
   Observation,
   ReplayStep,
   ReviewResult,
@@ -20,6 +23,10 @@ export interface BriefingInput {
   step: ReplayStep | null;
   review: ReviewResult;
   issues: ValidationIssue[];
+  /** Optional NEA Singapore context (context, not evidence). */
+  nea?: NeaContext | null;
+  /** Optional drift assessment; the NEA section is added only when this is present. */
+  drift?: DriftAssessment | null;
 }
 
 const WIDTH = 100;
@@ -293,7 +300,68 @@ function issuesSection(issues: ValidationIssue[]): string[] {
   return lines;
 }
 
-function limitationsFor(incident: Incident): string[] {
+function rangeText(values: Record<string, number>): string {
+  const nums = Object.values(values);
+  const min = Math.min(...nums);
+  const max = Math.max(...nums);
+  return min === max ? String(max) : `${min} to ${max}`;
+}
+
+/** "CONTEXT: NEA SINGAPORE (not evidence)": real NEA readings, only data timestamps (deterministic). */
+function neaSection(nea: NeaContext | null | undefined, drift: DriftAssessment): string[] {
+  const lines = [
+    ...heading('CONTEXT: NEA SINGAPORE (not evidence)'),
+    ...wrap(
+      'Real NEA readings shown for context only, separate from the simulated evidence above. They never ' +
+        'change the review state.',
+      '  ',
+    ),
+  ];
+  if (nea) {
+    lines.push(
+      ...field('  ', 'Mode', nea.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'),
+      ...field('  ', 'Wind reading time', nea.observedAt),
+      ...field('  ', nea.dataMode === 'live' ? 'Retrieved' : 'Snapshot captured', nea.retrievedAt),
+      ...field('  ', 'Wind', `${nea.wind.label} (wind measured at NEA Singapore stations)`),
+      ...field('  ', 'Stations', `${nea.wind.stationCount} NEA stations used`),
+    );
+    if (nea.haze) {
+      lines.push(
+        ...field(
+          '  ',
+          '24-hour PSI',
+          `${rangeText(nea.haze.psi24h)} across ${Object.keys(nea.haze.psi24h).length} regions; NEA band ` +
+            `for the highest region: ${nea.haze.psiBand} (reading time ${nea.haze.observedAt})`,
+        ),
+      );
+      if (nea.haze.pm25OneHour) {
+        lines.push(...field('  ', '1-hour PM2.5', `${rangeText(nea.haze.pm25OneHour)} µg/m³ across regions`));
+      }
+    } else {
+      lines.push(...field('  ', '24-hour PSI', 'not available'));
+    }
+  } else {
+    lines.push(...field('  ', 'Mode', 'NEA context not provided'));
+  }
+  lines.push(
+    ...field(
+      '  ',
+      'Distance',
+      `${drift.distanceKm} km from the incident to Singapore, initial bearing ${drift.bearingToSingaporeDeg} deg`,
+    ),
+    ...field('  ', 'Haze drift', drift.text),
+  );
+  if (nea) {
+    lines.push(
+      ...fieldWithUrl('  ', 'Source', nea.sourceName, nea.sourceUrl),
+      ...field('  ', 'Quality note', nea.qualityNote),
+      ...field('  ', 'Attribution', nea.attribution),
+    );
+  }
+  return lines;
+}
+
+function limitationsFor(incident: Incident, hasDrift = false): string[] {
   const items: string[] = [];
   if (incident.dataMode === 'simulated') {
     items.push(
@@ -318,6 +386,12 @@ function limitationsFor(incident: Incident): string[] {
     items.push('A satellite hotspot is not a confirmed fire until it is verified on the ground.');
   } else if (incident.hazard === 'flood') {
     items.push('Mapped water extent can be observed or modelled; forecast and observed extent differ.');
+  }
+  if (hasDrift) {
+    items.push(
+      'NEA wind is measured over Singapore, not along the haze path; the drift line is illustrative, ' +
+        'not a dispersion model.',
+    );
   }
   return items;
 }
@@ -387,6 +461,12 @@ function analystQuestions(input: BriefingInput): string[] {
         'validation. Should the source data be corrected?',
     );
   }
+  if (input.drift) {
+    questions.push(
+      'Do regional haze monitoring and smoke-trajectory products agree with the illustrative drift ' +
+        'based on Singapore station wind?',
+    );
+  }
   if (evidence.length > 0 && review.latestObservedAt) {
     questions.push(`Is any observation newer than ${review.latestObservedAt} available?`);
   }
@@ -437,8 +517,9 @@ export function buildBriefing(input: BriefingInput): string {
     ...reviewSection(review),
     ...evidenceSection(review.evidence),
     ...issuesSection(issues),
+    ...(input.drift ? neaSection(input.nea, input.drift) : []),
     ...heading('LIMITATIONS'),
-    ...limitationsFor(incident).flatMap((item) => bullet(item)),
+    ...limitationsFor(incident, Boolean(input.drift)).flatMap((item) => bullet(item)),
     ...heading('QUESTIONS FOR AN ANALYST'),
     ...analystQuestions(input).flatMap((q, i) => bullet(q, `${i + 1}.`)),
     ...nextStepSection(incident, volcano),

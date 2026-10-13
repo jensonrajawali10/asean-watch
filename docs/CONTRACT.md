@@ -87,3 +87,33 @@ Requested by Jenson: when the map zooms in near Singapore, show wind direction a
 | Logic | `src/lib/nea.ts`, `src/lib/nea.test.ts`, `scripts/capture-nea-snapshot.mjs`, `data/nea-snapshot.json`, the optional NEA section in `briefing.ts` |
 | Map | `RegionMap` optional props `nea?: NeaContext \| null` and `drift?: DriftAssessment \| null`, drawn in the zoomed view |
 | UI shell | Calls `loadNeaContext()` once on mount, passes `nea` and `drift` to the map, detail panel and brief |
+
+## Official warnings (evacuation awareness)
+
+Decision (Jenson, 2026-10-13): the product exists to make people aware of potential evacuation. It does this by **relaying official warnings from the agencies with authority**, never by issuing its own.
+
+- Sources are authoritative issuers only: tsunami warning centres (PTWC, NTWC, BMKG InaTEWS, JMA), volcano agencies (PVMBG/MAGMA, PHIVOLCS, GeoNet, JMA, VAACs for ash), national flood, haze and weather agencies, and GDACS for cross-hazard context. Final source list follows the research in `docs/research/`.
+- Each warning shows, **verbatim from the issuer**: issuer name, warning level or severity, headline, affected area, issue time, expiry when given, and any evacuation instruction. It also links to the issuer's public page ("Follow official instructions from <issuer>").
+- Issuer levels are never restyled into our review states, re-scored, merged, or paraphrased into stronger or weaker language. Our own corroboration states (Monitoring / Check observation / Review needed) stay analyst prompts and never say "evacuate".
+- **Absence is not safety.** If a feed is unreachable, stale, or returns nothing, the UI says "Official feed unavailable: check <issuer> directly", never "no warnings" or "all clear". Expired warnings are labelled EXPIRED with their expiry time.
+- Mode labels apply: LIVE for messages fetched this session; HISTORICAL for bundled examples, with their original times. A bundled example must never look current.
+- Planned type (added when the first feed is integrated):
+
+```ts
+interface OfficialWarning {
+  id: string;                    // issuer's message id when provided
+  issuer: string;                // e.g. "Pacific Tsunami Warning Center"
+  issuerUrl: string;             // official public page to follow
+  hazard: 'tsunami' | 'volcano' | 'earthquake' | 'flood' | 'haze' | 'weather' | 'other';
+  level: string;                 // verbatim, e.g. "WARNING", "Level III (Siaga)"
+  headline: string;              // verbatim
+  areaDescription: string;       // verbatim
+  location: { lat: number; lon: number } | null;
+  issuedAt: string;              // ISO 8601 UTC
+  expiresAt: string | null;      // ISO 8601 UTC
+  instruction: string | null;    // verbatim evacuation or safety instruction, if the issuer gave one
+  sourceUrl: string;             // the feed or message URL
+  dataMode: 'live' | 'historical';
+  retrievedAt: string;           // ISO 8601 UTC
+}
+```

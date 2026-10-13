@@ -29,7 +29,7 @@
   },
   {
     "id": "inc-ayutthaya-flood-demo",
-    "title": "Ayutthaya flood watch",
+    "title": "Ayutthaya flood observations",
     "hazard": "flood",
     "volcanoId": null,
     "locationName": "Phra Nakhon Si Ayutthaya, central Thailand",
