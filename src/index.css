@@ -1,6 +1,9 @@
 /* Design tokens shared by every component. Token names are contract: values change, names stay.
-   Light theme, projector-first (1366x768). Every text/background pair below is >= 4.5:1 and every
-   control border or focus ring >= 3:1; see docs/DESIGN.md section 2 for the measured table. */
+   Two themes on the same names: DARK is the default (map-first, near-black canvas, cream ink, tan accent);
+   LIGHT is for bright projector rooms. index.html sets <html data-theme> before first paint and the header
+   toggle persists the choice. :root holds the light values; :root[data-theme='dark'] overrides them.
+   Every text/background pair is >= 4.5:1 and every control border, state border or focus ring >= 3:1 in
+   both themes; see docs/DESIGN.md section 2 (light) and "Dark theme" for the measured tables. */
 :root {
   color-scheme: light;
 
@@ -88,6 +91,35 @@
   --backdrop: rgba(20, 26, 34, 0.28);
   --gap: 12px;
 
+  /* Added for the two-theme system (values below reproduce the earlier light literals). */
+  --on-accent: #ffffff; /* text on an --accent / --accent-strong fill */
+  --official-fill: #8a1f1f; /* the verbatim level chip's fill (reserved) */
+  --on-official: #ffffff; /* text on --official-fill */
+  --panel-glass: rgba(255, 255, 255, 0.96); /* floating panels over the map */
+  --panel-filter: none; /* backdrop-filter for floating panels */
+  --link-underline: #b9c9e6;
+  --track: #d5dae1; /* slider and scrubber tracks */
+  --hairline-on-fill: rgba(20, 26, 34, 0.22); /* edge that keeps pale data fills visible */
+  --on-dark-control: #8a94a3; /* button borders on the header and timeline */
+  --on-dark-hover: #2a3442;
+  --accent-edge: #6a9be0; /* primary button edge on the dark timeline */
+  --accent-edge-hover: #9bbdf0;
+  --day-done-bg: #2a3442;
+  --day-done-border: #3a4654;
+  --day-current-bg: #ffffff;
+  --day-current-fg: #141a22;
+  --day-count-bg: rgba(255, 255, 255, 0.12);
+  --nea-chip-bg: #141a22; /* measured NEA value chip (banner pair) */
+  --nea-chip-fg: #ffd27a;
+  --shadow-drawer: -8px 0 24px rgba(20, 26, 34, 0.18);
+  --shadow-dialog: 0 12px 40px rgba(20, 26, 34, 0.25);
+  /* Air-quality scale for map and legend fills: desaturated, never the official red (always labelled). */
+  --aq-good: #6f9a6a;
+  --aq-moderate: #c8b25a;
+  --aq-sensitive: #c98648;
+  --aq-unhealthy: #b5544a;
+  --aq-very-unhealthy: #84609a;
+
   /* Layout */
   --rail-w: 248px;
   --review-w: 488px;
@@ -95,6 +127,104 @@
   /* Measured header height, published by AppHeader for the drawers; never read by the header itself. */
   --header-offset: 40px;
   --timeline-h: 52px;
+}
+
+/* Dark theme (default): HazeView-like cinematic, map-first. Near-black canvas, cream ink, warm-grey
+   hairlines, a tan "smoke" accent, translucent panels with a light blur. Same token names as light. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0a1218;
+  --panel: #0e1216;
+  --panel-2: #161b20;
+  --border: #4a443b;
+  --text: #ece4d6;
+  --text-muted: #a9a193;
+  --accent: #c9a675;
+  --focus: #d8b680;
+
+  /* Review states: neutral -> amber outline -> solid amber. Never red. */
+  --state-monitoring-bg: #1b1f24;
+  --state-monitoring-fg: #c4bcad;
+  --state-monitoring-border: #736c5e;
+  --state-check-bg: #2a2012;
+  --state-check-fg: #f2c46e;
+  --state-check-border: #c48a2a;
+  --state-review-bg: #eea443;
+  --state-review-fg: #1d1200;
+  --state-review-strong: #f5bd66;
+
+  --mode-simulated-bg: #221d31;
+  --mode-simulated-fg: #cdbff0;
+  --mode-simulated-border: #6c5ca3;
+  --mode-modelled-bg: #221d31;
+  --mode-modelled-fg: #cdbff0;
+  --mode-modelled-border: #6c5ca3;
+  --mode-historical-bg: #13231c;
+  --mode-historical-fg: #9dd3b9;
+  --mode-historical-border: #4f7f69;
+  --mode-live-bg: #0e1216;
+  --mode-live-fg: #ece4d6;
+  --mode-live-border: #ece4d6;
+
+  /* Official warnings: reserved deep-red family. Ink and rail are a readable red; the chip is deep red. */
+  --official: #e5675f;
+  --official-bg: #2b1110;
+  --official-border: #b04a40;
+  --official-fill: #9e2b23;
+  --on-official: #ffffff;
+  --estimate: #9d978b;
+
+  --banner-bg: #0b0f12;
+  --banner-fg: #d9b77f;
+  --on-dark: #ece4d6;
+  --on-dark-muted: #a9a193;
+  --on-dark-border: #4a443b;
+
+  --map-water: #0a1218;
+  --map-land: #25221d;
+  --map-land-asean: #2f2b24;
+  --map-stroke: #3f3a32;
+  --map-stroke-asean: #8a7f6c;
+  --map-marker: #cfc6b5;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.35);
+
+  --nea-live-fg: #ece4d6;
+  --nea-live-border: #ece4d6;
+  --nea-snapshot-fg: #a9a193;
+  --nea-snapshot-border: #7a7264;
+  --border-strong: #857c6d;
+  --accent-strong: #dcbf92;
+  --selected-bg: #2a2419;
+  --new-row: #221e16;
+  --new-flash: #2a2419;
+  --counted-bg: #ece4d6;
+  --counted-fg: #14110c;
+  --ok-fg: #8fcfa9;
+  --danger-fg: #ee9a8c;
+  --focus-on-dark: #d8b680;
+  --backdrop: rgba(3, 5, 7, 0.62);
+
+  --on-accent: #16120c;
+  --panel-glass: rgba(14, 18, 22, 0.86);
+  --panel-filter: blur(6px);
+  --link-underline: #6e5d45;
+  --track: #3a362f;
+  --hairline-on-fill: rgba(236, 228, 214, 0.35);
+  --on-dark-control: #857c6d;
+  --on-dark-hover: #1d1a16;
+  --accent-edge: #dcbf92;
+  --accent-edge-hover: #ece4d6;
+  --day-done-bg: #1d1a16;
+  --day-done-border: #4a443b;
+  --day-current-bg: #ece4d6;
+  --day-current-fg: #14110c;
+  --day-count-bg: rgba(236, 228, 214, 0.12);
+  --nea-chip-bg: #d9b77f;
+  --nea-chip-fg: #14110c;
+  --shadow-drawer: -8px 0 28px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 12px 44px rgba(0, 0, 0, 0.6);
 }
 
 * {

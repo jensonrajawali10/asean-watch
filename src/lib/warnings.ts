@@ -21,7 +21,7 @@
 //   match its published 200/150/80 cm Siaga levels. We show cm, as DSDA does.
 // - data.gov.sg PUB flood alerts (shares the NEA data.gov.sg rate-limit backoff).
 import snapshotJson from '../../data/warnings-snapshot.json';
-import type { OfficialWarning, OfficialWarningArea, WarningFeedStatus, WarningHazard } from '../types';
+import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
 
 // ---------------------------------------------------------------------------
@@ -324,6 +324,42 @@ function bmkgOriginMs(date: string | null, time: string | null): number | null {
   return iso ? Date.parse(iso) : null;
 }
 
+/**
+ * BMKG InaTEWS <obsarea> tide-gauge observations in one <info>: verbatim location and height (m), the
+ * gauge's own coordinates, and the time (WIB -> UTC when a full date is given). Entries without a valid
+ * position or a finite height are skipped (never guessed).
+ */
+export function bmkgObservations(infoBlock: string): TsunamiObservation[] {
+  const out: TsunamiObservation[] = [];
+  for (const o of xmlBlocks(infoBlock, 'obsarea')) {
+    const location = xmlText(o, 'location');
+    const pos = validLatLon(num(xmlText(o, 'loclatitude')), num(xmlText(o, 'loclongitude')));
+    const heightText = xmlText(o, 'height');
+    const heightM = num(heightText);
+    if (!location || !pos || heightM === null || heightText === null) continue;
+    const date = xmlText(o, 'date');
+    const timeText = xmlText(o, 'time');
+    const observedAt = date && timeText ? wibToUtc(`${date} ${timeText}`) : null;
+    out.push({ location, lat: pos.lat, lon: pos.lon, heightM, heightText, observedAt, timeText });
+  }
+  return out;
+}
+
+/**
+ * BMKG's own instruction for one tsunami warning level, verbatim from the message: the <instruction1..3>
+ * line that names the level in quotes (e.g. status "Siaga"). Null when the message has no such line.
+ * No gloss of our own: BMKG's words are shown as they are (Indonesian), with a link to BMKG.
+ */
+export function bmkgLevelInstruction(w: Pick<OfficialWarning, 'instruction'>, level: string | null | undefined): string | null {
+  const want = level?.trim().toLowerCase();
+  if (!want || !w.instruction) return null;
+  for (const line of w.instruction.split('\n')) {
+    const quoted = /["“]([^"”]+)["”]/.exec(line);
+    if (quoted && quoted[1].trim().toLowerCase() === want) return line;
+  }
+  return null;
+}
+
 /** Messages within this many minutes of a closing PD-4's quake origin belong to the same event. */
 const BMKG_SAME_EVENT_MINUTES = 15;
 
@@ -345,7 +381,9 @@ export function parseBmkgTsunami(raw: unknown, meta: ParseMeta): FeedParseResult
       level: xmlText(w, 'level'),
       lat: null,
       lon: null,
+      province: xmlText(w, 'province'),
     }));
+    const observations = bmkgObservations(block);
     let level: string | null = null;
     for (const a of areas) {
       if (a.level && (level === null || (BMKG_LEVEL_RANK[a.level.toUpperCase()] ?? 0) > (BMKG_LEVEL_RANK[level.toUpperCase()] ?? 0))) {
@@ -380,6 +418,7 @@ export function parseBmkgTsunami(raw: unknown, meta: ParseMeta): FeedParseResult
         instruction: instruction === '' ? null : instruction,
         language: 'id',
         sourceUrl: feed.url,
+        ...(observations.length > 0 ? { observations } : {}),
       }),
     };
   });

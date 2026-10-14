@@ -1,0 +1,318 @@
+/* Forecast-hour control for the modelled haze and wind layers. Light panel tokens by default; .is-dark
+   is a dark translucent panel for the CARTO Dark Matter map (no blur). Worst-case backdrop is the
+   densest tan smoke (0.55) over the dark map, which composites under the panel to about #1e1e1e:
+   text #ece4d6 13.2:1, muted #a9a193 6.5:1, control edge #857c6d 4.1:1, modelled badge #cdbff0 on
+   #221d31 9.6:1. Colours follow the dark theme tokens (index.css); the light panel reads them live. */
+.haze-scrubber {
+  --hs-bg: var(--panel, #ffffff);
+  --hs-fg: var(--text, #141a22);
+  --hs-muted: var(--text-muted, #4e5967);
+  --hs-border: var(--border, #b7bfc9);
+  --hs-control: var(--border-strong, #7f8a98);
+  --hs-hover: var(--panel-2, #f5f6f8);
+  --hs-accent: var(--accent, #1b58a8);
+  --hs-focus: var(--focus, #1b58a8);
+  --hs-badge-bg: var(--mode-modelled-bg, #ece6f9);
+  --hs-badge-fg: var(--mode-modelled-fg, #4a2f8d);
+  --hs-badge-border: var(--mode-modelled-border, #c6b6ea);
+  --hs-track: var(--track, #d5dae1);
+  --hs-snap-bg: var(--mode-historical-bg, #e3f1ea);
+  --hs-snap-fg: var(--mode-historical-fg, #1a5e44);
+  --hs-snap-border: var(--mode-historical-border, #a4d0bf);
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 32px));
+  padding: 8px 10px 7px;
+  border: 1px solid var(--hs-border);
+  border-radius: var(--radius, 4px);
+  background: var(--hs-bg);
+  color: var(--hs-fg);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: default;
+}
+
+.haze-scrubber.is-dark {
+  --hs-bg: rgba(14, 18, 22, 0.86);
+  --hs-fg: #ece4d6;
+  --hs-muted: #a9a193;
+  --hs-border: #4a443b;
+  --hs-control: #857c6d;
+  --hs-hover: rgba(236, 228, 214, 0.08);
+  --hs-accent: #c9a675;
+  --hs-focus: #d8b680;
+  --hs-badge-bg: #221d31;
+  --hs-badge-fg: #cdbff0;
+  --hs-badge-border: #6c5ca3;
+  --hs-track: rgba(236, 228, 214, 0.22);
+  /* SNAPSHOT badge: #c4ecd0 on #183324, 11.6:1. */
+  --hs-snap-bg: #183324;
+  --hs-snap-fg: #c4ecd0;
+  --hs-snap-border: #3f7a55;
+}
+
+.haze-scrubber.is-dark .haze-scrubber__play,
+.haze-scrubber.is-dark .haze-scrubber__jump {
+  background: rgba(236, 228, 214, 0.04);
+}
+
+.haze-scrubber.is-dark .haze-scrubber__range::-webkit-slider-thumb {
+  border-color: #0e1216;
+}
+
+.haze-scrubber p,
+.haze-scrubber h2 {
+  margin: 0;
+}
+
+.haze-scrubber__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.haze-scrubber__play,
+.haze-scrubber__jump {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1px solid var(--hs-control);
+  border-radius: var(--radius, 4px);
+  background: var(--hs-bg);
+  color: var(--hs-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.haze-scrubber__play {
+  width: 30px;
+  padding: 0;
+}
+
+.haze-scrubber__play svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.haze-scrubber__jump {
+  margin-left: auto;
+  padding: 0 10px;
+}
+
+.haze-scrubber__play:hover,
+.haze-scrubber__jump:hover {
+  border-color: var(--hs-fg);
+  background: var(--hs-hover);
+}
+
+.haze-scrubber button:focus-visible,
+.haze-scrubber__range:focus-visible {
+  outline: 2px solid var(--hs-focus);
+  outline-offset: 2px;
+}
+
+.haze-scrubber__play:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.haze-scrubber__title {
+  min-width: 0;
+}
+
+.haze-scrubber__title h2 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.haze-scrubber__now {
+  color: var(--hs-muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.haze-scrubber__now strong {
+  color: var(--hs-fg);
+  font-weight: 600;
+}
+
+.haze-scrubber__track {
+  margin-top: 6px;
+}
+
+.haze-scrubber__strip {
+  position: relative;
+  /* Bars hang from a baseline just above the slider track. */
+  border-bottom: 1px solid var(--hs-border);
+}
+
+.haze-scrubber__bar {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.haze-scrubber__bar span {
+  display: block;
+  width: 100%;
+  border-radius: 1px 1px 0 0;
+  /* A hairline edge keeps pale bands (Moderate) visible on the light panel. */
+  box-shadow: inset 0 0 0 1px var(--hairline-on-fill, rgba(20, 26, 34, 0.22));
+}
+
+.haze-scrubber.is-dark .haze-scrubber__bar span {
+  box-shadow: inset 0 0 0 1px rgba(236, 228, 214, 0.35);
+}
+
+.haze-scrubber__bar:hover span,
+.haze-scrubber__bar:focus-visible span {
+  box-shadow: inset 0 0 0 1px var(--hs-fg);
+}
+
+.haze-scrubber__bar.is-current::after {
+  content: '';
+  position: absolute;
+  inset: -2px -1px auto;
+  height: 2px;
+  background: var(--hs-fg);
+}
+
+.haze-scrubber__range {
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--hs-accent);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.haze-scrubber__range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hs-track);
+}
+
+.haze-scrubber__range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hs-track);
+}
+
+.haze-scrubber__range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 2px solid var(--hs-bg);
+  border-radius: 50%;
+  background: var(--hs-accent);
+  box-shadow: 0 0 0 1px var(--hs-control);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.haze-scrubber__range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--hs-bg);
+  border-radius: 50%;
+  background: var(--hs-accent);
+  box-shadow: 0 0 0 1px var(--hs-control);
+}
+
+.haze-scrubber__ticks {
+  position: relative;
+  height: 14px;
+  color: var(--hs-muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.haze-scrubber__ticks span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.haze-scrubber__ticks span.is-mid {
+  transform: translateX(-50%);
+}
+
+.haze-scrubber__readout {
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.haze-scrubber__readout-k {
+  color: var(--hs-muted);
+}
+
+.haze-scrubber__note {
+  margin-top: 3px;
+  color: var(--hs-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.haze-scrubber__badge {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--hs-badge-border);
+  border-radius: var(--radius-sm, 3px);
+  background: var(--hs-badge-bg);
+  color: var(--hs-badge-fg);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.haze-scrubber__mode-badge {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--hs-control);
+  border-radius: var(--radius-sm, 3px);
+  color: var(--hs-fg);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 18px;
+}
+
+.haze-scrubber__mode-badge + .haze-scrubber__jump {
+  margin-left: 0;
+}
+
+/* SNAPSHOT uses the historical-mode tokens (green family), prominent beside the title. */
+.haze-scrubber__mode-badge.is-snapshot,
+.haze-scrubber__badge.is-snapshot {
+  border-color: var(--hs-snap-border);
+  background: var(--hs-snap-bg);
+  color: var(--hs-snap-fg);
+}
+
+.haze-scrubber__mode {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}

@@ -52,6 +52,8 @@ No emoji, no gradients, no glassmorphism or `backdrop-filter`, no pulse or radar
 
 ## 2. Design tokens (light theme)
 
+The light theme is now the alternative (`data-theme="light"`, for bright projector rooms); the dark default is in section 2a.
+
 Token names already in `src/index.css` are contract: values change, names stay; new names are added. Contrast ratios were computed with the dataviz skill's `contrast()` (WCAG 2.x relative luminance). Text must be ≥ 4.5:1; large state text ≥ 3:1; control borders and focus rings ≥ 3:1 against their surface.
 
 ### Surfaces, ink, action
@@ -142,6 +144,53 @@ Font stack stays local: `'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple
 - Radius (near-square, console discipline): 4 px panels, buttons, dialogs, map overlays (`--radius`); 3 px badges, pills, tags, day cells (`--radius-sm`); **0 px for the official level chip** (reserved cue); 50 % only for marker rings and dots.
 - Borders: 1 px `--border` on panels; selected row = 3 px `--accent` left bar + `--selected-bg`; new record = 3 px `--accent` left bar + `--new-row`; official item = 4 px `--official` left bar; impact estimate = 4 px dashed `--estimate` bar.
 - Elevation: `--shadow` on dialogs and floating map overlays only. Panels use borders.
+
+## 2a. Dark theme (default)
+
+Since 14 October 2026 the app opens in a dark, map-first theme (cinematic: near-black canvas, cream ink, warm-grey hairlines, a tan "smoke" accent, translucent panels over a dark basemap). The light theme in section 2 stays as the alternative for bright projector rooms.
+
+**Mechanism.** `src/index.css` keeps the light values on `:root` and overrides the same token names under `:root[data-theme='dark']`; no token was renamed. An inline script in `index.html` sets `<html data-theme>` before first paint from `localStorage['aw-theme']` (default `dark`; storage errors fall back to dark), and two inline background rules stop a light flash before the stylesheet loads. The header has a **Dark / Light** toggle (two buttons, `aria-pressed`) that writes the attribute, persists it in a try/catch and fires `aw:themechange` on `window`. The attribute is always present (`dark` or `light`); the map reads it for the basemap.
+
+**New token names (both themes).** `--on-accent`, `--official-fill`, `--on-official`, `--panel-glass`, `--panel-filter` (`blur(6px)` in dark, `none` in light), `--link-underline`, `--track`, `--hairline-on-fill`, `--on-dark-control`, `--on-dark-hover`, `--accent-edge(-hover)`, `--day-done-bg/-border`, `--day-current-bg/-fg`, `--day-count-bg`, `--nea-chip-bg/-fg`, `--shadow-drawer`, `--shadow-dialog`, and an air-quality scale `--aq-good #6f9a6a`, `--aq-moderate #c8b25a`, `--aq-sensitive #c98648`, `--aq-unhealthy #b5544a`, `--aq-very-unhealthy #84609a` (desaturated, map fills only, always labelled). Light values reproduce the earlier literals, so the light theme is unchanged.
+
+| Token | Dark value | Note |
+|---|---|---|
+| `--bg` / `--map-water` | `#0a1218` | the sea and page plane |
+| `--map-land` / `--map-land-asean` | `#25221d` / `#2f2b24` | warm near-black land |
+| `--panel` / `--panel-2` | `#0e1216` / `#161b20` | opaque surfaces (dialogs, drawer) |
+| `--panel-glass` | `rgba(14,18,22,0.86)` + `blur(6px)` | floating panels and the map hint |
+| `--border` / `--border-strong` | `#4a443b` / `#857c6d` | hairline (decorative) / control edges |
+| `--text` / `--text-muted` | `#ece4d6` / `#a9a193` | cream ink |
+| `--accent` / `--accent-strong` / `--focus` | `#c9a675` / `#dcbf92` / `#d8b680` | tan smoke; primary buttons carry `--on-accent #16120c` |
+| States | Monitoring `#c4bcad` on `#1b1f24`, border `#736c5e`; Check `#f2c46e` on `#2a2012`, border `#c48a2a`; Review `#1d1200` on `#eea443`, strong `#f5bd66` | neutral → amber outline → solid amber; never red |
+| Modes | MODELLED `#cdbff0` on `#221d31` / `#6c5ca3`; HISTORICAL `#9dd3b9` on `#13231c` / `#4f7f69`; LIVE cream outline | the uppercase word carries the meaning |
+| Official (reserved) | ink and rail `#e5675f`, surface `#2b1110`, hairline `#b04a40`, chip `#ffffff` on `#9e2b23` | deep-red family; used only for relayed official warnings |
+
+**Contrast (WCAG 2.x, computed with a node script using the dataviz `contrast()` formula).** Text ≥ 4.5:1; control borders, state borders and focus ≥ 3:1. The 1 px panel hairline `--border` is decorative in both themes (light 1.9:1, dark 2.0:1); every control, badge and focus ring carries its own ≥ 3:1 edge.
+
+| Pair (dark) | Ratio |
+|---|---|
+| `--text` on panel / panel-2 / glass over white street tiles | 14.9 / 13.7 / 10.1 |
+| `--text-muted` on panel / panel-2 / selected row / glass over white tiles | 7.3 / 6.8 / 6.0 / 5.0 |
+| `--accent` links on panel / panel-2 | 8.2 / 7.6 |
+| `--on-accent` on accent / accent-strong | 8.2 / 10.6 |
+| `--banner-fg` / `--on-dark-muted` on banner | 10.1 / 7.5 |
+| Monitoring / Check observation / Review needed (fg on bg) | 8.8 / 9.8 / 8.8 |
+| MODELLED / HISTORICAL SNAPSHOT / LIVE | 9.6 / 9.7 / 14.9 |
+| `--official` ink on panel / on official-bg; chip text on fill | 5.8 / 5.4; 7.4 |
+| `--estimate`, `--ok-fg`, `--danger-fg` on panel | 6.5, 10.4, 8.6 |
+| Timeline current day; NEA chip; toggle pressed | 14.9; 9.9; 15.2 |
+| `--border-strong` vs panel / panel-2; `--on-dark-control` vs banner | 4.6 / 4.2; 4.7 |
+| `--focus` vs panel / bg / banner | 9.8 / 9.8 / 10.0 |
+| State borders: Monitoring (panel / panel-2), Check, Review | 3.6 / 3.3, 6.3, 11.1 |
+| Mode borders: MODELLED (panel / panel-2), HISTORICAL, NEA snapshot | 3.3 / 3.1, 4.1, 4.0 |
+| `--official-border` vs panel / official-bg | 3.5 / 3.3 |
+| `--map-stroke-asean` vs member land | 3.6 |
+| Light additions: white on accent; white on official fill; `--on-dark-control` vs banner | 7.0; 9.1; 5.7 |
+
+Scrubber and popover (`.is-dark` variants, translucent over the densest tan smoke, about `#1e1e1e` composited): text 13.2:1, muted 6.5:1, control edge 4.1:1.
+
+**Separation rules in dark.** Official red (`#e5675f`, hue about 3°) and the Review amber (`#eea443`, hue about 35°) are close in luminance (1.6:1), so they are kept apart by hue, shape and words, exactly as in light: square uppercase verbatim chip on a deep-red fill with the "OFFICIAL · issuer" prefix, versus a rounded state badge with a dot and the words "Workflow state, not an official alert level". No workflow state uses red in either theme.
 
 ## 3. Badge system (must never be confused)
 

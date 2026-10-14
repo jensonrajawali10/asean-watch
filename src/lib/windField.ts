@@ -4,12 +4,26 @@
 // plume, so 10 m is the drift wind for haze, and it is the level NEA measures in Singapore.
 // loadWindField(): live first (timeout, in-flight dedupe, memory cache), then the bundled snapshot
 // data/wind-snapshot.json (dataMode "historical"). Never throws.
+// Two levels: '10m' (default; the trajectory logic in transport.ts) and '925hPa' (about 750 m, the
+// lower boundary layer that carries a regional smoke plume; the default for the animated particles).
+// Variable names verified live 2026-10-14: wind_speed_925hPa / wind_direction_925hPa, unit m/s.
+// The 925 hPa snapshot is data/wind925-snapshot.json (scripts/capture-wind-snapshot.mjs 925hPa).
 import snapshotJson from '../../data/wind-snapshot.json';
+import snapshot925Json from '../../data/wind925-snapshot.json';
 
 export const WIND_GRID_SPEC = { minLat: -6, maxLat: 8, minLon: 95, maxLon: 120, stepDeg: 1 } as const;
 export const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 export const WIND_ATTRIBUTION = 'Weather data by Open-Meteo.com (CC BY 4.0), best-match global weather model.';
 export const WIND_LEVEL = '10 m';
+
+export type WindLevel = '10m' | '925hPa';
+/** Open-Meteo hourly variables and display label per level. */
+export const WIND_LEVELS: Record<WindLevel, { speedVar: string; dirVar: string; label: string }> = {
+  '10m': { speedVar: 'wind_speed_10m', dirVar: 'wind_direction_10m', label: '10 m' },
+  '925hPa': { speedVar: 'wind_speed_925hPa', dirVar: 'wind_direction_925hPa', label: '925 hPa' },
+};
+/** Level for the animated wind particles. */
+export const PARTICLE_WIND_LEVEL: WindLevel = '925hPa';
 export const WIND_CACHE_TTL_MS = 30 * 60 * 1000;
 export const WIND_BACKOFF_MS = 5 * 60 * 1000;
 
@@ -68,7 +82,13 @@ export function gridAxes(spec: { minLat: number; maxLat: number; minLon: number;
 }
 
 /** The one multi-location request: points in row-major order (lat outer, lon inner). */
-export function buildWindUrl(lats: number[] = gridAxes().lats, lons: number[] = gridAxes().lons, forecastDays = 3): string {
+export function buildWindUrl(
+  lats: number[] = gridAxes().lats,
+  lons: number[] = gridAxes().lons,
+  forecastDays = 3,
+  level: WindLevel = '10m',
+): string {
+  const { speedVar, dirVar } = WIND_LEVELS[level];
   const la: number[] = [];
   const lo: number[] = [];
   for (const lat of lats) for (const lon of lons) {
@@ -77,7 +97,7 @@ export function buildWindUrl(lats: number[] = gridAxes().lats, lons: number[] = 
   }
   return (
     `${OPEN_METEO_FORECAST_URL}?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
-    `&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=ms&past_days=1&forecast_days=${forecastDays}&timezone=GMT`
+    `&hourly=${speedVar},${dirVar}&wind_speed_unit=ms&past_days=1&forecast_days=${forecastDays}&timezone=GMT`
   );
 }
 
@@ -101,7 +121,9 @@ export function normaliseOpenMeteoWind(
   axes: { lats: number[]; lons: number[] },
   retrievedAt: string,
   dataMode: WindGrid['dataMode'] = 'live',
+  level: WindLevel = '10m',
 ): WindGrid | null {
+  const { speedVar, dirVar, label } = WIND_LEVELS[level];
   const list = Array.isArray(json) ? json : [json];
   const nLat = axes.lats.length;
   const nLon = axes.lons.length;
@@ -116,11 +138,11 @@ export function normaliseOpenMeteoWind(
   for (let k = 0; k < list.length; k += 1) {
     const e = list[k];
     if (!isRecord(e) || !isRecord(e.hourly)) return null;
-    const sp = e.hourly.wind_speed_10m;
-    const dir = e.hourly.wind_direction_10m;
+    const sp = e.hourly[speedVar];
+    const dir = e.hourly[dirVar];
     const tt = e.hourly.time;
     if (!Array.isArray(sp) || !Array.isArray(dir) || !Array.isArray(tt) || sp.length !== nT || dir.length !== nT || tt.length !== nT) return null;
-    if (isRecord(e.hourly_units) && e.hourly_units.wind_speed_10m !== undefined && e.hourly_units.wind_speed_10m !== 'm/s') return null;
+    if (isRecord(e.hourly_units) && e.hourly_units[speedVar] !== undefined && e.hourly_units[speedVar] !== 'm/s') return null;
     const j = Math.floor(k / nLon);
     const i = k % nLon;
     for (let t = 0; t < nT; t += 1) {
@@ -141,7 +163,7 @@ export function normaliseOpenMeteoWind(
     source: 'Open-Meteo Forecast API',
     sourceUrl: 'https://open-meteo.com/en/docs',
     model: 'Open-Meteo best match (global weather models)',
-    level: WIND_LEVEL,
+    level: label,
     retrievedAt,
     dataMode,
     attribution: WIND_ATTRIBUTION,
@@ -183,70 +205,164 @@ export function parseWindGrid(raw: unknown, dataMode: WindGrid['dataMode']): Win
   };
 }
 
-export function loadWindSnapshot(): WindGrid | null {
-  return parseWindGrid(snapshotJson as unknown, 'historical');
+export function loadWindSnapshot(level: WindLevel = '10m'): WindGrid | null {
+  const g = parseWindGrid((level === '925hPa' ? snapshot925Json : snapshotJson) as unknown, 'historical');
+  // A snapshot of another level must never stand in for this one.
+  return g && g.level === WIND_LEVELS[level].label ? g : null;
 }
 
 // ---------------------------------------------------------------------------
-// Live loading with cache, in-flight dedupe and backoff (pattern from nea.ts)
+// Live loading with cache, in-flight dedupe and backoff (pattern from nea.ts). Caches are per level;
+// the rate-limit backoff is shared (Open-Meteo limits per client, not per variable).
 
-let inflight: Promise<WindLoadResult> | null = null;
-let memoryCache: { grid: WindGrid; at: number } | null = null;
+const inflight: Partial<Record<WindLevel, Promise<WindLoadResult>>> = {};
+const memoryCache: Partial<Record<WindLevel, { grid: WindGrid; at: number }>> = {};
 let backoffUntil = 0;
 
 export function resetWindCache(): void {
-  inflight = null;
-  memoryCache = null;
+  for (const k of Object.keys(WIND_LEVELS) as WindLevel[]) {
+    delete inflight[k];
+    delete memoryCache[k];
+  }
   backoffUntil = 0;
 }
 
-function snapshotResult(message: string): WindLoadResult {
-  const grid = loadWindSnapshot();
+function snapshotResult(message: string, level: WindLevel): WindLoadResult {
+  const grid = loadWindSnapshot(level);
   return grid
     ? { grid, status: 'snapshot', message }
-    : { grid: null, status: 'unavailable', message: `${message} The bundled wind snapshot is missing or malformed.` };
+    : {
+        grid: null,
+        status: 'unavailable',
+        message: `${message} The bundled ${WIND_LEVELS[level].label} wind snapshot is missing or malformed.`,
+      };
 }
 
-async function loadLive(timeoutMs: number, fetchImpl: typeof fetch, now: () => number): Promise<WindLoadResult> {
+async function loadLive(level: WindLevel, timeoutMs: number, fetchImpl: typeof fetch, now: () => number): Promise<WindLoadResult> {
   const axes = gridAxes();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(buildWindUrl(axes.lats, axes.lons), { signal: controller.signal });
+    const res = await fetchImpl(buildWindUrl(axes.lats, axes.lons, 3, level), { signal: controller.signal });
     if (res.status === 429) {
       backoffUntil = now() + WIND_BACKOFF_MS;
-      return snapshotResult('Open-Meteo rate limit reached; showing the bundled wind snapshot.');
+      return snapshotResult('Open-Meteo rate limit reached; showing the bundled wind snapshot.', level);
     }
-    if (!res.ok) return snapshotResult(`Open-Meteo returned HTTP ${res.status}; showing the bundled wind snapshot.`);
+    if (!res.ok) return snapshotResult(`Open-Meteo returned HTTP ${res.status}; showing the bundled wind snapshot.`, level);
     const json: unknown = await res.json();
     const retrievedAt = new Date(now()).toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const grid = normaliseOpenMeteoWind(json, axes, retrievedAt, 'live');
-    if (!grid) return snapshotResult('Open-Meteo response was not in the expected shape; showing the bundled wind snapshot.');
-    memoryCache = { grid, at: now() };
+    const grid = normaliseOpenMeteoWind(json, axes, retrievedAt, 'live', level);
+    if (!grid) return snapshotResult('Open-Meteo response was not in the expected shape; showing the bundled wind snapshot.', level);
+    memoryCache[level] = { grid, at: now() };
     return { grid, status: 'live', message: null };
   } catch (err) {
     const why = controller.signal.aborted ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err);
-    return snapshotResult(`Open-Meteo unavailable (${why}); showing the bundled wind snapshot.`);
+    return snapshotResult(`Open-Meteo unavailable (${why}); showing the bundled wind snapshot.`, level);
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** Live modelled wind grid, else the bundled snapshot. Never throws. */
-export async function loadWindField(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch; now?: () => number }): Promise<WindLoadResult> {
+/** Live modelled wind grid at `level` (default 10 m), else the bundled snapshot. Never throws. */
+export async function loadWindField(opts?: {
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  level?: WindLevel;
+}): Promise<WindLoadResult> {
   const now = opts?.now ?? Date.now;
+  const level: WindLevel = opts?.level ?? '10m';
   try {
-    if (memoryCache && now() - memoryCache.at < WIND_CACHE_TTL_MS) return { grid: memoryCache.grid, status: 'cached', message: null };
-    if (now() < backoffUntil) return snapshotResult('Open-Meteo rate limit backoff in effect; showing the bundled wind snapshot.');
+    const cached = memoryCache[level];
+    if (cached && now() - cached.at < WIND_CACHE_TTL_MS) return { grid: cached.grid, status: 'cached', message: null };
+    if (now() < backoffUntil) return snapshotResult('Open-Meteo rate limit backoff in effect; showing the bundled wind snapshot.', level);
     const fetchImpl = opts?.fetchImpl ?? (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
-    if (!fetchImpl) return snapshotResult('No fetch available; showing the bundled wind snapshot.');
-    if (!inflight) {
-      inflight = loadLive(opts?.timeoutMs ?? 8000, fetchImpl, now).finally(() => {
-        inflight = null;
+    if (!fetchImpl) return snapshotResult('No fetch available; showing the bundled wind snapshot.', level);
+    let p = inflight[level];
+    if (!p) {
+      p = loadLive(level, opts?.timeoutMs ?? 8000, fetchImpl, now).finally(() => {
+        delete inflight[level];
       });
+      inflight[level] = p;
     }
-    return await inflight;
+    return await p;
   } catch (err) {
-    return snapshotResult(`Wind load failed (${err instanceof Error ? err.message : String(err)}); showing the bundled wind snapshot.`);
+    return snapshotResult(`Wind load failed (${err instanceof Error ? err.message : String(err)}); showing the bundled wind snapshot.`, level);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Fast sampling for animation: interpolate one time slice once (when the hour changes), then sample
+// it bilinearly per particle per frame without re-parsing the time axis. Same maths as
+// transport.ts sampleWind (bilinear in space, linear in time), so the two agree.
+
+export interface WindSlice {
+  lats: readonly number[];
+  lons: readonly number[];
+  /** ISO 8601 UTC time of the slice. */
+  time: string;
+  /** Row-major [j * nLon + i], m/s. */
+  u: Float32Array;
+  v: Float32Array;
+}
+
+/** Index pair and weight for `ms` on an ascending time axis, clamped to its ends. */
+export function timeWeights(timesMs: readonly number[], ms: number): { a: number; b: number; f: number } {
+  const n = timesMs.length;
+  if (n === 0 || !(ms > timesMs[0])) return { a: 0, b: 0, f: 0 };
+  if (ms >= timesMs[n - 1]) return { a: n - 1, b: n - 1, f: 0 };
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (timesMs[mid] <= ms) lo = mid;
+    else hi = mid;
+  }
+  return { a: lo, b: hi, f: (ms - timesMs[lo]) / (timesMs[hi] - timesMs[lo]) };
+}
+
+/** The grid at one time (clamped to the grid's time range), as flat typed arrays. */
+export function windSlice(grid: WindGrid, timeISO: string): WindSlice {
+  const nLat = grid.lats.length;
+  const nLon = grid.lons.length;
+  const parsed = Date.parse(timeISO);
+  const ms = Number.isFinite(parsed) ? parsed : Date.parse(grid.times[0]);
+  const { a, b, f } = timeWeights(grid.times.map((t) => Date.parse(t)), ms);
+  const u = new Float32Array(nLat * nLon);
+  const v = new Float32Array(nLat * nLon);
+  for (let j = 0; j < nLat; j += 1) {
+    for (let i = 0; i < nLon; i += 1) {
+      const k = j * nLon + i;
+      u[k] = grid.u[a][j][i] * (1 - f) + grid.u[b][j][i] * f;
+      v[k] = grid.v[a][j][i] * (1 - f) + grid.v[b][j][i] * f;
+    }
+  }
+  return { lats: grid.lats, lons: grid.lons, time: timeISO, u, v };
+}
+
+/**
+ * Bilinear sample of a regular ascending grid stored row-major; NaN outside. Assumes evenly spaced
+ * axes (the 1° WIND_GRID_SPEC), which keeps it cheap enough for thousands of calls a frame.
+ */
+export function sampleRegular(field: ArrayLike<number>, lats: readonly number[], lons: readonly number[], lat: number, lon: number): number {
+  const nLat = lats.length;
+  const nLon = lons.length;
+  const fy = ((lat - lats[0]) / (lats[nLat - 1] - lats[0])) * (nLat - 1);
+  const fx = ((lon - lons[0]) / (lons[nLon - 1] - lons[0])) * (nLon - 1);
+  if (!(fy >= 0 && fy <= nLat - 1 && fx >= 0 && fx <= nLon - 1)) return Number.NaN;
+  const j = Math.min(Math.floor(fy), nLat - 2);
+  const i = Math.min(Math.floor(fx), nLon - 2);
+  const ty = fy - j;
+  const tx = fx - i;
+  const k = j * nLon + i;
+  const top = field[k] * (1 - tx) + field[k + 1] * tx;
+  const bot = field[k + nLon] * (1 - tx) + field[k + nLon + 1] * tx;
+  return top * (1 - ty) + bot * ty;
+}
+
+/** Wind (u east, v north, m/s) from a slice; null outside the grid. */
+export function sampleSlice(slice: WindSlice, lat: number, lon: number): { u: number; v: number } | null {
+  const u = sampleRegular(slice.u, slice.lats, slice.lons, lat, lon);
+  if (Number.isNaN(u)) return null;
+  return { u, v: sampleRegular(slice.v, slice.lats, slice.lons, lat, lon) };
 }

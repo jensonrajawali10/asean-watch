@@ -207,6 +207,24 @@ export interface OfficialWarningArea {
   level: string | null;
   lat: number | null;
   lon: number | null;
+  /** Verbatim province or region code from the issuer (e.g. BMKG "NTT"); absent when not given. */
+  province?: string | null;
+}
+
+/** A tsunami height measured at a tide gauge, relayed verbatim (BMKG InaTEWS <obsarea>). */
+export interface TsunamiObservation {
+  /** Verbatim gauge or place name, e.g. "MAUROLE-ENDE". */
+  location: string;
+  lat: number;
+  lon: number;
+  /** Observed height in metres (parsed). */
+  heightM: number;
+  /** The height exactly as the issuer wrote it, e.g. "0.30". */
+  heightText: string;
+  /** ISO 8601 UTC; null when the issuer gives no full date and time. */
+  observedAt: string | null;
+  /** Verbatim time text, e.g. "05:27 WIB". */
+  timeText: string | null;
 }
 
 export interface OfficialWarning {
@@ -237,6 +255,8 @@ export interface OfficialWarning {
   expiresAt: string | null;
   /** True when the issuer has ended or cancelled it, or expiresAt had passed when retrieved. */
   ended: boolean;
+  /** Observed tsunami heights the issuer reports with this message (BMKG InaTEWS); absent otherwise. */
+  observations?: TsunamiObservation[];
   /** Verbatim safety or evacuation instruction, if the issuer gave one. */
   instruction: string | null;
   /** BCP 47 language of the verbatim text, e.g. "id", "ja", "en". */
@@ -258,4 +278,128 @@ export interface WarningFeedStatus {
   retrievedAt: string | null;
   /** Readable status or error text. */
   message: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Connector layers (quakes, sea level, PTWC, GloFAS discharge, GIBS imagery). Context only: none of
+// these enters deriveReview. "live" = fetched this session; "historical" = bundled snapshot, shown
+// with its original times. See src/lib/{quakesLive,seaLevel,ptwc,floodModel,gibs}.ts.
+
+/** Per-source load outcome. "unavailable" must render as "<source> unavailable: check <source> directly", never as "none". */
+export interface ConnectorStatus {
+  sourceId: string;
+  sourceName: string;
+  status: 'live' | 'cached' | 'snapshot' | 'unavailable';
+  /** ISO 8601 UTC time the data was fetched (live/cached) or captured (snapshot); null when unavailable. */
+  retrievedAt: string | null;
+  message: string;
+}
+
+/** One earthquake as reported by ONE agency. USGS and BMKG reports of the same event are never merged. */
+export interface QuakeEvent {
+  /** Source-prefixed id, e.g. "usgs:us6000u28y", "bmkg-gempaterkini:20261011213453". */
+  id: string;
+  source: 'USGS' | 'BMKG';
+  /** The product it came from, e.g. "USGS FDSN event service", "BMKG gempaterkini (M 5.0+)". */
+  product: string;
+  magnitude: number;
+  /** e.g. "mww", "mb"; null when the agency does not say (BMKG). */
+  magType: string | null;
+  depthKm: number | null;
+  lat: number;
+  /** Normalised to -180..180. */
+  lon: number;
+  /** Verbatim place / region text from the agency. */
+  place: string;
+  /** ISO 8601 UTC origin time. */
+  timeISO: string;
+  /** Agency event page or product page. */
+  url: string;
+  /** USGS "tsunami" flag only (null for BMKG). NOT a tsunami warning: see USGS_TSUNAMI_FLAG_NOTE. */
+  tsunamiFlag: boolean | null;
+  /** BMKG verbatim tsunami-potential statement ("Potensi"), null for USGS. */
+  potential: string | null;
+  dataMode: Extract<DataMode, 'live' | 'historical'>;
+}
+
+/** IOC SLSMF tide gauge (one station, all its water-level sensors). */
+export interface SeaLevelStation {
+  code: string;
+  name: string;
+  /** IOC 3-letter country code, e.g. "IDN". */
+  country: string;
+  countryName: string | null;
+  lat: number;
+  lon: number;
+  /** Water-level sensors reported by IOC for this station (battery and wind sensors removed). */
+  sensors: string[];
+  /** Sensor used for readings (rad, prs, pwl, ... in that preference). */
+  sensor: string;
+  /** Sampling interval in minutes, as listed by IOC. */
+  rateMin: number | null;
+  /** ISO 8601 UTC time of the last sample at list capture time; null if never. */
+  lastTimeISO: string | null;
+}
+
+export interface SeaLevelReading {
+  /** ISO 8601 UTC sample time. */
+  timeISO: string;
+  /** Raw gauge value on the station's own datum (includes the normal tide). */
+  value: number;
+  unit: 'm';
+}
+
+export interface SeaLevelSeries {
+  stationCode: string;
+  sensor: string;
+  readings: SeaLevelReading[];
+  dataMode: Extract<DataMode, 'live' | 'historical'>;
+  retrievedAt: string;
+  sourceUrl: string;
+  /** Always the raw, unvalidated, not-a-warning caveat. */
+  note: string;
+}
+
+/** GloFAS river discharge via Open-Meteo. MODELLED context, never a warning or evidence. */
+export interface RiverDischargeDay {
+  /** YYYY-MM-DD (UTC day). */
+  date: string;
+  /** m³/s; null where the model gives no value. */
+  dischargeM3s: number | null;
+  kind: 'past' | 'today' | 'forecast';
+}
+
+export interface RiverDischargeSeries {
+  pointId: string;
+  river: string;
+  place: string;
+  country: string;
+  requested: { lat: number; lon: number };
+  /** The GloFAS cell actually used (highest mean discharge in the 5×5 neighbourhood). */
+  cell: { lat: number; lon: number };
+  unit: 'm³/s';
+  days: RiverDischargeDay[];
+  basis: 'MODELLED';
+  dataMode: Extract<DataMode, 'live' | 'historical'>;
+  retrievedAt: string;
+  sourceUrl: string;
+  note: string;
+}
+
+/** A MapLibre raster source + layer spec for NASA GIBS imagery (EPSG:3857, GoogleMapsCompatible). */
+export interface GibsRasterLayer {
+  id: string;
+  /** GIBS layer identifier, e.g. "Himawari_AHI_Band13_Clean_Infrared". */
+  layer: string;
+  title: string;
+  /** MapLibre tile URL templates ({z}/{y}/{x}). */
+  tiles: string[];
+  tileSize: 256;
+  maxzoom: number;
+  attribution: string;
+  /** Image time requested: ISO 8601 UTC (10-minute) or YYYY-MM-DD for daily layers. */
+  timeISO: string;
+  latencyNote: string;
+  legendUrl: string | null;
+  dataMode: 'live';
 }

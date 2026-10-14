@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { gridAxes, loadWindField, loadWindSnapshot, normaliseOpenMeteoWind, resetWindCache, windFromToUV } from './windField';
+import {
+  buildWindUrl,
+  gridAxes,
+  loadWindField,
+  loadWindSnapshot,
+  normaliseOpenMeteoWind,
+  PARTICLE_WIND_LEVEL,
+  resetWindCache,
+  sampleSlice,
+  timeWeights,
+  windFromToUV,
+  windSlice,
+} from './windField';
+import { sampleWind } from './transport';
 
 describe('windFromToUV (meteorological FROM convention)', () => {
   it('converts the cardinal directions', () => {
@@ -82,5 +95,65 @@ describe('loadWindField', () => {
     expect(a.status).toBe('live');
     expect(b.grid).toBe(a.grid);
     expect((await loadWindField({ fetchImpl: ok })).status).toBe('cached');
+  });
+});
+
+describe('925 hPa level (particle wind)', () => {
+  afterEach(() => resetWindCache());
+
+  it('requests the 925 hPa variables and normalises them with the 925 hPa label', () => {
+    expect(buildWindUrl([0], [103], 3, '925hPa')).toContain('&hourly=wind_speed_925hPa,wind_direction_925hPa&');
+    expect(buildWindUrl([0], [103])).toContain('&hourly=wind_speed_10m,wind_direction_10m&');
+    expect(PARTICLE_WIND_LEVEL).toBe('925hPa');
+    // Trimmed real 925 hPa shape (2026-10-14 probe: 6.25 m/s).
+    const loc = (lat: number, lon: number) => ({
+      latitude: lat,
+      longitude: lon,
+      hourly_units: { time: 'iso8601', wind_speed_925hPa: 'm/s', wind_direction_925hPa: '°' },
+      hourly: { time: ['2026-10-14T06:00'], wind_speed_925hPa: [6.25], wind_direction_925hPa: [270] },
+    });
+    const g = normaliseOpenMeteoWind([loc(0, 103), loc(0, 104), loc(1, 103), loc(1, 104)], { lats: [0, 1], lons: [103, 104] }, '2026-10-14T07:00:00Z', 'live', '925hPa');
+    expect(g!.level).toBe('925 hPa');
+    expect(g!.u[0][1][1]).toBeCloseTo(6.25);
+    // A 10 m parse of a 925 hPa response finds no 10 m variables.
+    expect(normaliseOpenMeteoWind([loc(0, 103), loc(0, 104), loc(1, 103), loc(1, 104)], { lats: [0, 1], lons: [103, 104] }, 'x')).toBeNull();
+  });
+
+  it('has its own bundled snapshot and per-level live cache', async () => {
+    const g = loadWindSnapshot('925hPa');
+    expect(g).not.toBeNull();
+    expect(g!.level).toBe('925 hPa');
+    expect(loadWindSnapshot()!.level).toBe('10 m');
+    const failing = (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch;
+    const r = await loadWindField({ fetchImpl: failing, level: '925hPa' });
+    expect(r.status).toBe('snapshot');
+    expect(r.grid!.level).toBe('925 hPa');
+  });
+});
+
+describe('windSlice / sampleSlice', () => {
+  it('agrees with transport sampleWind inside the grid and returns null outside', () => {
+    const g = loadWindSnapshot('925hPa')!;
+    const t = new Date((Date.parse(g.times[3]) + Date.parse(g.times[4])) / 2).toISOString();
+    const slice = windSlice(g, t);
+    for (const [lat, lon] of [
+      [1.35, 103.82],
+      [-2.5, 110.7],
+      [7.9, 119.1],
+      [-6, 95],
+    ]) {
+      const a = sampleSlice(slice, lat, lon)!;
+      const b = sampleWind(g, lat, lon, t)!;
+      expect(a.u).toBeCloseTo(b.u, 4);
+      expect(a.v).toBeCloseTo(b.v, 4);
+    }
+    expect(sampleSlice(slice, 9, 103)).toBeNull();
+    expect(sampleSlice(slice, 1, 121)).toBeNull();
+  });
+
+  it('clamps times outside the grid to its ends', () => {
+    expect(timeWeights([0, 10, 20], -5)).toEqual({ a: 0, b: 0, f: 0 });
+    expect(timeWeights([0, 10, 20], 25)).toEqual({ a: 2, b: 2, f: 0 });
+    expect(timeWeights([0, 10, 20], 15)).toEqual({ a: 1, b: 2, f: 0.5 });
   });
 });

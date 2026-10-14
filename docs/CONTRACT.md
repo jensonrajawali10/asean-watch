@@ -11,7 +11,7 @@ data/watches.json + data/real/* → watchRules → validateObservations → visi
 live in the browser when online: NEA, official warning feeds (warnings.ts); snapshots otherwise
 ```
 
-No server, database or model API. The core works offline from bundled real snapshots. Browser-callable feeds refresh live when online; FIRMS has no CORS, so it is refreshed by script. External links open in a new tab.
+No database. One optional server function (`api/ai-brief.ts`, Vercel) calls the Claude API for the grounded summary; the key stays server-side and the client sends only `{watchId, dayIndex}`. Further server functions may proxy official feeds that block browser calls (fixed host allow-lists only). The core works offline from bundled real snapshots. Browser-callable feeds refresh live when online; FIRMS has no CORS, so it is refreshed by script. External links open in a new tab.
 
 ## File ownership
 
@@ -103,8 +103,14 @@ Jenson: "make it all real data". Simulated fixtures are retired. Everything show
   - NASA FIRMS VIIRS/MODIS active-fire CSVs (open, no key, no CORS) give `thermal`.
   - USGS and BMKG earthquakes within a stated radius give `seismic`.
   - There is no open numeric SO2 feed, so `gas` is empty and links out to MOUNTS. It is never filled with modelled values.
-  - Modelled data (e.g. Open-Meteo/CAMS, not yet integrated) would be context only, labelled MODELLED, and never evidence.
+  - Modelled data (Open-Meteo wind at 10 m and 925 hPa, CAMS PM2.5 via Open-Meteo) is context only, labelled MODELLED, and never evidence.
 - **Anomalies come from stated watch rules,** e.g. "FIRMS detection, confidence nominal or high, within 5 km of the summit". The rule text travels with each record (`anomalyReason`) and appears in "Why this state?". These rules are illustrative workflow rules, not official thresholds.
 - **Replay steps through the real last 7 days,** one step per UTC day, oldest first, so the demo flow keeps working on real data. The state at each step is whatever the real data gives. Nothing is staged.
 - **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. In the app, NEA and the official warning feeds (warnings.ts) also refresh live when online; FIRMS and earthquakes come from the snapshot only. Snapshots are bundled at build time, so rebuild after `npm run refresh:all`.
 - **Banner:** "DEMO REPLAY" becomes a data-recency banner, e.g. "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".
+
+## Map v2 and AI summary (2026-10-14)
+
+- **Map engine:** MapLibre GL + deck.gl (`src/components/map/MapView.tsx`). Basemaps: CARTO Dark Matter (default; CARTO's free basemaps are for non-commercial use within their view limits, attribution "© CARTO © OpenStreetMap contributors"), OpenFreeMap positron (light option). Offline: a local outline style from `data/region.geojson`.
+- **Modelled haze layers:** CAMS PM2.5 haze, 925 hPa wind particles, city markers and the forecast scrubber are MODELLED context. When showing a snapshot they say "snapshot run <time>", never "now". Singapore's NEA reading is shown separately as MEASURED.
+- **Claude summary:** summarises only the deterministic brief for one watch and day, cites [E#] and [W#], states each warning's mode, time and status, quotes official instructions verbatim or cites them, never predicts, never gives its own advice, and never treats absence as an all-clear. Labelled "AI-written summary of the data shown. May contain errors. Not an official warning; follow the issuer's instructions."

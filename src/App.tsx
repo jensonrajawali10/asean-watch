@@ -2,7 +2,7 @@
 // generated brief and the inspected object; everything else is derived from them, the real-data
 // snapshot loaded once below, and the two context feeds (NEA Singapore, official warnings) loaded
 // once after mount. Every watch area replays over the same seven UTC days of the snapshot.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
 import { findVolcano, loadFixtures } from './lib/fixtures';
@@ -14,10 +14,21 @@ import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
 import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
 import type { OfficialWarningsResult } from './lib/warnings';
-import RegionMap from './components/RegionMap';
-import type { HazeTransportView, RegionMapProps } from './components/RegionMap';
-import { loadWindField } from './lib/windField';
-import type { WindLoadResult } from './lib/windField';
+import type { HazeTransportView, MapViewProps } from './components/map/MapView';
+import { hotspotsUpToDay } from './components/map/mapGeometry';
+import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
+import { loadAshWind } from './lib/ashDrift';
+import type { AshWindData } from './lib/ashDrift';
+import { loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
+import type { QuakesResult } from './lib/quakesLive';
+import { loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
+import type { FloodModelResult } from './lib/floodModel';
+import { loadPtwc, loadPtwcSnapshot } from './lib/ptwc';
+import type { PtwcResult } from './lib/ptwc';
+import type { WindGrid, WindLoadResult } from './lib/windField';
+import { loadAirQuality } from './lib/airQuality';
+import type { AirQualityData } from './lib/airQuality';
+import { useHazeHour } from './components/map/useHazeHour';
 import { computeTrajectories, hazeSourcesFromFixtures, sampleWind } from './lib/transport';
 import AppHeader from './components/AppHeader';
 import ReplayBar from './components/ReplayBar';
@@ -33,6 +44,9 @@ import OfficialWarningsPanel, { WarningInspector, feedForWarning, gaugeForWarnin
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNearSingapore } from './components/format';
 import './App.css';
+
+/** MapLibre + deck.gl are large: the map loads as its own chunk so the panels paint first. */
+const MapView = lazy(() => import('./components/map/MapView'));
 
 // ---------------------------------------------------------------------------
 // Snapshot data: loaded and validated once per page load.
@@ -239,6 +253,16 @@ export default function App() {
   /** Modelled wind field (Open-Meteo, live or snapshot); null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
+  /** Modelled haze layer inputs (CAMS PM2.5 and 925 hPa wind via Open-Meteo, live or snapshot); null until loaded. */
+  const [airQuality, setAirQuality] = useState<AirQualityData | null>(null);
+  const [wind925, setWind925] = useState<WindGrid | null>(null);
+  /** Modelled pressure-level winds at the volcano summits for the ash-drift lines (live or snapshot); null until loaded. */
+  const [ashWind, setAshWind] = useState<AshWindData | null>(null);
+  /** Connector layers: bundled snapshot first (HISTORICAL), replaced by the live load when it settles. */
+  const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
+  const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
+  const [ptwc, setPtwc] = useState<PtwcResult>(() => loadPtwcSnapshot());
+  const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
   /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -272,6 +296,17 @@ export default function App() {
     [selectedIncidentId],
   );
   const missingId = selectedIncidentId !== null && incident === null ? selectedIncidentId : null;
+  /** FIRMS detections behind the selected watch's thermal records, up to the replay day (map dots). */
+  const hotspots = useMemo(
+    () =>
+      hotspotsUpToDay(
+        FIXTURES.observations,
+        (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members,
+        incident?.id ?? null,
+        replayIndex,
+      ),
+    [incident, replayIndex],
+  );
   const review = incident ? (reviews[incident.id] ?? null) : null;
   const volcano = useMemo(() => (incident ? findVolcano(FIXTURES.volcanoes, incident.volcanoId) : null), [incident]);
   const replayEnabled = incident !== null && STEPS.length > 0;
@@ -296,7 +331,10 @@ export default function App() {
     }
   }, [incident, nea]);
 
-  const allWarnings = warningsResult.warnings;
+  // PTWC messages are official and relayed verbatim alongside the other feeds (its feed status carries the
+  // "for national authorities" note).
+  const allWarnings = useMemo(() => [...warningsResult.warnings, ...ptwc.warnings], [warningsResult.warnings, ptwc.warnings]);
+  const allFeeds = useMemo(() => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }], [warningsResult.feeds, ptwc]);
   /** Warnings near the selected area, or every warning (APAC-wide) when nothing is selected. */
   const nearWarnings = useMemo<OfficialWarning[]>(() => {
     if (!incident) return allWarnings;
@@ -323,8 +361,8 @@ export default function App() {
     [inspectedWarning, warningsResult.gauges],
   );
   const inspectedFeed = useMemo(
-    () => (inspectedWarning ? feedForWarning(inspectedWarning, warningsResult.feeds) : null),
-    [inspectedWarning, warningsResult.feeds],
+    () => (inspectedWarning ? feedForWarning(inspectedWarning, allFeeds) : null),
+    [inspectedWarning, allFeeds],
   );
 
   /**
@@ -337,9 +375,9 @@ export default function App() {
       [
         drift && nea ? `nea:${nea.dataMode}:${nea.retrievedAt}` : 'nea:none',
         `w:${nearWarnings.map((w) => w.id).join(',')}`,
-        `f:${warningsResult.feeds.map((f) => `${f.feedId}=${f.status}`).join(',')}`,
+        `f:${allFeeds.map((f) => `${f.feedId}=${f.status}`).join(',')}`,
       ].join('|'),
-    [drift, nea, nearWarnings, warningsResult.feeds],
+    [drift, nea, nearWarnings, allFeeds],
   );
 
   // --- Actions -------------------------------------------------------------
@@ -409,7 +447,7 @@ export default function App() {
       nea,
       drift,
       warnings: nearWarnings,
-      warningFeeds: warningsResult.feeds,
+      warningFeeds: allFeeds,
       dataAsOf: DATA_AS_OF,
       stepCount: STEPS.length || undefined,
     };
@@ -498,6 +536,44 @@ export default function App() {
         if (alive) setWindResult(result);
       })
       .catch((err: unknown) => console.error('Wind field could not be loaded:', err));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Modelled haze inputs for the map's haze layer: loaded once; both loaders never throw and fall back to snapshots.
+  useEffect(() => {
+    let alive = true;
+    loadAirQuality()
+      .then((result) => {
+        if (alive) setAirQuality(result.data);
+      })
+      .catch((err: unknown) => console.error('Air quality could not be loaded:', err));
+    loadWindField({ level: PARTICLE_WIND_LEVEL })
+      .then((result) => {
+        if (alive) setWind925(result.grid);
+      })
+      .catch((err: unknown) => console.error('925 hPa wind could not be loaded:', err));
+    loadAshWind()
+      .then((result) => {
+        if (alive) setAshWind(result.data);
+      })
+      .catch((err: unknown) => console.error('Ash-drift winds could not be loaded:', err));
+    loadQuakes()
+      .then((result) => {
+        if (alive) setQuakes(result);
+      })
+      .catch((err: unknown) => console.error('Earthquakes could not be loaded:', err));
+    loadFloodModel()
+      .then((result) => {
+        if (alive) setRiverFlow(result);
+      })
+      .catch((err: unknown) => console.error('River flow could not be loaded:', err));
+    loadPtwc()
+      .then((result) => {
+        if (alive) setPtwc(result);
+      })
+      .catch((err: unknown) => console.error('PTWC could not be loaded:', err));
     return () => {
       alive = false;
     };
@@ -601,17 +677,14 @@ export default function App() {
       </div>
     ) : null;
 
-  // Spread so the optional context props compile before and after RegionMap declares them.
-  const mapProps: RegionMapProps & {
-    nea: typeof nea;
-    drift: DriftAssessment | null;
-    warnings: OfficialWarning[];
-    gauges: OfficialWarningsResult['gauges'];
-    selectedWarningId: string | null;
-    onSelectWarning: (id: string) => void;
-  } = {
+  const mapProps: MapViewProps = {
     onClearSelection: () => selectIncident(null),
     transport,
+    hotspots,
+    windGrid: wind925,
+    airQuality,
+    hazeHour,
+    hazeTimeISO: transport?.time ?? null,
     incidents: INCIDENTS,
     selectedId: incident?.id ?? null,
     states,
@@ -623,6 +696,9 @@ export default function App() {
     gauges: warningsResult.gauges,
     selectedWarningId: inspectedWarningId,
     onSelectWarning: openWarning,
+    ashWind,
+    quakes,
+    riverFlow: riverFlow.series,
   };
 
   return (
@@ -649,7 +725,15 @@ export default function App() {
                 </div>
               )}
             >
-              <RegionMap {...mapProps} />
+              <Suspense
+                fallback={
+                  <div className="map-fallback" role="status">
+                    <p>Loading the map…</p>
+                  </div>
+                }
+              >
+                <MapView {...mapProps} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         </section>
@@ -704,7 +788,7 @@ export default function App() {
               <OfficialWarningsPanel
                 warnings={nearWarnings}
                 gauges={warningsResult.gauges}
-                feeds={warningsResult.feeds}
+                feeds={allFeeds}
                 nearName={selectedName}
                 elsewhere={elsewhereWarnings}
                 onShowAll={() => selectIncident(null)}
@@ -817,6 +901,7 @@ export default function App() {
                 filename={incident ? briefingFilename(incident, currentStep) : null}
                 onGenerate={generateBrief}
                 onDownload={downloadBrief}
+                dayIndex={currentStep?.index ?? null}
               />
             </div>
           </aside>

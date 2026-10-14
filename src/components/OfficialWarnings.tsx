@@ -16,6 +16,7 @@ import { haversineKm } from '../lib/nea';
 import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
+import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -248,6 +249,7 @@ function WarningItem({
       <p className="ow-headline" lang={lang} title={headline}>
         {headline}
       </p>
+      {w.issuer === PTWC_ISSUER && <p className="ow-meta">{PTWC_NATIONAL_AUTHORITIES_NOTE}</p>}
 
       <p className="ow-meta">
         {w.issuedAt ? (
@@ -442,6 +444,12 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
                   {w.headline.trim()}
                 </span>
               </Field>
+
+              {w.issuer === PTWC_ISSUER && (
+                <Field label="Audience">
+                  <span>{PTWC_NATIONAL_AUTHORITIES_NOTE}</span>
+                </Field>
+              )}
 
               <Field label="Area">
                 {w.areaDescription.trim() ? (

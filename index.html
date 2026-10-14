@@ -1,9 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Theme before first paint: the saved choice, else dark (the default). The attribute is always set;
+         the map reads it. The two background rules stop a light flash before the stylesheet loads. -->
+    <script>
+      (function () {
+        var theme = 'dark';
+        try {
+          var saved = localStorage.getItem('aw-theme');
+          if (saved === 'light' || saved === 'dark') theme = saved;
+        } catch (e) {}
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <style>
+      html { background: #0a1218; color-scheme: dark; }
+      html[data-theme='light'] { background: #eef0f3; color-scheme: light; }
+    </style>
     <meta name="theme-color" content="#141a22" />
     <meta name="description" content="ASEAN Watch: environmental watch areas with traceable evidence, relayed official warnings and a downloadable brief." />
     <title>ASEAN Watch · Environment</title>
