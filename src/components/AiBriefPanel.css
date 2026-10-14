@@ -1,0 +1,91 @@
+/* AI summary inside the brief bar. Everything here is ai- prefixed; .btn, .mono and
+   .visually-hidden come from App.css / index.css. 13 px minimum, weights 400/600, hairlines,
+   no icons, nothing animates. */
+
+.ai-brief {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.ai-brief-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-brief-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-brief-label {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--state-check-border);
+  background: var(--state-check-bg);
+  color: var(--state-check-fg);
+  line-height: 1.4;
+}
+
+.ai-brief-body {
+  margin-top: 6px;
+}
+
+.ai-brief-status {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.ai-brief-error {
+  color: var(--official);
+}
+
+.ai-brief-summary {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ai-brief-section {
+  margin: 8px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-brief-line {
+  margin: 2px 0;
+  line-height: 1.45;
+}
+
+.ai-brief-bullet {
+  padding-left: 12px;
+  text-indent: -12px;
+}
+
+.ai-brief-bullet::before {
+  content: '- ';
+}
+
+.ai-cite {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--text);
+  background: var(--bg);
+  text-indent: 0;
+}
+
+.ai-brief-meta {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+}

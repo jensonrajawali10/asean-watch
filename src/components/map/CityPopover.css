@@ -1,0 +1,241 @@
+/* City popover: light panel tokens by default, .is-dark for the dark map (same verified palette as
+   HazeScrubber.css). The NEA chip uses the banner pair (#ffd27a on #141a22, 12.3:1) so measured data
+   never looks like the modelled value above it. */
+.city-popover {
+  --cp-bg: var(--panel, #ffffff);
+  --cp-fg: var(--text, #141a22);
+  --cp-muted: var(--text-muted, #4e5967);
+  --cp-border: var(--border-strong, #7f8a98);
+  --cp-line: var(--accent, #1b58a8);
+  --cp-area: rgba(27, 88, 168, 0.12);
+  --cp-guide: #b7bfc9;
+  --cp-focus: var(--focus, #1b58a8);
+  --cp-badge-bg: var(--mode-modelled-bg, #ece6f9);
+  --cp-badge-fg: var(--mode-modelled-fg, #4a2f8d);
+  --cp-badge-border: var(--mode-modelled-border, #c6b6ea);
+  position: absolute;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 288px;
+  max-width: calc(100% - 16px);
+  padding: 9px 11px 8px;
+  border: 1px solid var(--cp-border);
+  border-radius: var(--radius, 4px);
+  background: var(--cp-bg);
+  color: var(--cp-fg);
+  font-size: 13px;
+  line-height: 18px;
+  box-shadow: 0 2px 10px rgba(20, 26, 34, 0.18);
+  cursor: default;
+}
+
+.city-popover.is-dark {
+  --cp-bg: #1a1f27;
+  --cp-fg: #e8ebef;
+  --cp-muted: #b4bcc7;
+  --cp-border: #5a6472;
+  --cp-line: #8fb8f0;
+  --cp-area: rgba(143, 184, 240, 0.16);
+  --cp-guide: #4a5360;
+  --cp-focus: #ffd27a;
+  --cp-badge-bg: #2e2547;
+  --cp-badge-fg: #dccfff;
+  --cp-badge-border: #5d4b94;
+}
+
+.city-popover:not(.is-anchored) {
+  right: 12px;
+  top: 12px;
+}
+
+.city-popover p,
+.city-popover h3,
+.city-popover figure {
+  margin: 0;
+}
+
+.city-popover__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.city-popover__head h3 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.city-popover__kind {
+  margin-left: 6px;
+  color: var(--cp-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.city-popover__close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin: -3px -5px 0 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius, 4px);
+  background: transparent;
+  color: var(--cp-fg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.city-popover__close:hover {
+  border-color: var(--cp-border);
+}
+
+.city-popover button:focus-visible,
+.city-popover a:focus-visible {
+  outline: 2px solid var(--cp-focus);
+  outline-offset: 2px;
+}
+
+.city-popover__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.city-popover__value strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.city-popover__badge,
+.city-popover__nea-tag {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--cp-badge-border);
+  border-radius: var(--radius-sm, 3px);
+  background: var(--cp-badge-bg);
+  color: var(--cp-badge-fg);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+}
+
+.city-popover__band {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cp-fg);
+}
+
+.city-popover__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--cp-border);
+}
+
+.city-popover__time {
+  color: var(--cp-muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.city-popover__spark {
+  margin-top: 6px;
+}
+
+.city-popover__spark svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.city-popover__area {
+  fill: var(--cp-area);
+}
+
+.city-popover__line {
+  fill: none;
+  stroke: var(--cp-line);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.city-popover__axis {
+  stroke: var(--cp-guide);
+  stroke-width: 1;
+}
+
+.city-popover__guide {
+  stroke: var(--cp-guide);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.city-popover__sel {
+  fill: var(--cp-bg);
+  stroke: var(--cp-fg);
+  stroke-width: 1.6;
+}
+
+.city-popover__tick {
+  fill: var(--cp-muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.city-popover__spark figcaption {
+  color: var(--cp-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.city-popover__nea {
+  margin-top: 6px;
+  padding: 3px 6px;
+  border-radius: 0;
+  background: #141a22;
+  color: #ffd27a;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.city-popover.is-dark .city-popover__nea {
+  background: #ffd27a;
+  color: #141a22;
+}
+
+.city-popover__nea .city-popover__nea-tag {
+  border-color: currentColor;
+  background: transparent;
+  color: inherit;
+}
+
+.city-popover__prov {
+  margin-top: 6px;
+  color: var(--cp-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.city-popover__prov a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.city-popover__note {
+  margin-top: 3px;
+  color: var(--cp-muted);
+  font-size: 11px;
+  line-height: 15px;
+}

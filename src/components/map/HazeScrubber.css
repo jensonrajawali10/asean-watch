@@ -1,0 +1,275 @@
+/* Forecast-hour control for the modelled haze and wind layers. Light panel tokens by default; .is-dark
+   matches the dark map (ratios: text #e8ebef on #1a1f27 14.6:1, muted #b4bcc7 on #1a1f27 8.9:1,
+   modelled badge #dccfff on #2e2547 10.9:1). */
+.haze-scrubber {
+  --hs-bg: var(--panel, #ffffff);
+  --hs-fg: var(--text, #141a22);
+  --hs-muted: var(--text-muted, #4e5967);
+  --hs-border: var(--border, #b7bfc9);
+  --hs-control: var(--border-strong, #7f8a98);
+  --hs-hover: var(--panel-2, #f5f6f8);
+  --hs-accent: var(--accent, #1b58a8);
+  --hs-focus: var(--focus, #1b58a8);
+  --hs-badge-bg: var(--mode-modelled-bg, #ece6f9);
+  --hs-badge-fg: var(--mode-modelled-fg, #4a2f8d);
+  --hs-badge-border: var(--mode-modelled-border, #c6b6ea);
+  --hs-track: #d5dae1;
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 32px));
+  padding: 8px 10px 7px;
+  border: 1px solid var(--hs-border);
+  border-radius: var(--radius, 4px);
+  background: var(--hs-bg);
+  color: var(--hs-fg);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: default;
+}
+
+.haze-scrubber.is-dark {
+  --hs-bg: #1a1f27;
+  --hs-fg: #e8ebef;
+  --hs-muted: #b4bcc7;
+  --hs-border: #3d4652;
+  --hs-control: #8792a0;
+  --hs-hover: #252b35;
+  --hs-accent: #8fb8f0;
+  --hs-focus: #ffd27a;
+  --hs-badge-bg: #2e2547;
+  --hs-badge-fg: #dccfff;
+  --hs-badge-border: #5d4b94;
+  --hs-track: #3d4652;
+}
+
+.haze-scrubber p,
+.haze-scrubber h2 {
+  margin: 0;
+}
+
+.haze-scrubber__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.haze-scrubber__play,
+.haze-scrubber__jump {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1px solid var(--hs-control);
+  border-radius: var(--radius, 4px);
+  background: var(--hs-bg);
+  color: var(--hs-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.haze-scrubber__play {
+  width: 30px;
+  padding: 0;
+}
+
+.haze-scrubber__play svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.haze-scrubber__jump {
+  margin-left: auto;
+  padding: 0 10px;
+}
+
+.haze-scrubber__play:hover,
+.haze-scrubber__jump:hover {
+  border-color: var(--hs-fg);
+  background: var(--hs-hover);
+}
+
+.haze-scrubber button:focus-visible,
+.haze-scrubber__range:focus-visible {
+  outline: 2px solid var(--hs-focus);
+  outline-offset: 2px;
+}
+
+.haze-scrubber__play:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.haze-scrubber__title {
+  min-width: 0;
+}
+
+.haze-scrubber__title h2 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.haze-scrubber__now {
+  color: var(--hs-muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.haze-scrubber__now strong {
+  color: var(--hs-fg);
+  font-weight: 600;
+}
+
+.haze-scrubber__track {
+  margin-top: 6px;
+}
+
+.haze-scrubber__strip {
+  position: relative;
+  /* Bars hang from a baseline just above the slider track. */
+  border-bottom: 1px solid var(--hs-border);
+}
+
+.haze-scrubber__bar {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translateX(-50%);
+  cursor: pointer;
+}
+
+.haze-scrubber__bar span {
+  display: block;
+  width: 100%;
+  border-radius: 1px 1px 0 0;
+  /* A hairline edge keeps pale bands (Moderate) visible on the light panel. */
+  box-shadow: inset 0 0 0 1px rgba(20, 26, 34, 0.22);
+}
+
+.haze-scrubber.is-dark .haze-scrubber__bar span {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.haze-scrubber__bar:hover span,
+.haze-scrubber__bar:focus-visible span {
+  box-shadow: inset 0 0 0 1px var(--hs-fg);
+}
+
+.haze-scrubber__bar.is-current::after {
+  content: '';
+  position: absolute;
+  inset: -2px -1px auto;
+  height: 2px;
+  background: var(--hs-fg);
+}
+
+.haze-scrubber__range {
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--hs-accent);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.haze-scrubber__range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hs-track);
+}
+
+.haze-scrubber__range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hs-track);
+}
+
+.haze-scrubber__range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 2px solid var(--hs-bg);
+  border-radius: 50%;
+  background: var(--hs-accent);
+  box-shadow: 0 0 0 1px var(--hs-control);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.haze-scrubber__range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--hs-bg);
+  border-radius: 50%;
+  background: var(--hs-accent);
+  box-shadow: 0 0 0 1px var(--hs-control);
+}
+
+.haze-scrubber__ticks {
+  position: relative;
+  height: 14px;
+  color: var(--hs-muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.haze-scrubber__ticks span {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.haze-scrubber__ticks span.is-mid {
+  transform: translateX(-50%);
+}
+
+.haze-scrubber__readout {
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.haze-scrubber__readout-k {
+  color: var(--hs-muted);
+}
+
+.haze-scrubber__note {
+  margin-top: 3px;
+  color: var(--hs-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.haze-scrubber__badge {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--hs-badge-border);
+  border-radius: var(--radius-sm, 3px);
+  background: var(--hs-badge-bg);
+  color: var(--hs-badge-fg);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.haze-scrubber__mode {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-variant-numeric: tabular-nums;
+}

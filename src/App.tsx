@@ -2,7 +2,7 @@
 // generated brief and the inspected object; everything else is derived from them, the real-data
 // snapshot loaded once below, and the two context feeds (NEA Singapore, official warnings) loaded
 // once after mount. Every watch area replays over the same seven UTC days of the snapshot.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
 import { findVolcano, loadFixtures } from './lib/fixtures';
@@ -14,8 +14,8 @@ import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
 import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
 import type { OfficialWarningsResult } from './lib/warnings';
-import RegionMap from './components/RegionMap';
-import type { HazeTransportView, RegionMapProps } from './components/RegionMap';
+import type { HazeTransportView, MapViewProps } from './components/map/MapView';
+import { hotspotsUpToDay } from './components/map/mapGeometry';
 import { loadWindField } from './lib/windField';
 import type { WindLoadResult } from './lib/windField';
 import { computeTrajectories, hazeSourcesFromFixtures, sampleWind } from './lib/transport';
@@ -33,6 +33,9 @@ import OfficialWarningsPanel, { WarningInspector, feedForWarning, gaugeForWarnin
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNearSingapore } from './components/format';
 import './App.css';
+
+/** MapLibre + deck.gl are large: the map loads as its own chunk so the panels paint first. */
+const MapView = lazy(() => import('./components/map/MapView'));
 
 // ---------------------------------------------------------------------------
 // Snapshot data: loaded and validated once per page load.
@@ -272,6 +275,17 @@ export default function App() {
     [selectedIncidentId],
   );
   const missingId = selectedIncidentId !== null && incident === null ? selectedIncidentId : null;
+  /** FIRMS detections behind the selected watch's thermal records, up to the replay day (map dots). */
+  const hotspots = useMemo(
+    () =>
+      hotspotsUpToDay(
+        FIXTURES.observations,
+        (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members,
+        incident?.id ?? null,
+        replayIndex,
+      ),
+    [incident, replayIndex],
+  );
   const review = incident ? (reviews[incident.id] ?? null) : null;
   const volcano = useMemo(() => (incident ? findVolcano(FIXTURES.volcanoes, incident.volcanoId) : null), [incident]);
   const replayEnabled = incident !== null && STEPS.length > 0;
@@ -601,17 +615,12 @@ export default function App() {
       </div>
     ) : null;
 
-  // Spread so the optional context props compile before and after RegionMap declares them.
-  const mapProps: RegionMapProps & {
-    nea: typeof nea;
-    drift: DriftAssessment | null;
-    warnings: OfficialWarning[];
-    gauges: OfficialWarningsResult['gauges'];
-    selectedWarningId: string | null;
-    onSelectWarning: (id: string) => void;
-  } = {
+  const mapProps: MapViewProps = {
     onClearSelection: () => selectIncident(null),
     transport,
+    hotspots,
+    windGrid: windResult?.grid ?? null,
+    hazeTimeISO: transport?.time ?? null,
     incidents: INCIDENTS,
     selectedId: incident?.id ?? null,
     states,
@@ -649,7 +658,15 @@ export default function App() {
                 </div>
               )}
             >
-              <RegionMap {...mapProps} />
+              <Suspense
+                fallback={
+                  <div className="map-fallback" role="status">
+                    <p>Loading the map…</p>
+                  </div>
+                }
+              >
+                <MapView {...mapProps} />
+              </Suspense>
             </ErrorBoundary>
           </div>
         </section>

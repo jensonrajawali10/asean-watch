@@ -4,12 +4,24 @@
 // 10 m wind, past_days=1, forecast_days=3, UTC. Stored 3-hourly (u/v in m/s, 2 decimals) to keep the
 // bundle small; the app interpolates linearly in time. Fail safe: any download, shape or value problem
 // writes nothing and keeps the previous snapshot (exit code 1). Written via a temp file and rename.
+// Level argument: none or "10m" writes data/wind-snapshot.json; "925hPa" writes data/wind925-snapshot.json
+// (wind_speed_925hPa / wind_direction_925hPa, the particle wind).
 import { rename, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const OUT = path.join(ROOT, 'data', 'wind-snapshot.json');
+const LEVELS = {
+  '10m': { speed: 'wind_speed_10m', dir: 'wind_direction_10m', label: '10 m', file: 'wind-snapshot.json' },
+  '925hPa': { speed: 'wind_speed_925hPa', dir: 'wind_direction_925hPa', label: '925 hPa', file: 'wind925-snapshot.json' },
+};
+const LEVEL_KEY = process.argv[2] ?? '10m';
+const LEVEL = LEVELS[LEVEL_KEY];
+if (!LEVEL) {
+  console.error(`Unknown level "${LEVEL_KEY}"; use 10m or 925hPa.`);
+  process.exit(1);
+}
+const OUT = path.join(ROOT, 'data', LEVEL.file);
 const SPEC = { minLat: -6, maxLat: 8, minLon: 95, maxLon: 120, stepDeg: 1 };
 const STORE_EVERY_HOURS = 3;
 
@@ -28,7 +40,7 @@ for (const lat of lats) for (const lon of lons) {
 }
 const url =
   `https://api.open-meteo.com/v1/forecast?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
-  '&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=ms&past_days=1&forecast_days=3&timezone=GMT';
+  `&hourly=${LEVEL.speed},${LEVEL.dir}&wind_speed_unit=ms&past_days=1&forecast_days=3&timezone=GMT`;
 
 const r2 = (x) => {
   const v = Math.round(x * 100) / 100;
@@ -53,13 +65,13 @@ async function main() {
   const v = times.map(() => lats.map(() => new Array(lons.length).fill(0)));
   json.forEach((e, idx) => {
     const h = e?.hourly;
-    if (e?.hourly_units?.wind_speed_10m !== 'm/s') throw new Error(`location ${idx}: speed unit is not m/s`);
+    if (e?.hourly_units?.[LEVEL.speed] !== 'm/s') throw new Error(`location ${idx}: speed unit is not m/s`);
     if (!h || h.time?.length !== hourly.time.length) throw new Error(`location ${idx}: time axis differs`);
     const j = Math.floor(idx / lons.length);
     const i = idx % lons.length;
     keep.forEach((k, t) => {
-      const s = h.wind_speed_10m?.[k];
-      const d = h.wind_direction_10m?.[k];
+      const s = h[LEVEL.speed]?.[k];
+      const d = h[LEVEL.dir]?.[k];
       if (!Number.isFinite(s) || !Number.isFinite(d)) throw new Error(`location ${idx}: missing value at ${hourly.time[k]}`);
       const rad = (d * Math.PI) / 180;
       u[t][j][i] = r2(-s * Math.sin(rad));
@@ -69,13 +81,13 @@ async function main() {
   const retrievedAt = new Date(startedMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const out = {
     about:
-      'MODELLED 10 m wind (u east, v north, m/s) from the Open-Meteo Forecast API, captured by scripts/capture-wind-snapshot.mjs. ' +
+      `MODELLED ${LEVEL.label} wind (u east, v north, m/s) from the Open-Meteo Forecast API, captured by scripts/capture-wind-snapshot.mjs. ` +
       `Stored every ${STORE_EVERY_HOURS} h. Context only, never evidence; not a dispersion model.`,
     source: 'Open-Meteo Forecast API',
     sourceUrl: 'https://open-meteo.com/en/docs',
     requestUrl: url.replace(/latitude=[^&]+&longitude=[^&]+/, 'latitude=<grid>&longitude=<grid>'),
     model: 'Open-Meteo best match (global weather models)',
-    level: '10 m',
+    level: LEVEL.label,
     retrievedAt,
     attribution: 'Weather data by Open-Meteo.com (CC BY 4.0), best-match global weather model.',
     licence: 'CC BY 4.0 (https://open-meteo.com/en/licence); free tier is non-commercial.',
@@ -95,11 +107,11 @@ async function main() {
     await rm(tmp, { force: true });
     throw err;
   }
-  console.log(`Wrote data/wind-snapshot.json (${Math.round(Buffer.byteLength(body) / 1024)} KB): ${times.length} times ${times[0]} to ${times[times.length - 1]}, retrieved ${retrievedAt}.`);
+  console.log(`Wrote data/${LEVEL.file} (${Math.round(Buffer.byteLength(body) / 1024)} KB): ${times.length} times ${times[0]} to ${times[times.length - 1]}, retrieved ${retrievedAt}.`);
 }
 
 main().catch((err) => {
   console.error(`capture-wind-snapshot failed: ${err instanceof Error ? err.message : String(err)}`);
-  console.error('Nothing was written; the previous data/wind-snapshot.json is unchanged.');
+  console.error(`Nothing was written; the previous data/${LEVEL.file} is unchanged.`);
   process.exit(1);
 });
