@@ -26,7 +26,11 @@ export interface HazeLayerInput {
 }
 
 export class HazeLayerController {
-  constructor(private readonly map: MapLibreMap) {}
+  private readonly map: MapLibreMap;
+
+  constructor(map: MapLibreMap) {
+    this.map = map;
+  }
 
   /** Apply new input; cheap to call on every React render. */
   update(input: HazeLayerInput): void {
