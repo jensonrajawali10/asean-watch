@@ -1,0 +1,241 @@
+/* Map-mode card. Tokens only (src/index.css); both themes. */
+.mcard {
+  width: min(340px, calc(100vw - 32px));
+  background: var(--panel-glass);
+  backdrop-filter: var(--panel-filter);
+  -webkit-backdrop-filter: var(--panel-filter);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-dialog);
+  padding: 14px 16px 12px;
+  font-family: var(--font);
+}
+
+.mcard__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: start;
+  gap: 8px;
+}
+
+.mcard__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--accent);
+}
+
+.mcard__titles {
+  min-width: 0;
+}
+
+.mcard__eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mcard__title {
+  margin: 1px 0 0;
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: 650;
+}
+
+.mcard__kind {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mcard__kind--modelled,
+.mcard__kind--scenario {
+  background: var(--mode-modelled-bg);
+  color: var(--mode-modelled-fg);
+  border-color: var(--mode-modelled-border);
+}
+
+.mcard__kind--measured {
+  background: var(--mode-historical-bg);
+  color: var(--mode-historical-fg);
+  border-color: var(--mode-historical-border);
+}
+
+.mcard__kind--official {
+  background: var(--official-bg);
+  color: var(--official);
+  border-color: var(--official-border);
+}
+
+.mcard__close {
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.mcard__close:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.mcard__close:focus-visible,
+.mcard__btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.mcard__facts {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.mcard__facts--1 {
+  grid-template-columns: 1fr;
+}
+
+.mcard__facts--2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.mcard__facts--3 {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.mcard__fact {
+  min-width: 0;
+}
+
+.mcard__fact dt {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mcard__fact dd {
+  margin: 0;
+}
+
+.mcard__value {
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.mcard__unit {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.mcard__value--good {
+  color: var(--aq-good);
+}
+
+.mcard__value--moderate {
+  color: var(--aq-moderate);
+}
+
+.mcard__value--sensitive {
+  color: var(--aq-sensitive);
+}
+
+.mcard__value--unhealthy {
+  color: var(--aq-unhealthy);
+}
+
+.mcard__value--very-unhealthy {
+  color: var(--aq-very-unhealthy);
+}
+
+.mcard__value--official {
+  color: var(--official);
+}
+
+.mcard__value--muted {
+  color: var(--text-muted);
+}
+
+.mcard__note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mcard__sentence {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.mcard__slot {
+  margin-top: 10px;
+}
+
+.mcard__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.mcard__btn {
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.mcard__btn--primary {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.mcard__btn--primary:hover {
+  background: var(--accent-strong);
+}
+
+.mcard__btn--link {
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mcard__btn--link:hover {
+  text-decoration: underline;
+}
+
+.mcard__source {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}

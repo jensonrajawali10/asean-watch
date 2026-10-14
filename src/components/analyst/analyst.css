@@ -1,0 +1,244 @@
+/* Analyst workspace: dense, readable, tokens only. Class prefix "an-". */
+.an-section {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  padding: 4px 0 20px;
+}
+
+.an-section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.an-section__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.an-section__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.an-lede {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+}
+
+.an-subhead {
+  margin: 18px 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.an-muted {
+  color: var(--text-muted);
+}
+
+.an-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  vertical-align: 1px;
+}
+
+.an-note {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--panel-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.an-note--official {
+  border-left-color: var(--official);
+  background: var(--official-bg);
+  color: var(--text);
+}
+
+.an-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.an-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.an-figure__label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.an-figure__value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.an-figure__unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.an-figure__note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.an-table-wrap {
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.an-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.an-table caption {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.an-table th,
+.an-table td {
+  padding: 5px 8px 5px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.an-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.an-table td.an-num,
+.an-table th.an-num {
+  text-align: right;
+}
+
+.an-table tbody tr:hover {
+  background: var(--selected-bg);
+}
+
+.an-row-btn {
+  font: inherit;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.an-row-btn:hover {
+  text-decoration: underline;
+}
+
+.an-row-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.an-bars {
+  margin: 6px 0;
+}
+
+.an-bars__plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 64px;
+  padding-bottom: 14px;
+  position: relative;
+}
+
+.an-bars__col {
+  flex: 1 1 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  position: relative;
+}
+
+.an-bars__bar {
+  display: block;
+  background: var(--border-strong);
+  border-radius: 2px 2px 0 0;
+}
+
+.an-bars__bar--hi {
+  background: var(--accent);
+}
+
+.an-bars__label {
+  position: absolute;
+  bottom: -14px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.an-sources {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.an-sources__title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.an-sources ol {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.an-sources a {
+  color: var(--accent);
+}
