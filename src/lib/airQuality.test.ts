@@ -3,6 +3,7 @@ import {
   AQ_PLACES,
   aqRange,
   buildAqUrl,
+  describePm25,
   forecastAnchorMs,
   forecastSteps,
   loadAirQuality,
@@ -16,6 +17,7 @@ import {
   PM25_BANDS_NOTE,
   resetAqCache,
   worstPlaceByStep,
+  WHO_PM25_24H_UGM3,
 } from './airQuality';
 import type { AqPlace } from './airQuality';
 import { gridAxes } from './windField';
@@ -203,5 +205,33 @@ describe('worstPlaceByStep', () => {
       ['singapore', 63.1],
     ]);
     expect(worstPlaceByStep(null, ['2026-10-13T00:00:00Z'])).toEqual([]);
+  });
+});
+
+describe('describePm25', () => {
+  it('reads a hazardous modelled value against the WHO 24-hour guideline (15 µg/m³)', () => {
+    expect(WHO_PM25_24H_UGM3).toBe(15);
+    const d = describePm25(2116);
+    expect(d.band?.label).toBe('Hazardous');
+    expect(d.timesWho).toBe(141);
+    expect(d.valueText).toBe('2,116');
+    expect(d.scale).toBe('About 141× the WHO 24-hour guideline (15 µg/m³).');
+    expect(d.sentence).toBe('Fine smoke and dust, small enough to reach deep into the lungs. About 141× the WHO 24-hour guideline (15 µg/m³).');
+  });
+
+  it('uses one decimal under 10×, and plain words near and under the guideline', () => {
+    expect(describePm25(37).timesWho).toBe(2.5);
+    expect(describePm25(37).scale).toBe('About 2.5× the WHO 24-hour guideline (15 µg/m³).');
+    expect(describePm25(15.4).scale).toBe('About the same as the WHO 24-hour guideline (15 µg/m³).');
+    expect(describePm25(6).scale).toBe('Under the WHO 24-hour guideline (15 µg/m³).');
+    expect(describePm25(6).band?.label).toBe('Good');
+    expect(describePm25(4000).scale).toBe('About 267× the WHO 24-hour guideline (15 µg/m³).');
+  });
+
+  it('gives no band or ratio for a missing value and never offers advice', () => {
+    const d = describePm25(Number.NaN);
+    expect(d.band).toBeNull();
+    expect(d.timesWho).toBeNull();
+    for (const v of [3, 20, 60, 200, 900]) expect(describePm25(v).sentence).not.toMatch(/safe|stay indoors|mask|all clear|avoid/i);
   });
 });

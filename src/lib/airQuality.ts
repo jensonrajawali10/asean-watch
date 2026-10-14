@@ -58,6 +58,51 @@ export function pm25Band(value: number): Pm25Band | null {
   return PM25_BANDS.find((b) => value >= b.min && value < b.max) ?? null;
 }
 
+/**
+ * WHO global air quality guidelines (2021): PM2.5 24-hour AQG level 15 µg/m³ (99th percentile; annual 5 µg/m³).
+ * Verified live 2026-10-14 in WHO's "Compendium of WHO and other UN guidance on health and environment, 2024
+ * update", chapter 2 (Air pollution), table of AQG levels and interim targets:
+ * https://cdn.who.int/media/docs/default-source/who-compendium-on-health-and-environment/who_compendium_chapter2.pdf?sfvrsn=14f84896_8
+ * (publication page: https://www.who.int/publications/i/item/9789240034228).
+ */
+export const WHO_PM25_24H_UGM3 = 15;
+
+/** What PM2.5 is, in one plain sentence. No health advice of our own. */
+export const PM25_MEANING = 'Fine smoke and dust, small enough to reach deep into the lungs.';
+
+/** The unit in plain words, for the big number. */
+export const PM25_UNIT_WORDS = 'µg/m³ of PM2.5';
+
+export interface Pm25Description {
+  band: Pm25Band | null;
+  /** value / WHO 24-hour guideline, rounded (1 decimal under 10, whole above); null for a non-finite value. */
+  timesWho: number | null;
+  /** "2,116" */
+  valueText: string;
+  /** Meaning sentence plus the WHO scale comparison. */
+  sentence: string;
+  /** Just the WHO comparison, e.g. "About 141× the WHO 24-hour guideline (15 µg/m³)." */
+  scale: string;
+}
+
+const groupInt = (n: number) => Math.round(n).toLocaleString('en-US');
+
+/** Plain-language reading of a MODELLED PM2.5 value: band, scale against the WHO 24-hour guideline, sentence. */
+export function describePm25(value: number): Pm25Description {
+  const band = pm25Band(value);
+  if (!Number.isFinite(value) || value < 0) {
+    return { band: null, timesWho: null, valueText: '—', sentence: PM25_MEANING, scale: '' };
+  }
+  const ratio = value / WHO_PM25_24H_UGM3;
+  const timesWho = ratio >= 10 ? Math.round(ratio) : Math.round(ratio * 10) / 10;
+  const guide = `the WHO 24-hour guideline (${WHO_PM25_24H_UGM3} µg/m³)`;
+  let scale: string;
+  if (ratio < 0.95) scale = `Under ${guide}.`;
+  else if (ratio < 1.05) scale = `About the same as ${guide}.`;
+  else scale = `About ${timesWho.toLocaleString('en-US')}× ${guide}.`;
+  return { band, timesWho, valueText: groupInt(value), sentence: `${PM25_MEANING} ${scale}`, scale };
+}
+
 /** "PM2.5 23 µg/m³ (modelled)". */
 export function pm25Label(value: number): string {
   return `PM2.5 ${Math.round(value)} ${AQ_UNIT} (modelled)`;

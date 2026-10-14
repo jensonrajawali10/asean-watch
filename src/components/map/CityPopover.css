@@ -16,9 +16,9 @@
   position: absolute;
   z-index: 20;
   box-sizing: border-box;
-  width: 288px;
+  width: 300px;
   max-width: calc(100% - 16px);
-  padding: 9px 11px 8px;
+  padding: 10px 12px 8px;
   border: 1px solid var(--cp-border);
   border-radius: var(--radius, 4px);
   background: var(--cp-bg);
@@ -99,57 +99,169 @@
   outline-offset: 2px;
 }
 
-.city-popover__value {
+.city-popover__sub {
+  margin-top: 1px;
+  color: var(--cp-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.city-popover__rule {
+  height: 0;
+  margin: 7px 0;
+  border: 0;
+  border-top: 1px solid var(--cp-guide);
+}
+
+.city-popover__reading {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-  margin-top: 4px;
+  gap: 4px 9px;
   font-variant-numeric: tabular-nums;
 }
 
-.city-popover__value strong {
-  font-size: 15px;
+.city-popover__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid var(--band, var(--cp-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--band, transparent) 16%, transparent);
+  color: var(--cp-fg);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.city-popover__dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--band, var(--cp-muted));
+  box-shadow: 0 0 0 1px var(--cp-border);
+}
+
+.city-popover__big {
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 30px;
+  letter-spacing: -0.01em;
+}
+
+.city-popover__unit {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.city-popover__when {
+  color: var(--cp-muted);
+  font-size: 11px;
+}
+
+.city-popover__meaning {
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+.city-popover__section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
   font-weight: 600;
 }
 
-.city-popover__badge,
+.city-popover__tag,
 .city-popover__nea-tag {
   display: inline-block;
-  padding: 0 4px;
+  padding: 0 5px;
   border: 1px solid var(--cp-badge-border);
   border-radius: var(--radius-sm, 3px);
   background: var(--cp-badge-bg);
   color: var(--cp-badge-fg);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  line-height: 15px;
+}
+
+.city-popover__worst {
+  color: var(--cp-fg);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.city-popover__trust {
+  display: flex;
+  gap: 6px;
+  color: var(--cp-muted);
+  font-size: 12px;
   line-height: 16px;
 }
 
-.city-popover__band {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--cp-fg);
+.city-popover__info {
+  flex: none;
+  margin-top: 1px;
 }
 
-.city-popover__dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--cp-border);
+.city-popover__official {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.city-popover a {
+  color: var(--cp-line);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.city-popover__about {
+  margin-top: 6px;
+  color: var(--cp-muted);
+  font-size: 11.5px;
+  line-height: 15px;
+}
+
+.city-popover__about summary {
+  width: max-content;
+  color: var(--cp-fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.city-popover__about summary:focus-visible {
+  outline: 2px solid var(--cp-focus);
+  outline-offset: 2px;
+}
+
+.city-popover__about ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.city-popover__about li + li {
+  margin-top: 3px;
+}
+
+.city-popover__about a {
+  color: inherit;
 }
 
 .city-popover__time {
   color: var(--cp-muted);
-  font-family: var(--mono, ui-monospace, monospace);
   font-size: 12px;
-  font-variant-numeric: tabular-nums;
 }
 
 .city-popover__spark {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .city-popover__spark svg {
@@ -192,14 +304,8 @@
   font-size: 10px;
 }
 
-.city-popover__spark figcaption {
-  color: var(--cp-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
 .city-popover__nea {
-  margin-top: 6px;
+  margin-top: 5px;
   padding: 3px 6px;
   border-radius: 0;
   background: var(--nea-chip-bg, #141a22);
@@ -218,24 +324,4 @@
   border-color: currentColor;
   background: transparent;
   color: inherit;
-}
-
-.city-popover__prov {
-  margin-top: 6px;
-  color: var(--cp-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.city-popover__prov a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.city-popover__note {
-  margin-top: 3px;
-  color: var(--cp-muted);
-  font-size: 11px;
-  line-height: 15px;
 }
