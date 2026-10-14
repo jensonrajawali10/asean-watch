@@ -15,7 +15,7 @@
 // - The modelled haze, wind particles and city markers belong to HazeLayerController (its own overlay);
 //   this component only constructs it after load, updates it and destroys it.
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactElement } from 'react';
+import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { AttributionControl, Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl';
 import type { IControl, LngLatBoundsLike, MapSourceDataEvent } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
@@ -34,11 +34,18 @@ import type {
   ReviewState,
 } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
-import { BMKG_TSUNAMI_GLOSS } from '../../lib/warnings';
+import { bmkgLevelInstruction } from '../../lib/warnings';
 import { ashDriftTracks, compass16 } from '../../lib/ashDrift';
 import type { AshLevel, AshWindData, DriftTrack } from '../../lib/ashDrift';
 import { GEOBOUNDARIES_ATTRIBUTION, idnDistrictIndex, placeTsunamiAreas, selectTsunamiAreaWarnings } from '../../lib/tsunamiAreas';
 import type { WindGrid } from '../../lib/windField';
+import { USGS_TSUNAMI_FLAG_NOTE } from '../../lib/quakesLive';
+import type { QuakesResult } from '../../lib/quakesLive';
+import { loadSeaLevelStations } from '../../lib/seaLevel';
+import { himawariIrLayer, trueColourLayer } from '../../lib/gibs';
+import type { QuakeEvent, RiverDischargeSeries, SeaLevelStation } from '../../types';
+import { QUAKE_DEPTH_RGB, isRecentQuake, quakeDepthBand, quakeRadiusPx, quakeTooltip, stackNotes } from './connectorRender';
+import { RiverFlowPopover, TideGaugePopover } from './ChartPopover';
 import { psiBand } from '../../lib/nea';
 import { HAZE_ATTRIBUTION, HazeLayerController } from './HazeLayerController';
 import type { AirQualityData, HazeCity, HazeLayerInput } from './HazeLayerController';
@@ -127,6 +134,10 @@ export interface MapViewProps {
    * selected, the map draws illustrative ash-drift lines at ~3, ~5.5 and ~9 km. Not an ash advisory.
    */
   ashWind?: AshWindData | null;
+  /** Earthquakes (USGS and BMKG, one record per agency report, never merged). */
+  quakes?: QuakesResult | null;
+  /** MODELLED GloFAS river discharge per river point (Open-Meteo). Not a flood warning. */
+  riverFlow?: RiverDischargeSeries[] | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -479,6 +490,11 @@ interface LayerToggles {
   buildings: boolean;
   ash: boolean;
   tsunami: boolean;
+  quakes: boolean;
+  tide: boolean;
+  river: boolean;
+  satIr: boolean;
+  satTrue: boolean;
 }
 
 export default function MapView({
@@ -505,6 +521,8 @@ export default function MapView({
   hazeHour = null,
   theme,
   ashWind = null,
+  quakes = null,
+  riverFlow = null,
 }: MapViewProps) {
   const calloutId = useId();
   const layersTitleId = useId();
@@ -519,7 +537,16 @@ export default function MapView({
     buildings: true,
     ash: true,
     tsunami: true,
+    quakes: true,
+    tide: false,
+    river: false,
+    satIr: false,
+    satTrue: false,
   });
+  /** Satellite imagery opacity (0..1), shared by both GIBS layers. */
+  const [satOpacity, setSatOpacity] = useState(0.75);
+  /** Open chart popover: a tide gauge (code) or a river point (id), at a point in the map container. */
+  const [chart, setChart] = useState<{ kind: 'tide' | 'river'; id: string; at: { x: number; y: number } } | null>(null);
   /** "History: last BMKG tsunami warning" (only offered when no BMKG tsunami warning is in force). Off by default. */
   const [tsunamiHistory, setTsunamiHistory] = useState(false);
   /** Wall clock once per mount: the ash drift starts at the forecast hour at or before it. */
@@ -553,6 +580,8 @@ export default function MapView({
   const anchorsRef = useRef<HTMLElement[]>([]);
   const officialRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const applyStyleRef = useRef<((dark: boolean) => void) | null>(null);
+  /** Retries the live basemap after the offline fallback (the online event or the Retry button). */
+  const retryStyleRef = useRef<(() => void) | null>(null);
   const deckLayersRef = useRef<LayersList>([]);
   const hazeInputRef = useRef<HazeLayerInput | null>(null);
   const officialTabRef = useRef(-1);
@@ -655,6 +684,38 @@ export default function MapView({
   const tsunamiShown = Boolean(tsunamiWarning && tsunamiPlacement && layers.tsunami);
   const tsunamiAreaMarkers = tsunamiShown && tsunamiPlacement ? tsunamiPlacement.placed.slice(0, MAX_TSUNAMI_MARKERS) : [];
   const tsunamiObsMarkers = tsunamiShown && tsunamiWarning ? (tsunamiWarning.observations ?? []).slice(0, MAX_TSUNAMI_MARKERS) : [];
+
+  // Tide gauges come on by themselves whenever official tsunami areas (in force or History) are shown.
+  useEffect(() => {
+    if (tsunamiShown) setLayers((prev) => (prev.tide ? prev : { ...prev, tide: true }));
+  }, [tsunamiShown]);
+
+  // Connector layers: earthquakes (USGS, BMKG), IOC tide gauges, modelled river flow, GIBS imagery.
+  const quakesShown = useMemo<QuakeEvent[]>(
+    () =>
+      layers.quakes && quakes
+        ? quakes.events
+            .filter((q) => Number.isFinite(q.lat) && Number.isFinite(q.lon) && Number.isFinite(q.magnitude))
+            .slice()
+            .sort((a, b) => Date.parse(a.timeISO) - Date.parse(b.timeISO))
+        : [],
+    [layers.quakes, quakes],
+  );
+  const quakesRecent = quakesShown.filter((q) => isRecentQuake(q.timeISO, nowMs)).length;
+  const tideStations = useMemo<SeaLevelStation[]>(() => {
+    try {
+      return loadSeaLevelStations().stations;
+    } catch {
+      return [];
+    }
+  }, []);
+  const tideShown = useMemo(() => (layers.tide ? tideStations : []), [layers.tide, tideStations]);
+  const riverShown = useMemo(() => (layers.river && riverFlow ? riverFlow : []), [layers.river, riverFlow]);
+  const gibsIr = useMemo(() => himawariIrLayer(nowMs), [nowMs]);
+  const gibsTrue = useMemo(() => trueColourLayer(nowMs), [nowMs]);
+  const gibsShown = [...(layers.satTrue ? [gibsTrue] : []), ...(layers.satIr ? [gibsIr] : [])];
+  const gibsRef = useRef({ ir: false, tc: false, opacity: 0.75 });
+  gibsRef.current = { ir: layers.satIr, tc: layers.satTrue, opacity: satOpacity };
 
   // --- deck.gl layers (rebuilt only when inputs change, never per frame) -----------------------
 
@@ -911,8 +972,88 @@ export default function MapView({
         }),
       );
     }
+    if (tideShown.length > 0) {
+      const tideInk: RGB = dark ? [150, 200, 235] : [30, 96, 150];
+      out.push(
+        new ScatterplotLayer<SeaLevelStation>({
+          id: 'mv-tide',
+          data: tideShown,
+          getPosition: (d) => [d.lon, d.lat],
+          radiusUnits: 'pixels',
+          getRadius: 3.5,
+          filled: true,
+          getFillColor: [...tideInk, 230],
+          stroked: true,
+          getLineColor: [...halo, 230],
+          lineWidthUnits: 'pixels',
+          getLineWidth: 1,
+          pickable: true,
+          onClick: (info) => {
+            const st = info.object as SeaLevelStation | undefined;
+            if (st) setChart({ kind: 'tide', id: st.code, at: { x: info.x, y: info.y } });
+            return true;
+          },
+          updateTriggers: { getFillColor: [dark], getLineColor: [dark] },
+        }),
+      );
+    }
+    if (quakesShown.length > 0) {
+      const alpha = (q: QuakeEvent) => (isRecentQuake(q.timeISO, nowMs) ? 240 : 105);
+      const colour = (q: QuakeEvent): [number, number, number, number] => [...QUAKE_DEPTH_RGB[quakeDepthBand(q.depthKm)], alpha(q)];
+      const usgs = quakesShown.filter((q) => q.source === 'USGS');
+      const bmkg = quakesShown.filter((q) => q.source === 'BMKG');
+      out.push(
+        // USGS: filled discs with a halo. BMKG: open rings, slightly larger, so both reports of one event stay visible.
+        new ScatterplotLayer<QuakeEvent>({
+          id: 'mv-quakes-usgs',
+          data: usgs,
+          getPosition: (d) => [d.lon, d.lat],
+          radiusUnits: 'pixels',
+          getRadius: (d) => quakeRadiusPx(d.magnitude),
+          filled: true,
+          getFillColor: colour,
+          stroked: true,
+          getLineColor: (d) => [...halo, isRecentQuake(d.timeISO, nowMs) ? 255 : 140],
+          lineWidthUnits: 'pixels',
+          getLineWidth: (d) => (isRecentQuake(d.timeISO, nowMs) ? 1.6 : 0.8),
+          pickable: true,
+          updateTriggers: { getLineColor: [dark, nowMs], getFillColor: [nowMs], getLineWidth: [nowMs] },
+        }),
+        new ScatterplotLayer<QuakeEvent>({
+          id: 'mv-quakes-bmkg',
+          data: bmkg,
+          getPosition: (d) => [d.lon, d.lat],
+          radiusUnits: 'pixels',
+          getRadius: (d) => quakeRadiusPx(d.magnitude) + 2,
+          filled: false,
+          stroked: true,
+          getLineColor: colour,
+          lineWidthUnits: 'pixels',
+          getLineWidth: (d) => (isRecentQuake(d.timeISO, nowMs) ? 2.2 : 1.2),
+          pickable: true,
+          updateTriggers: { getLineColor: [nowMs], getLineWidth: [nowMs] },
+        }),
+      );
+    }
     return out;
-  }, [hazeRegions, rings, driftCone, seaWindToward, windVariable, transport, transportShown, stride, hotspotsShown, dark, windGrid, ashShown, ashDrift]);
+  }, [
+    hazeRegions,
+    rings,
+    driftCone,
+    seaWindToward,
+    windVariable,
+    transport,
+    transportShown,
+    stride,
+    hotspotsShown,
+    dark,
+    windGrid,
+    ashShown,
+    ashDrift,
+    quakesShown,
+    tideShown,
+    nowMs,
+  ]);
 
   useEffect(() => {
     deckLayersRef.current = deckLayers;
@@ -1013,6 +1154,9 @@ export default function MapView({
       }
       if (best) {
         if (el.dataset.tag !== best.pos) el.dataset.tag = best.pos;
+        // A tag that cannot fit inside the visible map is hidden (the marker and its aria-label stay).
+        const clip = outside(best.rect, frame) > 0 ? '1' : '0';
+        if (el.dataset.clip !== clip) el.dataset.clip = clip;
         occupied.push(best.rect);
       }
     });
@@ -1078,6 +1222,46 @@ export default function MapView({
     },
     [syncPadding],
   );
+
+  /** NASA GIBS rasters under the deck overlays and the basemap labels; idempotent, safe before style load. */
+  const syncGibsRef = useRef<() => void>(() => {});
+  syncGibsRef.current = () => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const want = gibsRef.current;
+    for (const [spec, on] of [
+      [gibsTrue, want.tc],
+      [gibsIr, want.ir],
+    ] as const) {
+      const layerId = `${spec.id}-layer`;
+      try {
+        if (on) {
+          if (!map.getSource(spec.id)) {
+            map.addSource(spec.id, { type: 'raster', tiles: spec.tiles, tileSize: spec.tileSize, maxzoom: spec.maxzoom, attribution: spec.attribution });
+          }
+          if (!map.getLayer(layerId)) {
+            const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
+            // Overzoom past maxzoom: MapLibre scales the last level up; the raster keeps showing when zoomed in.
+            map.addLayer({ id: layerId, type: 'raster', source: spec.id, paint: { 'raster-opacity': want.opacity, 'raster-fade-duration': 0 } }, firstSymbol);
+          } else {
+            map.setPaintProperty(layerId, 'raster-opacity', want.opacity);
+          }
+        } else {
+          if (map.getLayer(layerId)) map.removeLayer(layerId);
+          if (map.getSource(spec.id)) map.removeSource(spec.id);
+        }
+      } catch (err) {
+        console.error('Satellite layer could not be updated:', err);
+      }
+    }
+    // Infrared above true colour when both are on.
+    if (want.ir && want.tc && map.getLayer(`${gibsIr.id}-layer`) && map.getLayer(`${gibsTrue.id}-layer`)) {
+      map.moveLayer(`${gibsTrue.id}-layer`, `${gibsIr.id}-layer`);
+    }
+  };
+  useEffect(() => {
+    if (ready) syncGibsRef.current();
+  }, [ready, layers.satIr, layers.satTrue, satOpacity]);
 
   /** Fit a box (the 24 h ash drift, the tsunami warning areas) in the visible map, above the bottom dock. */
   const fitBox = useCallback(
@@ -1165,6 +1349,18 @@ export default function MapView({
         if (!styleLoaded) goOffline();
       }, STYLE_TIMEOUT_MS);
     };
+    retryStyleRef.current = () => {
+      if (!offlineMode) return;
+      offlineMode = false;
+      setOffline(false);
+      styleLoaded = false;
+      tilesOk = false;
+      tileErrors = 0;
+      map.setStyle(darkRef.current ? STYLE_URLS.dark : STYLE_URLS.light, { diff: false });
+      arm();
+    };
+    const onOnline = () => retryStyleRef.current?.();
+    window.addEventListener('online', onOnline);
     applyStyleRef.current = (isDark: boolean) => {
       styleLoaded = false;
       tilesOk = false;
@@ -1181,6 +1377,7 @@ export default function MapView({
     map.on('style.load', () => {
       styleLoaded = true;
       clearTimer();
+      syncGibsRef.current();
       // Compact attribution starts collapsed on phones (the "i" button opens it).
       if (el.clientWidth <= NARROW_MAX) {
         el.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show');
@@ -1237,8 +1434,16 @@ export default function MapView({
         interleaved: false,
         layers: deckLayersRef.current,
         getTooltip: (info: PickingInfo) => {
+          const id = info.layer?.id ?? '';
+          if (info.object && (id === 'mv-quakes-usgs' || id === 'mv-quakes-bmkg')) {
+            return { text: quakeTooltip(info.object as QuakeEvent, USGS_TSUNAMI_FLAG_NOTE), className: 'mv-tooltip' };
+          }
+          if (info.object && id === 'mv-tide') {
+            const st = info.object as SeaLevelStation;
+            return { text: `Tide gauge ${st.name} (IOC ${st.code})\nRaw tide gauge data, not a tsunami warning (IOC/VLIZ)\nClick for the last 24 h`, className: 'mv-tooltip' };
+          }
           const h = info.object as MapHotspot | undefined;
-          if (!h || info.layer?.id !== 'mv-firms') return null;
+          if (!h || id !== 'mv-firms') return null;
           return {
             text: `NASA FIRMS hotspot (satellite)\n${h.confidenceLabel} · FRP ${formatValue(h.frp)} MW\n${formatUtc(h.observedAt)}`,
             className: 'mv-tooltip',
@@ -1270,6 +1475,8 @@ export default function MapView({
 
     return () => {
       clearTimer();
+      window.removeEventListener('online', onOnline);
+      retryStyleRef.current = null;
       applyStyleRef.current = null;
       try {
         hazeRef.current?.destroy();
@@ -1303,14 +1510,48 @@ export default function MapView({
     return () => observer.disconnect();
   }, [syncPadding, positionOverlays, layoutTags]);
 
-  // After every commit: register the positioned elements, place them, and follow the panel padding
-  // (the panels open and close with App state, which re-renders this component).
+  // When the overlay's content changes: register the positioned elements, place them and lay out tags.
   useLayoutEffect(() => {
     anchorsRef.current = Array.from(overlayRef.current?.querySelectorAll<HTMLElement>('[data-lon]') ?? []);
     syncPadding();
     positionOverlays();
     layoutTags();
-  });
+  }, [
+    ready,
+    placed,
+    selectedId,
+    layers,
+    narrow,
+    tight,
+    warningMarkers,
+    gaugeMarkers,
+    rings,
+    hazeRegions,
+    driftCone,
+    seaWindToward,
+    tsunamiAreaMarkers.length,
+    tsunamiObsMarkers.length,
+    tsunamiWarning,
+    riverShown,
+    syncPadding,
+    positionOverlays,
+    layoutTags,
+  ]);
+
+  // The floating panels publish their widths through CSS custom properties that size the two probes:
+  // follow them (open, close, resize) without re-running on every render.
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
+    const probes = [probeLRef.current, probeRRef.current].filter((p): p is HTMLSpanElement => p !== null);
+    if (probes.length === 0) return;
+    const observer = new ResizeObserver(() => {
+      syncPadding();
+      positionOverlays();
+      layoutTags();
+    });
+    probes.forEach((p) => observer.observe(p));
+    return () => observer.disconnect();
+  }, [syncPadding, positionOverlays, layoutTags]);
 
   // Selecting a watch area (map, list, hash) flies to it; clearing the selection returns to APAC.
   const fitKey = selectedIncident?.id ?? '';
@@ -1472,7 +1713,16 @@ export default function MapView({
             </li>
           ))}
         </ul>
-        {(hasOfficial || hasEstimate || hasGauge || hotspotsShown.length > 0 || transportShown || ashShown || tsunamiAreaMarkers.length > 0 || tsunamiObsMarkers.length > 0) && (
+        {(hasOfficial ||
+          hasEstimate ||
+          hasGauge ||
+          hotspotsShown.length > 0 ||
+          transportShown ||
+          ashShown ||
+          tsunamiAreaMarkers.length > 0 ||
+          tsunamiObsMarkers.length > 0 ||
+          quakesShown.length > 0 ||
+          tideShown.length > 0) && (
           <ul className="mv-legend-list is-official">
             {hasOfficial && (
               <li className="mv-legend-item">
@@ -1532,6 +1782,22 @@ export default function MapView({
                 </span>
               </li>
             )}
+            {quakesShown.length > 0 && (
+              <li className="mv-legend-item">
+                <span className="mv-quake-swatch" aria-hidden="true" />
+                <span>
+                  Earthquake <span className="mv-legend-sub">(USGS disc, BMKG ring; depth: amber shallow, teal mid, violet deep)</span>
+                </span>
+              </li>
+            )}
+            {tideShown.length > 0 && (
+              <li className="mv-legend-item">
+                <span className="mv-tide-swatch" aria-hidden="true" />
+                <span>
+                  Tide gauge <span className="mv-legend-sub">(IOC, raw)</span>
+                </span>
+              </li>
+            )}
             {ashShown && (
               <li className="mv-legend-item">
                 <span className="mv-ash-swatch" aria-hidden="true" />
@@ -1562,74 +1828,312 @@ export default function MapView({
         <span id={layersTitleId} className="mv-layers-title">
           Layers
         </span>
-        <label className="mv-layer">
-          <input type="checkbox" checked={layers.watch} onChange={(e) => toggleLayer('watch', e.currentTarget.checked)} />
-          <span>Watch areas</span>
-        </label>
-        <label className="mv-layer">
-          <input type="checkbox" checked={layers.warnings} onChange={(e) => toggleLayer('warnings', e.currentTarget.checked)} />
-          <span>Official warnings</span>
-        </label>
-        {tsunamiPick.latest && (
+        <fieldset className="mv-layer-group">
+          <legend>Watch</legend>
           <label className="mv-layer">
-            <input type="checkbox" checked={layers.tsunami} onChange={(e) => toggleLayer('tsunami', e.currentTarget.checked)} />
-            <span>Official tsunami areas (BMKG)</span>
+            <input type="checkbox" checked={layers.watch} onChange={(e) => toggleLayer('watch', e.currentTarget.checked)} />
+            <span>Watch areas</span>
           </label>
-        )}
-        {tsunamiPick.latest && !tsunamiInForce && (
-          <label className="mv-layer mv-layer-sub">
-            <input type="checkbox" role="switch" checked={tsunamiHistory} onChange={(e) => showTsunamiHistory(e.currentTarget.checked)} />
-            <span>History: last BMKG tsunami warning</span>
-          </label>
-        )}
-        {ashDrift && (
           <label className="mv-layer">
-            <input type="checkbox" checked={layers.ash} onChange={(e) => toggleLayer('ash', e.currentTarget.checked)} />
-            <span>Ash drift (modelled)</span>
+            <input type="checkbox" checked={layers.rings} onChange={(e) => toggleLayer('rings', e.currentTarget.checked)} />
+            <span>Distance rings</span>
           </label>
-        )}
-        <label className="mv-layer">
-          <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
-          <span>NEA wind and haze</span>
-        </label>
-        {transport && (
           <label className="mv-layer">
-            <input type="checkbox" checked={layers.transport} onChange={(e) => toggleLayer('transport', e.currentTarget.checked)} />
-            <span>Haze transport (modelled)</span>
+            <input type="checkbox" checked={layers.quakes} onChange={(e) => toggleLayer('quakes', e.currentTarget.checked)} />
+            <span>Earthquakes (USGS, BMKG)</span>
           </label>
-        )}
-        {windGrid && (
           <label className="mv-layer">
-            <input type="checkbox" checked={layers.particles} onChange={(e) => toggleLayer('particles', e.currentTarget.checked)} />
-            <span>Wind particles (modelled, 925 hPa)</span>
+            <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
+            <span>NEA wind and haze</span>
           </label>
-        )}
-        {airQuality != null && (
           <label className="mv-layer">
-            <input type="checkbox" checked={layers.haze} onChange={(e) => toggleLayer('haze', e.currentTarget.checked)} />
-            <span>Haze (modelled PM2.5, CAMS)</span>
+            <input type="checkbox" checked={layers.tide} onChange={(e) => toggleLayer('tide', e.currentTarget.checked)} />
+            <span>Tide gauges (IOC)</span>
           </label>
-        )}
-        <label className="mv-layer">
-          <input type="checkbox" checked={layers.rings} onChange={(e) => toggleLayer('rings', e.currentTarget.checked)} />
-          <span>Distance rings</span>
-        </label>
-        {!offline && (
+        </fieldset>
+        <fieldset className="mv-layer-group">
+          <legend>Official</legend>
           <label className="mv-layer">
-            <input type="checkbox" checked={layers.buildings} onChange={(e) => toggleLayer('buildings', e.currentTarget.checked)} />
-            <span>3D buildings</span>
+            <input type="checkbox" checked={layers.warnings} onChange={(e) => toggleLayer('warnings', e.currentTarget.checked)} />
+            <span>Official warnings</span>
           </label>
-        )}
-        <label className="mv-layer">
-          <input type="checkbox" checked={!dark} onChange={(e) => setBasemapDark(!e.currentTarget.checked)} />
-          <span>Light map</span>
-        </label>
+          {tsunamiPick.latest && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.tsunami} onChange={(e) => toggleLayer('tsunami', e.currentTarget.checked)} />
+              <span>Official tsunami areas (BMKG)</span>
+            </label>
+          )}
+          {tsunamiPick.latest && !tsunamiInForce && (
+            <label className="mv-layer mv-layer-sub">
+              <input type="checkbox" role="switch" checked={tsunamiHistory} onChange={(e) => showTsunamiHistory(e.currentTarget.checked)} />
+              <span>History: last BMKG tsunami warning</span>
+            </label>
+          )}
+        </fieldset>
+        <fieldset className="mv-layer-group">
+          <legend>Modelled</legend>
+          {ashDrift && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.ash} onChange={(e) => toggleLayer('ash', e.currentTarget.checked)} />
+              <span>Ash drift (modelled)</span>
+            </label>
+          )}
+          {transport && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.transport} onChange={(e) => toggleLayer('transport', e.currentTarget.checked)} />
+              <span>Haze transport (modelled)</span>
+            </label>
+          )}
+          {windGrid && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.particles} onChange={(e) => toggleLayer('particles', e.currentTarget.checked)} />
+              <span>Wind particles (modelled, 925 hPa)</span>
+            </label>
+          )}
+          {airQuality != null && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.haze} onChange={(e) => toggleLayer('haze', e.currentTarget.checked)} />
+              <span>Haze (modelled PM2.5, CAMS)</span>
+            </label>
+          )}
+          {riverFlow && riverFlow.length > 0 && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.river} onChange={(e) => toggleLayer('river', e.currentTarget.checked)} />
+              <span>River flow (modelled)</span>
+            </label>
+          )}
+        </fieldset>
+        <fieldset className="mv-layer-group">
+          <legend>Imagery</legend>
+          <label className="mv-layer">
+            <input type="checkbox" checked={layers.satIr} onChange={(e) => toggleLayer('satIr', e.currentTarget.checked)} />
+            <span>Satellite: Himawari-9 infrared (~10 min, ~45 min delay)</span>
+          </label>
+          <label className="mv-layer">
+            <input type="checkbox" checked={layers.satTrue} onChange={(e) => toggleLayer('satTrue', e.currentTarget.checked)} />
+            <span>Satellite: true colour (yesterday)</span>
+          </label>
+          {(layers.satIr || layers.satTrue) && (
+            <label className="mv-layer mv-layer-range">
+              <span>Imagery opacity</span>
+              <input
+                type="range"
+                min={0.2}
+                max={1}
+                step={0.05}
+                value={satOpacity}
+                onChange={(e) => setSatOpacity(Number(e.currentTarget.value))}
+                aria-valuetext={`${Math.round(satOpacity * 100)} %`}
+              />
+            </label>
+          )}
+          {!offline && (
+            <label className="mv-layer">
+              <input type="checkbox" checked={layers.buildings} onChange={(e) => toggleLayer('buildings', e.currentTarget.checked)} />
+              <span>3D buildings</span>
+            </label>
+          )}
+          <label className="mv-layer">
+            <input type="checkbox" checked={!dark} onChange={(e) => setBasemapDark(!e.currentTarget.checked)} />
+            <span>Light map</span>
+          </label>
+        </fieldset>
       </div>
-      {offline && <p className="mv-legend-note">Offline map: street tiles unavailable, showing bundled country outlines.</p>}
+      {offline && (
+        <p className="mv-legend-note">
+          Offline map: street tiles unavailable, showing bundled country outlines.{' '}
+          <button type="button" className="mv-linkbtn" onClick={() => retryStyleRef.current?.()}>
+            Retry map
+          </button>
+        </p>
+      )}
     </>
   );
 
-  const showCaption = rings !== null || transportShown || hotspotsShown.length > 0 || ashShown;
+
+  // Captions: official first, then the safety caption of the selection, then the rest. At most two show
+  // (one on phones); the others fold into a "Notes (n)" chip so the map stays visible at 1366x680.
+  const notes: { key: string; card?: boolean; node: ReactNode }[] = [];
+  if (tsunamiShown && tsunamiWarning && tsunamiPlacement) {
+    notes.push({
+      key: 'tsunami',
+      card: true,
+      node: (
+          <div className="mv-caption mv-tsunami" role="group" aria-label="Official BMKG InaTEWS tsunami warning areas">
+            <p className="mv-tsunami-head">
+              <span className={`mv-mode ${tsunamiInForce && tsunamiWarning.dataMode === 'live' ? 'is-live' : 'is-historical'}`}>{tsunamiStatus}</span>{' '}
+              <span lang="id">{tsunamiWarning.product}</span>
+            </p>
+            <p>
+              <span className="mv-caption-key">
+                Official BMKG InaTEWS warning areas, relayed verbatim. Positions are district centres (approximate). Follow BMKG&apos;s
+                instructions.
+              </span>{' '}
+              <a href={tsunamiWarning.issuerUrl} target="_blank" rel="noopener noreferrer">
+                BMKG InaTEWS <span aria-hidden="true">↗</span>
+                <span className="visually-hidden"> (opens in a new tab)</span>
+              </a>
+            </p>
+            <p className="mv-tsunami-meta">
+              {tsunamiPlacement.placed.length} of {tsunamiWarning.areas.length} areas placed
+              {tsunamiObsMarkers.length > 0 ? ` · ${tsunamiObsMarkers.length} observed heights (BMKG tide gauges)` : ''}
+              {onSelectWarning && (
+                <>
+                  {' · '}
+                  <button type="button" className="mv-linkbtn" onClick={() => onSelectWarning(tsunamiWarning.id)}>
+                    Open the BMKG message
+                  </button>
+                </>
+              )}
+            </p>
+            {tsunamiPlacement.unplaced.length > 0 && (
+              <details className="mv-tsunami-unplaced">
+                <summary>Not placed on map ({tsunamiPlacement.unplaced.length})</summary>
+                <ul>
+                  {tsunamiPlacement.unplaced.map((u, i) => (
+                    <li key={`${u.area.name}-${i}`}>
+                      <span lang="id">
+                        {u.area.name}
+                        {u.area.province ? `, ${u.area.province}` : ''} · <strong>{u.area.level ?? 'No level given'}</strong>
+                      </span>
+                      <span className="mv-tsunami-why"> · {u.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+      ),
+    });
+  }
+  if (ashShown && ashDrift) {
+    notes.push({
+      key: 'ash',
+      node: (
+              <p className="mv-caption-ash">
+                <span className="mv-caption-key">
+                  Where ash would drift with current forecast winds at three heights (Open-Meteo, MODELLED). Illustrative, not an ash
+                  advisory or hazard zone. Official:{' '}
+                  <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
+                    PVMBG (MAGMA)
+                    <span className="visually-hidden"> (opens in a new tab)</span>
+                  </a>{' '}
+                  and{' '}
+                  <a href={VAAC_DARWIN_URL} target="_blank" rel="noopener noreferrer">
+                    VAAC Darwin
+                    <span className="visually-hidden"> (opens in a new tab)</span>
+                  </a>
+                  .
+                </span>{' '}
+                <span>Simplified: uses the forecast wind at the summit for the whole path.</span>{' '}
+                <span className="mv-caption-meta">
+                  {ashModeLabel} · 24 h from <time dateTime={ashDrift.startISO}>{formatUtc(ashDrift.startISO)}</time>, dots at 3, 6,
+                  12 and 24 h. {ashDirections}.
+                </span>{' '}
+                <button type="button" className="mv-linkbtn" onClick={() => fitBox(ashDrift.tracks.flatMap((t) => t.points))}>
+                  Show the 24 h drift
+                </button>
+              </p>
+      ),
+    });
+  }
+  if (rings) {
+    notes.push({
+      key: 'rings',
+      node: (
+              <p>
+                <span className="mv-caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}
+                <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
+                  Official danger zone and recommendations: PVMBG / MAGMA <span aria-hidden="true">↗</span>
+                  <span className="visually-hidden"> (opens in a new tab)</span>
+                </a>
+              </p>
+      ),
+    });
+  }
+  for (const g of gibsShown) {
+    notes.push({
+      key: g.id,
+      node: (
+        <p>
+          <span className="mv-caption-key">Satellite imagery: {g.title}</span>{' '}
+          <span className="mv-caption-meta">
+            {g.timeISO.length > 10 ? `${formatUtc(g.timeISO)}` : `${g.timeISO} (UTC day)`}. {g.latencyNote} NASA GIBS.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (quakesShown.length > 0) {
+    notes.push({
+      key: 'quakes',
+      node: (
+        <p>
+          <span className="mv-caption-key">Earthquakes M4.5+ (USGS filled, BMKG rings), sized by magnitude, coloured by depth.</span>{' '}
+          <span className="mv-caption-meta">
+            {quakesRecent} in the last 24 h (bright), {quakesShown.length - quakesRecent} earlier, last 7 days. Each agency&apos;s report
+            is shown separately. Not a tsunami warning.
+          </span>
+        </p>
+      ),
+    });
+  }
+  if (tideShown.length > 0) {
+    notes.push({
+      key: 'tide',
+      node: (
+        <p>
+          <span className="mv-caption-key">Raw tide gauge data, not a tsunami warning (IOC/VLIZ).</span>{' '}
+          <span className="mv-caption-meta">{tideShown.length} stations; click one for its last 24 h.</span>
+        </p>
+      ),
+    });
+  }
+  if (riverShown.length > 0) {
+    notes.push({
+      key: 'river',
+      node: (
+        <p>
+          <span className="mv-caption-key">River flow: MODELLED (GloFAS via Open-Meteo), not a flood warning.</span>{' '}
+          <span className="mv-caption-meta">Click a river point for its 15-day modelled discharge.</span>
+        </p>
+      ),
+    });
+  }
+  if (hotspotsShown.length > 0) {
+    notes.push({
+      key: 'firms',
+      node: (
+              <p className="mv-caption-firms">
+                <span className="mv-caption-key">NASA FIRMS hotspots:</span>{' '}
+                <span className="mv-caption-meta">
+                  {hotspotsToday} on this replay day (filled), {hotspotsShown.length - hotspotsToday} earlier (faded); satellite
+                  detections, not confirmed fires
+                </span>
+              </p>
+      ),
+    });
+  }
+  if (transportShown && transport) {
+    notes.push({
+      key: 'transport',
+      node: (
+              <>
+                <p>
+                  <span className="mv-caption-key">
+                    MODELLED wind (Open-Meteo, {transport.level}) · illustrative haze paths, not a dispersion model
+                  </span>{' '}
+                  <span className="mv-caption-meta">
+                    {transport.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · from{' '}
+                    <time dateTime={transport.time}>{formatUtc(transport.time)}</time>, dots every 12 h
+                  </span>
+                </p>
+                {transport.summary && !rings && <p className="mv-caption-summary">{transport.summary}</p>}
+              </>
+      ),
+    });
+  }
+  const stackedNotes = stackNotes(notes, narrow ? 1 : 2);
 
   return (
     <div ref={rootRef} className={`map-view${dark ? ' is-dark' : ' is-light'}${narrow ? ' is-narrow' : ''}${tight ? ' is-tight' : ''}${className ? ` ${className}` : ''}`}>
@@ -1739,7 +2243,8 @@ export default function MapView({
               tsunamiAreaMarkers.map((a, i) => {
                 const isSelected = tsunamiWarning.id === selectedWarningId;
                 const level = a.area.level ?? 'No level given';
-                const gloss = a.area.level ? BMKG_TSUNAMI_GLOSS[a.area.level.toUpperCase()] : undefined;
+                // BMKG's own instruction line for this level, verbatim (no gloss or numbers of ours).
+                const instruction = bmkgLevelInstruction(tsunamiWarning, a.area.level);
                 const place = `${a.area.name}${a.area.province ? `, ${a.area.province}` : ''}`;
                 const kind: OfficialKind = tsunamiWarning.ended ? 'ended' : 'official';
                 return (
@@ -1749,7 +2254,7 @@ export default function MapView({
                     className={`mv-wmarker mv-tarea is-${kind}${isSelected ? ' is-selected' : ''}`}
                     data-lon={a.lon}
                     data-lat={a.lat}
-                    aria-label={`Official tsunami warning area (BMKG InaTEWS): ${place} · ${level}${gloss ? ` (${gloss})` : ''} · ${tsunamiStatus} · position approximate, ${a.note}`}
+                    aria-label={`Official tsunami warning area (BMKG InaTEWS): ${place} · ${level}${instruction ? ` · BMKG's instruction for this level: ${instruction}` : ''} · ${tsunamiStatus} · position approximate, ${a.note}`}
                     aria-pressed={isSelected}
                     onClick={onSelectWarning ? () => onSelectWarning(tsunamiWarning.id) : undefined}
                     {...officialProps(tsunamiBase + i)}
@@ -1763,10 +2268,15 @@ export default function MapView({
                     <span className="mv-wcallout" aria-hidden="true">
                       <strong>BMKG InaTEWS</strong>
                       <span lang="id">{place}</span>
-                      <span>
-                        <strong lang="id">{level}</strong>
-                        {gloss && <> · BMKG: {gloss}</>}
-                      </span>
+                      <strong lang="id">{level}</strong>
+                      {instruction ? (
+                        <>
+                          <span className="mv-wcallout-meta">BMKG&apos;s instruction for this level:</span>
+                          <span lang="id">{instruction}</span>
+                        </>
+                      ) : (
+                        <span className="mv-wcallout-meta">See BMKG for level definitions</span>
+                      )}
                       <span className="mv-wcallout-meta">{tsunamiStatus}</span>
                       <span className="mv-wcallout-meta">Position: {a.note}</span>
                     </span>
@@ -1802,6 +2312,27 @@ export default function MapView({
               })}
           </div>
         )}
+
+        {riverShown.map((r) => (
+          <button
+            key={r.pointId}
+            type="button"
+            className={`mv-river${chart?.kind === 'river' && chart.id === r.pointId ? ' is-selected' : ''}`}
+            data-lon={r.requested.lon}
+            data-lat={r.requested.lat}
+            aria-label={`${r.river} at ${r.place}: modelled river flow (GloFAS via Open-Meteo), not a flood warning`}
+            onClick={(e) => {
+              const box = rootRef.current?.getBoundingClientRect();
+              const b = e.currentTarget.getBoundingClientRect();
+              setChart({ kind: 'river', id: r.pointId, at: { x: b.left + b.width / 2 - (box?.left ?? 0), y: b.top + b.height / 2 - (box?.top ?? 0) } });
+            }}
+          >
+            <span className="mv-river-dot" aria-hidden="true" />
+            <span className="mv-river-tag" aria-hidden="true">
+              {r.river} <span className="mv-river-sub">modelled</span>
+            </span>
+          </button>
+        ))}
 
         {layers.watch &&
           placed.map((p) => {
@@ -1894,6 +2425,19 @@ export default function MapView({
         All APAC
       </button>
 
+      {chart?.kind === 'tide' &&
+        layers.tide &&
+        (() => {
+          const st = tideStations.find((t) => t.code === chart.id);
+          return st ? <TideGaugePopover station={st} anchor={chart.at} dark={dark} onClose={() => setChart(null)} /> : null;
+        })()}
+      {chart?.kind === 'river' &&
+        layers.river &&
+        (() => {
+          const r = riverFlow?.find((x) => x.pointId === chart.id);
+          return r ? <RiverFlowPopover series={r} anchor={chart.at} dark={dark} onClose={() => setChart(null)} /> : null;
+        })()}
+
       {city && airQuality && hazeHour && layers.haze && (
         <CityPopover
           cityId={city.id}
@@ -1922,113 +2466,21 @@ export default function MapView({
             />
           </details>
         )}
-        {tsunamiShown && tsunamiWarning && tsunamiPlacement && (
-          <div className="mv-caption mv-tsunami" role="group" aria-label="Official BMKG InaTEWS tsunami warning areas">
-            <p className="mv-tsunami-head">
-              <span className={`mv-mode ${tsunamiInForce && tsunamiWarning.dataMode === 'live' ? 'is-live' : 'is-historical'}`}>{tsunamiStatus}</span>{' '}
-              <span lang="id">{tsunamiWarning.product}</span>
-            </p>
-            <p>
-              <span className="mv-caption-key">
-                Official BMKG InaTEWS warning areas, relayed verbatim. Positions are district centres (approximate). Follow BMKG&apos;s
-                instructions.
-              </span>{' '}
-              <a href={tsunamiWarning.issuerUrl} target="_blank" rel="noopener noreferrer">
-                BMKG InaTEWS <span aria-hidden="true">↗</span>
-                <span className="visually-hidden"> (opens in a new tab)</span>
-              </a>
-            </p>
-            <p className="mv-tsunami-meta">
-              {tsunamiPlacement.placed.length} of {tsunamiWarning.areas.length} areas placed
-              {tsunamiObsMarkers.length > 0 ? ` · ${tsunamiObsMarkers.length} observed heights (BMKG tide gauges)` : ''}
-              {onSelectWarning && (
-                <>
-                  {' · '}
-                  <button type="button" className="mv-linkbtn" onClick={() => onSelectWarning(tsunamiWarning.id)}>
-                    Open the BMKG message
-                  </button>
-                </>
-              )}
-            </p>
-            {tsunamiPlacement.unplaced.length > 0 && (
-              <details className="mv-tsunami-unplaced">
-                <summary>Not placed on map ({tsunamiPlacement.unplaced.length})</summary>
-                <ul>
-                  {tsunamiPlacement.unplaced.map((u, i) => (
-                    <li key={`${u.area.name}-${i}`}>
-                      <span lang="id">
-                        {u.area.name}
-                        {u.area.province ? `, ${u.area.province}` : ''} · <strong>{u.area.level ?? 'No level given'}</strong>
-                      </span>
-                      <span className="mv-tsunami-why"> · {u.reason}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
+        {stackedNotes.visible.map((n) => (n.card ? <div key={n.key}>{n.node}</div> : null))}
+        {stackedNotes.visible.some((n) => !n.card) && (
+          <div className="mv-caption">
+            {stackedNotes.visible.map((n) => (n.card ? null : <div key={n.key}>{n.node}</div>))}
           </div>
         )}
-        {showCaption && (
-          <div className="mv-caption">
-            {ashShown && ashDrift && (
-              <p className="mv-caption-ash">
-                <span className="mv-caption-key">
-                  Where ash would drift with current forecast winds at three heights (Open-Meteo, MODELLED). Illustrative, not an ash
-                  advisory or hazard zone. Official:{' '}
-                  <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
-                    PVMBG (MAGMA)
-                    <span className="visually-hidden"> (opens in a new tab)</span>
-                  </a>{' '}
-                  and{' '}
-                  <a href={VAAC_DARWIN_URL} target="_blank" rel="noopener noreferrer">
-                    VAAC Darwin
-                    <span className="visually-hidden"> (opens in a new tab)</span>
-                  </a>
-                  .
-                </span>{' '}
-                <span>Simplified: uses the forecast wind at the summit for the whole path.</span>{' '}
-                <span className="mv-caption-meta">
-                  {ashModeLabel} · 24 h from <time dateTime={ashDrift.startISO}>{formatUtc(ashDrift.startISO)}</time>, dots at 3, 6,
-                  12 and 24 h. {ashDirections}.
-                </span>{' '}
-                <button type="button" className="mv-linkbtn" onClick={() => fitBox(ashDrift.tracks.flatMap((t) => t.points))}>
-                  Show the 24 h drift
-                </button>
-              </p>
-            )}
-            {rings && (
-              <p>
-                <span className="mv-caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}
-                <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
-                  Official danger zone and recommendations: PVMBG / MAGMA <span aria-hidden="true">↗</span>
-                  <span className="visually-hidden"> (opens in a new tab)</span>
-                </a>
-              </p>
-            )}
-            {hotspotsShown.length > 0 && (
-              <p className="mv-caption-firms">
-                <span className="mv-caption-key">NASA FIRMS hotspots:</span>{' '}
-                <span className="mv-caption-meta">
-                  {hotspotsToday} on this replay day (filled), {hotspotsShown.length - hotspotsToday} earlier (faded); satellite
-                  detections, not confirmed fires
-                </span>
-              </p>
-            )}
-            {transportShown && transport && (
-              <>
-                <p>
-                  <span className="mv-caption-key">
-                    MODELLED wind (Open-Meteo, {transport.level}) · illustrative haze paths, not a dispersion model
-                  </span>{' '}
-                  <span className="mv-caption-meta">
-                    {transport.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · from{' '}
-                    <time dateTime={transport.time}>{formatUtc(transport.time)}</time>, dots every 12 h
-                  </span>
-                </p>
-                {transport.summary && !rings && <p className="mv-caption-summary">{transport.summary}</p>}
-              </>
-            )}
-          </div>
+        {stackedNotes.hidden.length > 0 && (
+          <details className="mv-caption mv-notes">
+            <summary>Notes ({stackedNotes.hidden.length})</summary>
+            {stackedNotes.hidden.map((n) => (
+              <div key={n.key} className={n.card ? 'mv-notes-card' : undefined}>
+                {n.node}
+              </div>
+            ))}
+          </details>
         )}
       </div>
     </div>

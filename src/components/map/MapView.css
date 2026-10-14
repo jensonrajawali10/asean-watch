@@ -1283,3 +1283,154 @@
   max-height: 96px;
   overflow: auto;
 }
+
+/* Layer toggles grouped in sections (Watch / Official / Modelled / Imagery). ----------------------- */
+
+.mv-layer-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 10px;
+  width: 100%;
+  min-width: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.mv-layer-group > legend {
+  float: left;
+  width: 100%;
+  margin: 3px 0 0;
+  padding: 0;
+  color: var(--mv-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mv-layer.mv-layer-range input[type='range'] {
+  width: 110px;
+}
+
+/* Connector swatches -------------------------------------------------------------------------------- */
+
+.mv-quake-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin: 2px;
+  border: 1.5px solid var(--mv-solid);
+  border-radius: 50%;
+  background: rgb(242 176 64);
+  box-shadow: 4px 0 0 -1px rgb(64 168 190), 8px 0 0 -2px rgb(150 118 214);
+}
+
+.mv-tide-swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 4px;
+  border-radius: 50%;
+  background: rgb(30 96 150);
+}
+
+.map-view.is-dark .mv-tide-swatch {
+  background: rgb(150 200 235);
+}
+
+/* Modelled river points (GloFAS): small blue-grey dot with a "modelled" tag, never the official style. */
+.mv-river {
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -7px 0 0 -7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mv-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.mv-river-dot {
+  width: 14px;
+  height: 14px;
+  border: 2px dashed var(--mv-path);
+  border-radius: 50%;
+  background: var(--mv-solid);
+}
+
+.mv-river.is-selected .mv-river-dot {
+  border-style: solid;
+}
+
+.mv-river-tag {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--mv-surface);
+  white-space: nowrap;
+}
+
+.mv-river-sub {
+  color: var(--mv-muted);
+}
+
+.mv-river:focus-visible {
+  outline: 2px solid var(--mv-focus);
+  outline-offset: 2px;
+}
+
+/* Caption stack: at most two captions; the rest behind a "Notes (n)" chip. ----------------------- */
+
+.mv-notes {
+  max-width: 420px;
+}
+
+.mv-notes > summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mv-notes[open] {
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.mv-notes .mv-notes-card > .mv-caption {
+  margin-top: 4px;
+  box-shadow: none;
+}
+
+.chart-popover {
+  z-index: 21;
+}
+
+/* Phones (375 px): a taller map, legend closed (set in the component), labels kept inside. --------- */
+
+@media (max-width: 520px) {
+  .mv-notes,
+  .mv-caption {
+    max-width: calc(100vw - 24px);
+  }
+
+  .mv-layer {
+    white-space: normal;
+  }
+
+  .mv-tarea-level,
+  .mv-river-tag {
+    max-width: 30vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Tags that would spill out of the visible map are hidden (the selected callout always shows). */
+.mv-marker[data-clip='1']:not(.is-selected) > .mv-tag {
+  visibility: hidden;
+}

@@ -1962,3 +1962,12 @@ dialog::backdrop {
     display: block;
   }
 }
+
+/* Phones: the map gets most of the first screen (the panels follow below it). */
+@media (max-width: 640px) {
+  .map-panel {
+    height: 74vh;
+    height: 74dvh;
+    min-height: 360px;
+  }
+}

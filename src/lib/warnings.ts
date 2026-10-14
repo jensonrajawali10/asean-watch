@@ -346,15 +346,19 @@ export function bmkgObservations(infoBlock: string): TsunamiObservation[] {
 }
 
 /**
- * Fixed, reviewed English gloss for BMKG InaTEWS tsunami warning levels, from BMKG's InaTEWS level
- * definitions (estimated tsunami height) and the actions in each message's own instruction lines
- * ("Awas": evakuasi menyeluruh, "Siaga": evakuasi, "Waspada": menjauhi pantai dan tepian sungai).
+ * BMKG's own instruction for one tsunami warning level, verbatim from the message: the <instruction1..3>
+ * line that names the level in quotes (e.g. status "Siaga"). Null when the message has no such line.
+ * No gloss of our own: BMKG's words are shown as they are (Indonesian), with a link to BMKG.
  */
-export const BMKG_TSUNAMI_GLOSS: Record<string, string> = {
-  AWAS: 'Highest level, estimated tsunami over 3 m: full evacuation',
-  SIAGA: 'Estimated tsunami 0.5 to 3 m: evacuate',
-  WASPADA: 'Estimated tsunami under 0.5 m: stay away from beaches and river banks',
-};
+export function bmkgLevelInstruction(w: Pick<OfficialWarning, 'instruction'>, level: string | null | undefined): string | null {
+  const want = level?.trim().toLowerCase();
+  if (!want || !w.instruction) return null;
+  for (const line of w.instruction.split('\n')) {
+    const quoted = /["“]([^"”]+)["”]/.exec(line);
+    if (quoted && quoted[1].trim().toLowerCase() === want) return line;
+  }
+  return null;
+}
 
 /** Messages within this many minutes of a closing PD-4's quake origin belong to the same event. */
 const BMKG_SAME_EVENT_MINUTES = 15;

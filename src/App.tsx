@@ -19,6 +19,12 @@ import { hotspotsUpToDay } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
 import { loadAshWind } from './lib/ashDrift';
 import type { AshWindData } from './lib/ashDrift';
+import { loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
+import type { QuakesResult } from './lib/quakesLive';
+import { loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
+import type { FloodModelResult } from './lib/floodModel';
+import { loadPtwc, loadPtwcSnapshot } from './lib/ptwc';
+import type { PtwcResult } from './lib/ptwc';
 import type { WindGrid, WindLoadResult } from './lib/windField';
 import { loadAirQuality } from './lib/airQuality';
 import type { AirQualityData } from './lib/airQuality';
@@ -252,6 +258,10 @@ export default function App() {
   const [wind925, setWind925] = useState<WindGrid | null>(null);
   /** Modelled pressure-level winds at the volcano summits for the ash-drift lines (live or snapshot); null until loaded. */
   const [ashWind, setAshWind] = useState<AshWindData | null>(null);
+  /** Connector layers: bundled snapshot first (HISTORICAL), replaced by the live load when it settles. */
+  const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
+  const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
+  const [ptwc, setPtwc] = useState<PtwcResult>(() => loadPtwcSnapshot());
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
   /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
@@ -321,7 +331,10 @@ export default function App() {
     }
   }, [incident, nea]);
 
-  const allWarnings = warningsResult.warnings;
+  // PTWC messages are official and relayed verbatim alongside the other feeds (its feed status carries the
+  // "for national authorities" note).
+  const allWarnings = useMemo(() => [...warningsResult.warnings, ...ptwc.warnings], [warningsResult.warnings, ptwc.warnings]);
+  const allFeeds = useMemo(() => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }], [warningsResult.feeds, ptwc]);
   /** Warnings near the selected area, or every warning (APAC-wide) when nothing is selected. */
   const nearWarnings = useMemo<OfficialWarning[]>(() => {
     if (!incident) return allWarnings;
@@ -348,8 +361,8 @@ export default function App() {
     [inspectedWarning, warningsResult.gauges],
   );
   const inspectedFeed = useMemo(
-    () => (inspectedWarning ? feedForWarning(inspectedWarning, warningsResult.feeds) : null),
-    [inspectedWarning, warningsResult.feeds],
+    () => (inspectedWarning ? feedForWarning(inspectedWarning, allFeeds) : null),
+    [inspectedWarning, allFeeds],
   );
 
   /**
@@ -362,9 +375,9 @@ export default function App() {
       [
         drift && nea ? `nea:${nea.dataMode}:${nea.retrievedAt}` : 'nea:none',
         `w:${nearWarnings.map((w) => w.id).join(',')}`,
-        `f:${warningsResult.feeds.map((f) => `${f.feedId}=${f.status}`).join(',')}`,
+        `f:${allFeeds.map((f) => `${f.feedId}=${f.status}`).join(',')}`,
       ].join('|'),
-    [drift, nea, nearWarnings, warningsResult.feeds],
+    [drift, nea, nearWarnings, allFeeds],
   );
 
   // --- Actions -------------------------------------------------------------
@@ -434,7 +447,7 @@ export default function App() {
       nea,
       drift,
       warnings: nearWarnings,
-      warningFeeds: warningsResult.feeds,
+      warningFeeds: allFeeds,
       dataAsOf: DATA_AS_OF,
       stepCount: STEPS.length || undefined,
     };
@@ -546,6 +559,21 @@ export default function App() {
         if (alive) setAshWind(result.data);
       })
       .catch((err: unknown) => console.error('Ash-drift winds could not be loaded:', err));
+    loadQuakes()
+      .then((result) => {
+        if (alive) setQuakes(result);
+      })
+      .catch((err: unknown) => console.error('Earthquakes could not be loaded:', err));
+    loadFloodModel()
+      .then((result) => {
+        if (alive) setRiverFlow(result);
+      })
+      .catch((err: unknown) => console.error('River flow could not be loaded:', err));
+    loadPtwc()
+      .then((result) => {
+        if (alive) setPtwc(result);
+      })
+      .catch((err: unknown) => console.error('PTWC could not be loaded:', err));
     return () => {
       alive = false;
     };
@@ -669,6 +697,8 @@ export default function App() {
     selectedWarningId: inspectedWarningId,
     onSelectWarning: openWarning,
     ashWind,
+    quakes,
+    riverFlow: riverFlow.series,
   };
 
   return (
@@ -758,7 +788,7 @@ export default function App() {
               <OfficialWarningsPanel
                 warnings={nearWarnings}
                 gauges={warningsResult.gauges}
-                feeds={warningsResult.feeds}
+                feeds={allFeeds}
                 nearName={selectedName}
                 elsewhere={elsewhereWarnings}
                 onShowAll={() => selectIncident(null)}

@@ -4,6 +4,9 @@ import { buildBriefing } from './briefing';
 import { dataGovSgBackoffUntil, markDataGovSgRateLimited, resetNeaCache } from './nea';
 import { deriveReview } from './reviewRules';
 import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from './magmaLevels';
+import * as warningsModule from './warnings';
+import warningsSource from './warnings.ts?raw';
+import mapViewSource from '../components/map/MapView.tsx?raw';
 import {
   BUNDLED_WARNINGS_SNAPSHOT,
   FEEDS,
@@ -19,7 +22,7 @@ import {
   parseBmkgGempa,
   parseBmkgTsunami,
   bmkgObservations,
-  BMKG_TSUNAMI_GLOSS,
+  bmkgLevelInstruction,
   parseDsda,
   parseGdacs,
   parseGeonetVal,
@@ -473,8 +476,40 @@ describe('BMKG InaTEWS tsunami parser', () => {
     expect(pd34.observations?.find((o) => o.location === 'BAUBAU')?.heightText).toBe('0.30');
   });
 
-  it('glosses only the three BMKG tsunami levels', () => {
-    expect(Object.keys(BMKG_TSUNAMI_GLOSS).sort()).toEqual(['AWAS', 'SIAGA', 'WASPADA']);
+  it("gives BMKG's own instruction line for each level, verbatim from the message", () => {
+    const w = byId('20260815070532');
+    expect(bmkgLevelInstruction(w, 'SIAGA')).toBe(
+      'Pemerintah Propinsi/Kab/Kota yang berada pada status "Siaga" diharap memperhatikan dan segera mengarahkan masyarakat untuk melakukan evakuasi',
+    );
+    expect(bmkgLevelInstruction(w, 'awas')).toBe(
+      'Pemerintah Propinsi/Kab/Kota yang berada pada status "Awas" diharap memperhatikan dan segera mengarahkan masyarakat untuk melakukan evakuasi menyeluruh',
+    );
+    expect(bmkgLevelInstruction(w, 'WASPADA')).toContain('menjauhi pantai dan tepian sungai');
+    expect(bmkgLevelInstruction(w, 'NORMAL')).toBeNull();
+    expect(bmkgLevelInstruction(w, null)).toBeNull();
+    expect(bmkgLevelInstruction({ ...w, instruction: null }, 'SIAGA')).toBeNull();
+  });
+
+  it('shows no unsourced numbers: every level instruction on the real snapshot occurs verbatim in the BMKG XML', () => {
+    const raw = BUNDLED_WARNINGS_SNAPSHOT.feeds['bmkg-inatews'].raw as string;
+    const real = parseBmkgTsunami(raw, { dataMode: 'historical', retrievedAt: '2026-10-13T07:51:20Z' }).warnings;
+    let checked = 0;
+    for (const w of real) {
+      for (const a of w.areas) {
+        const text = bmkgLevelInstruction(w, a.level);
+        if (text === null) continue;
+        expect(raw).toContain(text);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+    // The memory-based wave-height gloss table is gone, and no wave-height thresholds are written into the
+    // warnings adapter or the map (e.g. "0.5 to 3 m", "over 3 m", "under 0.5 m").
+    expect((warningsModule as Record<string, unknown>).BMKG_TSUNAMI_GLOSS).toBeUndefined();
+    for (const src of [warningsSource, mapViewSource]) {
+      expect(src).not.toMatch(/(?:over|under|above|below)\s+\d+(?:[.,]\d+)?\s*m/i);
+      expect(src).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:to|-|–)\s*\d+(?:[.,]\d+)?\s*m/);
+    }
   });
 
   it('never alters text: every headline, area name and instruction line occurs verbatim in the source XML', () => {
