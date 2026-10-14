@@ -77,7 +77,7 @@ The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 
 ## Architecture
 
-There is no server, database or model API. Data flow:
+There is no database. The site is static; one optional Vercel function (`api/ai-brief.ts`) calls the Claude API for the grounded summary, with the key kept server-side. Data flow:
 
 ```
 refresh scripts → data/real/*.json, data/watches.json (snapshot, bundled at build)

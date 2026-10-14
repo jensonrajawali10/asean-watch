@@ -18,7 +18,14 @@
     "refresh:all": "npm run refresh:data && npm run refresh:warnings && npm run refresh:nea && npm run refresh:wind && npm run refresh:wind925 && npm run refresh:aq",
     "refresh:wind": "node scripts/capture-wind-snapshot.mjs",
     "refresh:aq": "node scripts/capture-aq-snapshot.mjs",
-    "refresh:wind925": "node scripts/capture-wind-snapshot.mjs 925hPa"
+    "refresh:wind925": "node scripts/capture-wind-snapshot.mjs 925hPa",
+    "refresh:ashwind": "node scripts/capture-ash-wind-snapshot.mjs",
+    "build:idn-centroids": "node scripts/build-idn-centroids.mjs",
+    "refresh:quakes": "node scripts/capture-quakes-snapshot.mjs",
+    "refresh:sealevel": "node scripts/capture-sealevel-snapshot.mjs",
+    "refresh:ptwc": "node scripts/capture-ptwc-snapshot.mjs",
+    "refresh:flood": "node scripts/capture-flood-snapshot.mjs",
+    "check:gibs": "node scripts/capture-gibs-check.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.4.0",

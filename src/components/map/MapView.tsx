@@ -21,7 +21,7 @@ import type { IControl, LngLatBoundsLike, MapSourceDataEvent } from 'maplibre-gl
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { LayersList, PickingInfo } from '@deck.gl/core';
 import regionRaw from '../../../data/region.geojson?raw';
 import type {
@@ -34,6 +34,10 @@ import type {
   ReviewState,
 } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
+import { BMKG_TSUNAMI_GLOSS } from '../../lib/warnings';
+import { ashDriftTracks, compass16 } from '../../lib/ashDrift';
+import type { AshLevel, AshWindData, DriftTrack } from '../../lib/ashDrift';
+import { GEOBOUNDARIES_ATTRIBUTION, idnDistrictIndex, placeTsunamiAreas, selectTsunamiAreaWarnings } from '../../lib/tsunamiAreas';
 import type { WindGrid } from '../../lib/windField';
 import { psiBand } from '../../lib/nea';
 import { HAZE_ATTRIBUTION, HazeLayerController } from './HazeLayerController';
@@ -118,6 +122,11 @@ export interface MapViewProps {
    * (dark unless "light"); the "Light map" toggle can still switch the basemap.
    */
   theme?: 'dark' | 'light';
+  /**
+   * Modelled pressure-level winds at the volcano summits (Open-Meteo, live or snapshot). With a volcano
+   * selected, the map draws illustrative ash-drift lines at ~3, ~5.5 and ~9 km. Not an ash advisory.
+   */
+  ashWind?: AshWindData | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -136,6 +145,9 @@ const CREDITS = [
   '<a href="https://firms.modaps.eosdis.nasa.gov/" target="_blank" rel="noopener noreferrer">NASA FIRMS</a>',
   HAZE_ATTRIBUTION,
   '<a href="https://data.gov.sg/open-data-licence" target="_blank" rel="noopener noreferrer">NEA, Singapore Open Data Licence</a>',
+  'Ash drift: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> pressure-level winds (CC BY 4.0)',
+  'Tsunami areas: <a href="https://inatews.bmkg.go.id/" target="_blank" rel="noopener noreferrer">BMKG InaTEWS</a>',
+  GEOBOUNDARIES_ATTRIBUTION.replace('geoBoundaries', '<a href="https://www.geoboundaries.org/" target="_blank" rel="noopener noreferrer">geoBoundaries</a>'),
 ];
 const MAP_LABEL =
   'Regional map of watch areas and official warnings. Drag or use the arrow keys to pan; scroll, pinch, or plus and minus to zoom.';
@@ -154,6 +166,14 @@ const PSI_RADIUS_M = 7800;
 /** PSI and NEA wind labels appear once the map is zoomed in near Singapore. */
 const NEAR_ZOOM = 8.5;
 const MAGMA_URL = 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas';
+const VAAC_DARWIN_URL = 'http://www.bom.gov.au/aviation/volcanic-ash/';
+/** Ash-drift line colours: neutral cream and tan (red is reserved for official warnings). */
+const ASH_INK: Record<'dark' | 'light', Record<AshLevel, RGB>> = {
+  dark: { '700': [247, 239, 222], '500': [226, 196, 148], '300': [190, 152, 102] },
+  light: { '700': [150, 120, 78], '500': [118, 86, 48], '300': [82, 58, 32] },
+};
+const ASH_WIDTH: Record<AshLevel, number> = { '700': 3.25, '500': 2.5, '300': 2 };
+const MAX_TSUNAMI_MARKERS = 80;
 const SINGAPORE: LonLat = [103.8198, 1.3521];
 const DRIFT_LENGTH_KM = 111.2;
 const DRIFT_HALF_ANGLE_DEG = 15;
@@ -457,6 +477,8 @@ interface LayerToggles {
   particles: boolean;
   rings: boolean;
   buildings: boolean;
+  ash: boolean;
+  tsunami: boolean;
 }
 
 export default function MapView({
@@ -482,6 +504,7 @@ export default function MapView({
   selectedCityId = null,
   hazeHour = null,
   theme,
+  ashWind = null,
 }: MapViewProps) {
   const calloutId = useId();
   const layersTitleId = useId();
@@ -494,7 +517,13 @@ export default function MapView({
     particles: true,
     rings: true,
     buildings: true,
+    ash: true,
+    tsunami: true,
   });
+  /** "History: last BMKG tsunami warning" (only offered when no BMKG tsunami warning is in force). Off by default. */
+  const [tsunamiHistory, setTsunamiHistory] = useState(false);
+  /** Wall clock once per mount: the ash drift starts at the forecast hour at or before it. */
+  const [nowMs] = useState(() => Date.now());
   const [dark, setDark] = useState(() => resolveTheme(theme) === 'dark');
   const [narrow, setNarrow] = useState(false);
   /** The map visible between the panels is narrow (under TIGHT_MAX px): legend closed, caption trimmed. */
@@ -609,6 +638,23 @@ export default function MapView({
   const transportShown = Boolean(transport && layers.transport);
   const hotspotsShown = layers.watch && hotspots ? hotspots : NO_HOTSPOTS;
   const hotspotsToday = hotspotsShown.filter((h) => h.current).length;
+
+  // Illustrative ash drift (modelled) for the selected volcano: three heights from the GVP summit.
+  const ashSeries = useMemo(() => {
+    if (!ashWind || !selectedIncident || selectedIncident.hazard !== 'volcano' || !selectedIncident.volcanoId) return null;
+    return ashWind.volcanoes.find((v) => v.volcanoId === selectedIncident.volcanoId) ?? null;
+  }, [ashWind, selectedIncident]);
+  const ashDrift = useMemo(() => (ashSeries ? ashDriftTracks(ashSeries, nowMs) : null), [ashSeries, nowMs]);
+  const ashShown = Boolean(ashDrift && layers.ash);
+
+  // Official BMKG InaTEWS tsunami warning areas (verbatim levels) at district centres (approximate).
+  const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings), [warnings]);
+  const tsunamiInForce = tsunamiPick.inForce !== null;
+  const tsunamiWarning = tsunamiPick.inForce ?? (tsunamiHistory ? tsunamiPick.latest : null);
+  const tsunamiPlacement = useMemo(() => (tsunamiWarning ? placeTsunamiAreas(tsunamiWarning.areas, idnDistrictIndex()) : null), [tsunamiWarning]);
+  const tsunamiShown = Boolean(tsunamiWarning && tsunamiPlacement && layers.tsunami);
+  const tsunamiAreaMarkers = tsunamiShown && tsunamiPlacement ? tsunamiPlacement.placed.slice(0, MAX_TSUNAMI_MARKERS) : [];
+  const tsunamiObsMarkers = tsunamiShown && tsunamiWarning ? (tsunamiWarning.observations ?? []).slice(0, MAX_TSUNAMI_MARKERS) : [];
 
   // --- deck.gl layers (rebuilt only when inputs change, never per frame) -----------------------
 
@@ -781,8 +827,92 @@ export default function MapView({
         }),
       );
     }
+    if (ashShown && ashDrift) {
+      const inks = ASH_INK[dark ? 'dark' : 'light'];
+      const tracks = ashDrift.tracks.filter((t) => t.points.length > 1);
+      const ticks = tracks.flatMap((t) => t.ticks.map((k) => ({ ...k, level: t.level })));
+      // The 24 h tick carries the height label instead of an hour label; heights stack so ends never collide.
+      const tickLabels = ticks.filter((k) => k.hour < 24);
+      const labelDy: Record<AshLevel, number> = { '700': -10, '500': 0, '300': 10 };
+      const ends = tracks.map((t) => ({ track: t, at: t.points[t.points.length - 1] }));
+      const outline: [number, number, number, number] = [...halo, 235];
+      out.push(
+        new PathLayer<DriftTrack>({
+          id: 'mv-ash-halo',
+          data: tracks,
+          getPath: (d) => d.points.map((p) => [p.lon, p.lat] as LonLat),
+          getColor: [...halo, dark ? 190 : 210],
+          getWidth: (d) => ASH_WIDTH[d.level] + 3,
+          widthUnits: 'pixels',
+          jointRounded: true,
+          capRounded: true,
+          updateTriggers: { getColor: [dark] },
+        }),
+        new PathLayer<DriftTrack>({
+          id: 'mv-ash-paths',
+          data: tracks,
+          getPath: (d) => d.points.map((p) => [p.lon, p.lat] as LonLat),
+          getColor: (d) => [...inks[d.level], 245],
+          getWidth: (d) => ASH_WIDTH[d.level],
+          widthUnits: 'pixels',
+          jointRounded: true,
+          capRounded: true,
+          updateTriggers: { getColor: [dark] },
+        }),
+        new ScatterplotLayer<(typeof ticks)[number]>({
+          id: 'mv-ash-ticks',
+          data: ticks,
+          getPosition: (d) => [d.lon, d.lat],
+          radiusUnits: 'pixels',
+          getRadius: 3.5,
+          filled: true,
+          getFillColor: [...halo, 255],
+          stroked: true,
+          getLineColor: (d) => [...inks[d.level], 255],
+          lineWidthUnits: 'pixels',
+          getLineWidth: 1.6,
+          updateTriggers: { getFillColor: [dark], getLineColor: [dark] },
+        }),
+        new TextLayer<(typeof tickLabels)[number]>({
+          id: 'mv-ash-tick-labels',
+          data: tickLabels,
+          getPosition: (d) => [d.lon, d.lat],
+          getText: (d) => `${d.hour} h`,
+          getSize: 11,
+          sizeUnits: 'pixels',
+          getColor: (d) => [...inks[d.level], 255],
+          getPixelOffset: [7, -9],
+          getTextAnchor: 'start',
+          getAlignmentBaseline: 'center',
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontWeight: 600,
+          fontSettings: { sdf: true, fontSize: 48, buffer: 6 },
+          outlineWidth: 3,
+          outlineColor: outline,
+          updateTriggers: { getColor: [dark] },
+        }),
+        new TextLayer<(typeof ends)[number]>({
+          id: 'mv-ash-level-labels',
+          data: ends,
+          getPosition: (d) => [d.at.lon, d.at.lat],
+          getText: (d) => `${d.track.label}${d.track.ticks.some((k) => k.hour === 24) ? ' (24 h)' : ''}`,
+          getSize: 13,
+          sizeUnits: 'pixels',
+          getColor: (d) => [...inks[d.track.level], 255],
+          getPixelOffset: (d) => [9, labelDy[d.track.level]],
+          getTextAnchor: 'start',
+          getAlignmentBaseline: 'center',
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontWeight: 700,
+          fontSettings: { sdf: true, fontSize: 48, buffer: 6 },
+          outlineWidth: 3,
+          outlineColor: outline,
+          updateTriggers: { getColor: [dark] },
+        }),
+      );
+    }
     return out;
-  }, [hazeRegions, rings, driftCone, seaWindToward, windVariable, transport, transportShown, stride, hotspotsShown, dark, windGrid]);
+  }, [hazeRegions, rings, driftCone, seaWindToward, windVariable, transport, transportShown, stride, hotspotsShown, dark, windGrid, ashShown, ashDrift]);
 
   useEffect(() => {
     deckLayersRef.current = deckLayers;
@@ -945,6 +1075,41 @@ export default function MapView({
         bearing: 0,
         pitch: 0,
       });
+    },
+    [syncPadding],
+  );
+
+  /** Fit a box (the 24 h ash drift, the tsunami warning areas) in the visible map, above the bottom dock. */
+  const fitBox = useCallback(
+    (points: readonly { lat: number; lon: number }[]) => {
+      const map = mapRef.current;
+      if (!map || points.length === 0) return;
+      syncPadding();
+      const lats = points.map((p) => p.lat);
+      const lons = points.map((p) => p.lon);
+      const { w, h } = sizeRef.current;
+      const visW = Math.max(0, w - padRef.current.left - padRef.current.right);
+      const dock = rootRef.current?.querySelector<HTMLElement>('.mv-dock');
+      const dockH = dock ? dock.offsetHeight + 24 : 0;
+      map.fitBounds(
+        [
+          [Math.min(...lons), Math.min(...lats)],
+          [Math.max(...lons), Math.max(...lats)],
+        ],
+        {
+          padding: {
+            top: Math.min(64, h / 6),
+            bottom: Math.min(Math.max(48, dockH), h * 0.5),
+            left: Math.min(48, visW / 6),
+            right: Math.min(96, visW / 5),
+          },
+          duration: prefersReducedMotion() ? 0 : 1200,
+          maxZoom: 9,
+          essential: false,
+          bearing: 0,
+          pitch: 0,
+        },
+      );
     },
     [syncPadding],
   );
@@ -1201,7 +1366,10 @@ export default function MapView({
 
   // --- Official markers: one tab stop, arrow keys move between the visible ones ----------------
 
-  const officialCount = layers.warnings ? warningMarkers.length + gaugeMarkers.length : 0;
+  const warningsDrawn = layers.warnings ? warningMarkers : [];
+  const gaugesDrawn = layers.warnings ? gaugeMarkers : [];
+  const tsunamiBase = warningsDrawn.length + gaugesDrawn.length;
+  const officialCount = tsunamiBase + tsunamiAreaMarkers.length + tsunamiObsMarkers.length;
   const officialTabStop = officialCount === 0 ? -1 : Math.min(officialActive, officialCount - 1);
   officialTabRef.current = officialTabStop;
   const focusOfficial = (from: number, step: number) => {
@@ -1268,6 +1436,28 @@ export default function MapView({
   const selectedRest = selected ? locationRest(selected.name, selected.incident.locationName) : '';
   const chipText = neaShown && nea ? psiChipText(nea) : null;
   const modeLabel = nea?.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT';
+  const tsunamiIssued = tsunamiWarning?.issuedAt ? formatUtc(tsunamiWarning.issuedAt) : 'issue time not given';
+  /** In force: LIVE or SNAPSHOT plus the issue time. History: HISTORICAL with the real ended state. */
+  const tsunamiStatus = !tsunamiWarning
+    ? ''
+    : tsunamiInForce
+      ? `${tsunamiWarning.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · issued ${tsunamiIssued}`
+      : `HISTORICAL · ${tsunamiIssued} · ${tsunamiWarning.ended ? 'ended' : 'not ended'}`;
+  const ashModeLabel = ashWind?.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT';
+  const ashDirections = ashDrift
+    ? ashDrift.tracks
+        .map((t) => `${t.label} toward ${t.bearingDeg === null ? 'nowhere (calm)' : compass16(t.bearingDeg)}, ${Math.round(t.distanceKm)} km`)
+        .join(' · ')
+    : '';
+  const showTsunamiHistory = (checked: boolean) => {
+    setTsunamiHistory(checked);
+    const latest = tsunamiPick.latest;
+    if (!checked || !latest) return;
+    if (!layers.tsunami) setLayers((prev) => ({ ...prev, tsunami: true }));
+    const pts = [...placeTsunamiAreas(latest.areas, idnDistrictIndex()).placed, ...(latest.observations ?? [])];
+    // After the panel renders, so the fit keeps clear of it.
+    window.setTimeout(() => fitBox(pts), 60);
+  };
 
   const legendBody = (
     <>
@@ -1282,7 +1472,7 @@ export default function MapView({
             </li>
           ))}
         </ul>
-        {(hasOfficial || hasEstimate || hasGauge || hotspotsShown.length > 0 || transportShown) && (
+        {(hasOfficial || hasEstimate || hasGauge || hotspotsShown.length > 0 || transportShown || ashShown || tsunamiAreaMarkers.length > 0 || tsunamiObsMarkers.length > 0) && (
           <ul className="mv-legend-list is-official">
             {hasOfficial && (
               <li className="mv-legend-item">
@@ -1322,6 +1512,34 @@ export default function MapView({
                 </span>
               </li>
             )}
+            {tsunamiAreaMarkers.length > 0 && (
+              <li className="mv-legend-item">
+                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <OfficialSymbol kind={tsunamiWarning?.ended ? 'ended' : 'official'} />
+                </svg>
+                <span>
+                  Tsunami warning area <span className="mv-legend-sub">(BMKG, district centre)</span>
+                </span>
+              </li>
+            )}
+            {tsunamiObsMarkers.length > 0 && (
+              <li className="mv-legend-item">
+                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <OfficialSymbol kind="gauge" />
+                </svg>
+                <span>
+                  Observed tsunami height <span className="mv-legend-sub">(BMKG gauge)</span>
+                </span>
+              </li>
+            )}
+            {ashShown && (
+              <li className="mv-legend-item">
+                <span className="mv-ash-swatch" aria-hidden="true" />
+                <span>
+                  Ash drift <span className="mv-legend-sub">(modelled, ~3 / 5.5 / 9 km)</span>
+                </span>
+              </li>
+            )}
             {transportShown && (
               <li className="mv-legend-item">
                 <span className="mv-path-swatch" aria-hidden="true" />
@@ -1352,6 +1570,24 @@ export default function MapView({
           <input type="checkbox" checked={layers.warnings} onChange={(e) => toggleLayer('warnings', e.currentTarget.checked)} />
           <span>Official warnings</span>
         </label>
+        {tsunamiPick.latest && (
+          <label className="mv-layer">
+            <input type="checkbox" checked={layers.tsunami} onChange={(e) => toggleLayer('tsunami', e.currentTarget.checked)} />
+            <span>Official tsunami areas (BMKG)</span>
+          </label>
+        )}
+        {tsunamiPick.latest && !tsunamiInForce && (
+          <label className="mv-layer mv-layer-sub">
+            <input type="checkbox" role="switch" checked={tsunamiHistory} onChange={(e) => showTsunamiHistory(e.currentTarget.checked)} />
+            <span>History: last BMKG tsunami warning</span>
+          </label>
+        )}
+        {ashDrift && (
+          <label className="mv-layer">
+            <input type="checkbox" checked={layers.ash} onChange={(e) => toggleLayer('ash', e.currentTarget.checked)} />
+            <span>Ash drift (modelled)</span>
+          </label>
+        )}
         <label className="mv-layer">
           <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
           <span>NEA wind and haze</span>
@@ -1393,7 +1629,7 @@ export default function MapView({
     </>
   );
 
-  const showCaption = rings !== null || transportShown || hotspotsShown.length > 0;
+  const showCaption = rings !== null || transportShown || hotspotsShown.length > 0 || ashShown;
 
   return (
     <div ref={rootRef} className={`map-view${dark ? ' is-dark' : ' is-light'}${narrow ? ' is-narrow' : ''}${tight ? ' is-tight' : ''}${className ? ` ${className}` : ''}`}>
@@ -1436,7 +1672,7 @@ export default function MapView({
             aria-label="Official warnings and water-level gauges on the map (arrow keys to move between them)"
             onKeyDown={onOfficialKeyDown}
           >
-            {warningMarkers.map((w, i) => {
+            {warningsDrawn.map((w, i) => {
               const official = w.authority === 'official';
               const isSelected = w.id === selectedWarningId;
               const area = w.areaDescription.trim() || w.headline.trim();
@@ -1469,7 +1705,7 @@ export default function MapView({
                 </button>
               );
             })}
-            {gaugeMarkers.map((g, i) => {
+            {gaugesDrawn.map((g, i) => {
               const reading = `${formatValue(g.value)} ${g.unit} (${g.datum})`;
               const label = `Water level: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
               const cited = warningMarkers.find((w) => w.id.includes(g.id));
@@ -1484,7 +1720,7 @@ export default function MapView({
                   aria-label={label}
                   aria-pressed={cited ? isSelected : undefined}
                   onClick={onSelectWarning && cited ? () => onSelectWarning(cited.id) : undefined}
-                  {...officialProps(warningMarkers.length + i)}
+                  {...officialProps(warningsDrawn.length + i)}
                 >
                   <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
                     <OfficialSymbol kind="gauge" selected={isSelected} />
@@ -1499,6 +1735,71 @@ export default function MapView({
                 </button>
               );
             })}
+            {tsunamiWarning &&
+              tsunamiAreaMarkers.map((a, i) => {
+                const isSelected = tsunamiWarning.id === selectedWarningId;
+                const level = a.area.level ?? 'No level given';
+                const gloss = a.area.level ? BMKG_TSUNAMI_GLOSS[a.area.level.toUpperCase()] : undefined;
+                const place = `${a.area.name}${a.area.province ? `, ${a.area.province}` : ''}`;
+                const kind: OfficialKind = tsunamiWarning.ended ? 'ended' : 'official';
+                return (
+                  <button
+                    key={`ta-${a.area.name}-${i}`}
+                    type="button"
+                    className={`mv-wmarker mv-tarea is-${kind}${isSelected ? ' is-selected' : ''}`}
+                    data-lon={a.lon}
+                    data-lat={a.lat}
+                    aria-label={`Official tsunami warning area (BMKG InaTEWS): ${place} · ${level}${gloss ? ` (${gloss})` : ''} · ${tsunamiStatus} · position approximate, ${a.note}`}
+                    aria-pressed={isSelected}
+                    onClick={onSelectWarning ? () => onSelectWarning(tsunamiWarning.id) : undefined}
+                    {...officialProps(tsunamiBase + i)}
+                  >
+                    <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                      <OfficialSymbol kind={kind} selected={isSelected} />
+                    </svg>
+                    <span className="mv-tarea-level" lang="id" aria-hidden="true">
+                      {level}
+                    </span>
+                    <span className="mv-wcallout" aria-hidden="true">
+                      <strong>BMKG InaTEWS</strong>
+                      <span lang="id">{place}</span>
+                      <span>
+                        <strong lang="id">{level}</strong>
+                        {gloss && <> · BMKG: {gloss}</>}
+                      </span>
+                      <span className="mv-wcallout-meta">{tsunamiStatus}</span>
+                      <span className="mv-wcallout-meta">Position: {a.note}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            {tsunamiWarning &&
+              tsunamiObsMarkers.map((o, i) => {
+                const isSelected = tsunamiWarning.id === selectedWarningId;
+                const when = o.observedAt ? formatUtc(o.observedAt) : (o.timeText ?? 'time not given');
+                const text = `Observed ${o.heightText} m at ${o.location} ${when} (BMKG)`;
+                return (
+                  <button
+                    key={`to-${o.location}-${i}`}
+                    type="button"
+                    className={`mv-wmarker mv-tobs is-gauge${isSelected ? ' is-selected' : ''}`}
+                    data-lon={o.lon}
+                    data-lat={o.lat}
+                    aria-label={`${text}, tide gauge reading relayed from BMKG InaTEWS`}
+                    aria-pressed={isSelected}
+                    onClick={onSelectWarning ? () => onSelectWarning(tsunamiWarning.id) : undefined}
+                    {...officialProps(tsunamiBase + tsunamiAreaMarkers.length + i)}
+                  >
+                    <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                      <OfficialSymbol kind="gauge" selected={isSelected} />
+                    </svg>
+                    <span className="mv-wcallout" aria-hidden="true">
+                      <span lang="id">{text}</span>
+                      <span className="mv-wcallout-meta">{tsunamiStatus}</span>
+                    </span>
+                  </button>
+                );
+              })}
           </div>
         )}
 
@@ -1621,8 +1922,80 @@ export default function MapView({
             />
           </details>
         )}
+        {tsunamiShown && tsunamiWarning && tsunamiPlacement && (
+          <div className="mv-caption mv-tsunami" role="group" aria-label="Official BMKG InaTEWS tsunami warning areas">
+            <p className="mv-tsunami-head">
+              <span className={`mv-mode ${tsunamiInForce && tsunamiWarning.dataMode === 'live' ? 'is-live' : 'is-historical'}`}>{tsunamiStatus}</span>{' '}
+              <span lang="id">{tsunamiWarning.product}</span>
+            </p>
+            <p>
+              <span className="mv-caption-key">
+                Official BMKG InaTEWS warning areas, relayed verbatim. Positions are district centres (approximate). Follow BMKG&apos;s
+                instructions.
+              </span>{' '}
+              <a href={tsunamiWarning.issuerUrl} target="_blank" rel="noopener noreferrer">
+                BMKG InaTEWS <span aria-hidden="true">↗</span>
+                <span className="visually-hidden"> (opens in a new tab)</span>
+              </a>
+            </p>
+            <p className="mv-tsunami-meta">
+              {tsunamiPlacement.placed.length} of {tsunamiWarning.areas.length} areas placed
+              {tsunamiObsMarkers.length > 0 ? ` · ${tsunamiObsMarkers.length} observed heights (BMKG tide gauges)` : ''}
+              {onSelectWarning && (
+                <>
+                  {' · '}
+                  <button type="button" className="mv-linkbtn" onClick={() => onSelectWarning(tsunamiWarning.id)}>
+                    Open the BMKG message
+                  </button>
+                </>
+              )}
+            </p>
+            {tsunamiPlacement.unplaced.length > 0 && (
+              <details className="mv-tsunami-unplaced">
+                <summary>Not placed on map ({tsunamiPlacement.unplaced.length})</summary>
+                <ul>
+                  {tsunamiPlacement.unplaced.map((u, i) => (
+                    <li key={`${u.area.name}-${i}`}>
+                      <span lang="id">
+                        {u.area.name}
+                        {u.area.province ? `, ${u.area.province}` : ''} · <strong>{u.area.level ?? 'No level given'}</strong>
+                      </span>
+                      <span className="mv-tsunami-why"> · {u.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
         {showCaption && (
           <div className="mv-caption">
+            {ashShown && ashDrift && (
+              <p className="mv-caption-ash">
+                <span className="mv-caption-key">
+                  Where ash would drift with current forecast winds at three heights (Open-Meteo, MODELLED). Illustrative, not an ash
+                  advisory or hazard zone. Official:{' '}
+                  <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
+                    PVMBG (MAGMA)
+                    <span className="visually-hidden"> (opens in a new tab)</span>
+                  </a>{' '}
+                  and{' '}
+                  <a href={VAAC_DARWIN_URL} target="_blank" rel="noopener noreferrer">
+                    VAAC Darwin
+                    <span className="visually-hidden"> (opens in a new tab)</span>
+                  </a>
+                  .
+                </span>{' '}
+                <span>Simplified: uses the forecast wind at the summit for the whole path.</span>{' '}
+                <span className="mv-caption-meta">
+                  {ashModeLabel} · 24 h from <time dateTime={ashDrift.startISO}>{formatUtc(ashDrift.startISO)}</time>, dots at 3, 6,
+                  12 and 24 h. {ashDirections}.
+                </span>{' '}
+                <button type="button" className="mv-linkbtn" onClick={() => fitBox(ashDrift.tracks.flatMap((t) => t.points))}>
+                  Show the 24 h drift
+                </button>
+              </p>
+            )}
             {rings && (
               <p>
                 <span className="mv-caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}

@@ -17,6 +17,8 @@ import type { OfficialWarningsResult } from './lib/warnings';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
+import { loadAshWind } from './lib/ashDrift';
+import type { AshWindData } from './lib/ashDrift';
 import type { WindGrid, WindLoadResult } from './lib/windField';
 import { loadAirQuality } from './lib/airQuality';
 import type { AirQualityData } from './lib/airQuality';
@@ -248,6 +250,8 @@ export default function App() {
   /** Modelled haze layer inputs (CAMS PM2.5 and 925 hPa wind via Open-Meteo, live or snapshot); null until loaded. */
   const [airQuality, setAirQuality] = useState<AirQualityData | null>(null);
   const [wind925, setWind925] = useState<WindGrid | null>(null);
+  /** Modelled pressure-level winds at the volcano summits for the ash-drift lines (live or snapshot); null until loaded. */
+  const [ashWind, setAshWind] = useState<AshWindData | null>(null);
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
   /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
@@ -537,6 +541,11 @@ export default function App() {
         if (alive) setWind925(result.grid);
       })
       .catch((err: unknown) => console.error('925 hPa wind could not be loaded:', err));
+    loadAshWind()
+      .then((result) => {
+        if (alive) setAshWind(result.data);
+      })
+      .catch((err: unknown) => console.error('Ash-drift winds could not be loaded:', err));
     return () => {
       alive = false;
     };
@@ -659,6 +668,7 @@ export default function App() {
     gauges: warningsResult.gauges,
     selectedWarningId: inspectedWarningId,
     onSelectWarning: openWarning,
+    ashWind,
   };
 
   return (

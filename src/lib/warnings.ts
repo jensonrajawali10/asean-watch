@@ -21,7 +21,7 @@
 //   match its published 200/150/80 cm Siaga levels. We show cm, as DSDA does.
 // - data.gov.sg PUB flood alerts (shares the NEA data.gov.sg rate-limit backoff).
 import snapshotJson from '../../data/warnings-snapshot.json';
-import type { OfficialWarning, OfficialWarningArea, WarningFeedStatus, WarningHazard } from '../types';
+import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
 
 // ---------------------------------------------------------------------------
@@ -324,6 +324,38 @@ function bmkgOriginMs(date: string | null, time: string | null): number | null {
   return iso ? Date.parse(iso) : null;
 }
 
+/**
+ * BMKG InaTEWS <obsarea> tide-gauge observations in one <info>: verbatim location and height (m), the
+ * gauge's own coordinates, and the time (WIB -> UTC when a full date is given). Entries without a valid
+ * position or a finite height are skipped (never guessed).
+ */
+export function bmkgObservations(infoBlock: string): TsunamiObservation[] {
+  const out: TsunamiObservation[] = [];
+  for (const o of xmlBlocks(infoBlock, 'obsarea')) {
+    const location = xmlText(o, 'location');
+    const pos = validLatLon(num(xmlText(o, 'loclatitude')), num(xmlText(o, 'loclongitude')));
+    const heightText = xmlText(o, 'height');
+    const heightM = num(heightText);
+    if (!location || !pos || heightM === null || heightText === null) continue;
+    const date = xmlText(o, 'date');
+    const timeText = xmlText(o, 'time');
+    const observedAt = date && timeText ? wibToUtc(`${date} ${timeText}`) : null;
+    out.push({ location, lat: pos.lat, lon: pos.lon, heightM, heightText, observedAt, timeText });
+  }
+  return out;
+}
+
+/**
+ * Fixed, reviewed English gloss for BMKG InaTEWS tsunami warning levels, from BMKG's InaTEWS level
+ * definitions (estimated tsunami height) and the actions in each message's own instruction lines
+ * ("Awas": evakuasi menyeluruh, "Siaga": evakuasi, "Waspada": menjauhi pantai dan tepian sungai).
+ */
+export const BMKG_TSUNAMI_GLOSS: Record<string, string> = {
+  AWAS: 'Highest level, estimated tsunami over 3 m: full evacuation',
+  SIAGA: 'Estimated tsunami 0.5 to 3 m: evacuate',
+  WASPADA: 'Estimated tsunami under 0.5 m: stay away from beaches and river banks',
+};
+
 /** Messages within this many minutes of a closing PD-4's quake origin belong to the same event. */
 const BMKG_SAME_EVENT_MINUTES = 15;
 
@@ -345,7 +377,9 @@ export function parseBmkgTsunami(raw: unknown, meta: ParseMeta): FeedParseResult
       level: xmlText(w, 'level'),
       lat: null,
       lon: null,
+      province: xmlText(w, 'province'),
     }));
+    const observations = bmkgObservations(block);
     let level: string | null = null;
     for (const a of areas) {
       if (a.level && (level === null || (BMKG_LEVEL_RANK[a.level.toUpperCase()] ?? 0) > (BMKG_LEVEL_RANK[level.toUpperCase()] ?? 0))) {
@@ -380,6 +414,7 @@ export function parseBmkgTsunami(raw: unknown, meta: ParseMeta): FeedParseResult
         instruction: instruction === '' ? null : instruction,
         language: 'id',
         sourceUrl: feed.url,
+        ...(observations.length > 0 ? { observations } : {}),
       }),
     };
   });

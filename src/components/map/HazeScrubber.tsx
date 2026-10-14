@@ -4,6 +4,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { pm25Band, worstPlaceByStep } from '../../lib/airQuality';
+import { scrubLabels } from './hazeRender';
 import type { AirQualityData, ForecastSteps } from '../../lib/airQuality';
 import './HazeScrubber.css';
 
@@ -24,9 +25,6 @@ const STRIP_H = 24;
 const THUMB_HALF = 8;
 
 const minus = (n: number) => (n < 0 ? `−${Math.abs(n)}` : `+${n}`);
-function offsetLabel(h: number): string {
-  return h === 0 ? 'now' : `now ${minus(h)} h`;
-}
 function utcLabel(iso: string): string {
   const d = new Date(iso);
   const day = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
@@ -72,7 +70,8 @@ export default function HazeScrubber({ steps, index, onIndexChange, airQuality, 
 
   const offset = steps.offsetsH[index] ?? 0;
   const time = steps.times[index] ?? '';
-  const mode = airQuality?.dataMode === 'historical' ? 'SNAPSHOT' : airQuality ? 'LIVE' : null;
+  // A snapshot's anchor is its capture time: never call it "now".
+  const labels = scrubLabels(airQuality, offset);
   const readout = peek !== null ? worstText(peek) : worstText(index);
 
   const onBarKey = (e: KeyboardEvent<HTMLButtonElement>, k: number) => {
@@ -103,16 +102,22 @@ export default function HazeScrubber({ steps, index, onIndexChange, airQuality, 
           </svg>
         </button>
         <div className="haze-scrubber__title">
-          <h2 id={titleId}>
-            Haze &amp; wind model: now {'−'}24 h … +48 h
-          </h2>
+          <h2 id={titleId}>{labels.title}</h2>
           <p className="haze-scrubber__now" aria-live="polite">
-            <strong>{offsetLabel(offset)}</strong> · <time dateTime={time}>{time ? utcLabel(time) : '—'}</time>
+            <strong>{labels.offset}</strong> · <time dateTime={time}>{time ? utcLabel(time) : '—'}</time>
           </p>
         </div>
+        {labels.mode && (
+          <span
+            className={`haze-scrubber__mode-badge${labels.mode === 'SNAPSHOT' ? ' is-snapshot' : ''}`}
+            title={labels.mode === 'SNAPSHOT' ? `Bundled snapshot of the model run captured ${labels.run}` : `Model run retrieved ${labels.run}`}
+          >
+            {labels.mode}
+          </span>
+        )}
         {index !== steps.nowIndex && (
           <button type="button" className="haze-scrubber__jump" onClick={() => onIndexChange(steps.nowIndex)}>
-            Now
+            {labels.jump}
           </button>
         )}
       </div>
@@ -163,7 +168,7 @@ export default function HazeScrubber({ steps, index, onIndexChange, airQuality, 
           value={index}
           onChange={(e) => onIndexChange(Number(e.currentTarget.value))}
           aria-label="Forecast hour (3-hourly steps)"
-          aria-valuetext={`${offsetLabel(offset)}, ${time ? utcLabel(time) : ''}`}
+          aria-valuetext={`${labels.offset}, ${time ? utcLabel(time) : ''}`}
           disabled={n < 2}
         />
         <div className="haze-scrubber__ticks" aria-hidden="true">
@@ -173,7 +178,7 @@ export default function HazeScrubber({ steps, index, onIndexChange, airQuality, 
               className="is-mid"
               style={{ left: `calc(${THUMB_HALF}px + (100% - ${2 * THUMB_HALF}px) * ${steps.nowIndex / last})` }}
             >
-              now
+              {labels.tick}
             </span>
           )}
           <span style={{ right: 0 }}>{minus(steps.offsetsH[last] ?? 0)} h</span>
@@ -184,12 +189,18 @@ export default function HazeScrubber({ steps, index, onIndexChange, airQuality, 
         <span className="haze-scrubber__readout-k">Worst city</span> {readout || '—'}
       </p>
       <p className="haze-scrubber__note">
-        <span className="haze-scrubber__badge">MODELLED</span> forecast (CAMS + Open-Meteo), not an official advisory
-        {mode && airQuality && (
+        <span className="haze-scrubber__badge">MODELLED</span>{' '}
+        {labels.mode === 'SNAPSHOT' && (
+          <>
+            <span className="haze-scrubber__badge is-snapshot">SNAPSHOT</span>{' '}
+          </>
+        )}
+        forecast (CAMS + Open-Meteo), not an official advisory
+        {labels.mode && labels.run && (
           <>
             {' · '}
             <span className="haze-scrubber__mode">
-              {mode} run {airQuality.retrievedAt.slice(5, 10)} {airQuality.retrievedAt.slice(11, 16)} UTC
+              {labels.mode === 'SNAPSHOT' ? 'snapshot run' : 'LIVE run'} {labels.run}
             </span>
           </>
         )}

@@ -18,6 +18,8 @@ import {
   magmaRecords,
   parseBmkgGempa,
   parseBmkgTsunami,
+  bmkgObservations,
+  BMKG_TSUNAMI_GLOSS,
   parseDsda,
   parseGdacs,
   parseGeonetVal,
@@ -425,8 +427,8 @@ describe('BMKG InaTEWS tsunami parser', () => {
       sourceUrl: FEEDS.bmkgInatews.url,
     });
     expect(w.areas).toEqual([
-      { name: 'MANGGARAI BAGIAN UTARA', level: 'SIAGA', lat: null, lon: null },
-      { name: 'PULAU ENDE', level: 'WASPADA', lat: null, lon: null },
+      { name: 'MANGGARAI BAGIAN UTARA', level: 'SIAGA', lat: null, lon: null, province: 'NTT' },
+      { name: 'PULAU ENDE', level: 'WASPADA', lat: null, lon: null, province: 'NTT' },
     ]);
     expect(w.instruction?.split('\n')).toEqual([
       'Ikuti arahan peringatan dini TSUNAMI dari BPBD, BNPB dan BMKG',
@@ -436,6 +438,43 @@ describe('BMKG InaTEWS tsunami parser', () => {
     ]);
     expect(byId('20260815050037').level).toBe('WASPADA');
     expect(byId('20260815073130').level).toBe('Warning Tsunami PD-4');
+  });
+
+  it('exports <obsarea> tide-gauge observations verbatim with their own coordinates', () => {
+    const w = byId('20260815070532');
+    // The fixture gives a time without a date, so there is no UTC instant (never guessed).
+    expect(w.observations).toEqual([
+      { location: 'BAKALANG-ALOR', lat: -8.26, lon: 124.23, heightM: 0.14, heightText: '0.14', observedAt: null, timeText: '05:41 WIB' },
+    ]);
+    expect(byId('20260815050037').observations).toBeUndefined();
+  });
+
+  it('converts a dated <obsarea> time from WIB to UTC and skips entries without a position or height', () => {
+    const block = `<info>
+      <obsarea><location>MAUROLE-ENDE</location><loclatitude>-8.47</loclatitude><loclongitude>121.84</loclongitude><height>0.94</height><date>15-08-2026</date><time>05:27 WIB</time></obsarea>
+      <obsarea><location>NO-POSITION</location><height>0.30</height><date>15-08-2026</date><time>05:47 WIB</time></obsarea>
+      <obsarea><location>NO-HEIGHT</location><loclatitude>-5.45</loclatitude><loclongitude>122.59</loclongitude><date>15-08-2026</date><time>05:47 WIB</time></obsarea>
+    </info>`;
+    expect(bmkgObservations(block)).toEqual([
+      { location: 'MAUROLE-ENDE', lat: -8.47, lon: 121.84, heightM: 0.94, heightText: '0.94', observedAt: '2026-08-14T22:27:00Z', timeText: '05:27 WIB' },
+    ]);
+  });
+
+  it('reads the real snapshot: the Flores Sea PD-3.4 message carries ten observed heights', () => {
+    const real = parseBmkgTsunami(BUNDLED_WARNINGS_SNAPSHOT.feeds['bmkg-inatews'].raw, { dataMode: 'historical', retrievedAt: '2026-10-13T07:51:20Z' });
+    const pd34 = real.warnings.find((x) => x.product === 'Warning Tsunami PD-3.4' && x.issuedAt === '2026-08-15T00:05:32Z') as OfficialWarning;
+    expect(pd34.ended).toBe(true);
+    expect(pd34.areas).toHaveLength(22);
+    expect(pd34.observations).toHaveLength(10);
+    const maurole = pd34.observations?.find((o) => o.location === 'MAUROLE-ENDE');
+    expect(maurole?.heightM).toBe(0.94);
+    expect(maurole?.observedAt).toBe('2026-08-14T22:27:00Z');
+    // Verbatim height text, trailing zero kept.
+    expect(pd34.observations?.find((o) => o.location === 'BAUBAU')?.heightText).toBe('0.30');
+  });
+
+  it('glosses only the three BMKG tsunami levels', () => {
+    expect(Object.keys(BMKG_TSUNAMI_GLOSS).sort()).toEqual(['AWAS', 'SIAGA', 'WASPADA']);
   });
 
   it('never alters text: every headline, area name and instruction line occurs verbatim in the source XML', () => {

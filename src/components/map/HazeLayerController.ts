@@ -11,6 +11,10 @@
 //     Singapore also shows NEA MEASURED 24-h PSI with its LIVE/SNAPSHOT tag in a visibly different chip.
 // The overlay's container is placed directly above the map canvas (below MapLibre markers, popups and
 // controls, and below any overlay MapView adds as a control), so haze never tints MapView's markers.
+// Performance: the particle loop is capped at 30 fps, stops when the tab is hidden, the map is
+// off-screen or no grid is in view, draws shorter trails at low zoom, and an adaptive budget sheds
+// particles step-wise when frames run long (restoring slowly when there is headroom).
+// TODO(map-v2): merge into one shared deck.gl overlay with MapView (one canvas, one redraw per frame).
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { BitmapLayer, IconLayer, LineLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
@@ -21,7 +25,7 @@ import { pm25Band, pm25Slice, placePm25At } from '../../lib/airQuality';
 import type { AirQualityData } from '../../lib/airQuality';
 import { WIND_GRID_SPEC, windSlice } from '../../lib/windField';
 import type { WindGrid, WindSlice } from '../../lib/windField';
-import { intersectBox, ParticleSystem, rasterisePm25, streakArrows } from './hazeRender';
+import { AdaptiveBudget, FrameLimiter, intersectBox, ParticleSystem, rasterisePm25, streakArrows, trailForZoom } from './hazeRender';
 import type { ParticleBox } from './hazeRender';
 
 export type { AirQualityData };
@@ -61,9 +65,12 @@ const GRID_BOX: ParticleBox = {
   east: WIND_GRID_SPEC.maxLon,
   north: WIND_GRID_SPEC.maxLat,
 };
-/** One particle per this many visible grid pixels, capped. */
+/** One particle per this many visible grid pixels, capped by MAX_PARTICLES and the adaptive budget. */
 const PX_PER_PARTICLE = 300;
 const MAX_PARTICLES = 3500;
+const MIN_PARTICLES = 600;
+/** Particle frames per second (trails are tuned for this rate). */
+const PARTICLE_FPS = 30;
 const TRAIL = 6;
 /** Screen pixels per second per m/s of wind. */
 const PX_PER_S_PER_MS = 6;
@@ -150,6 +157,11 @@ export class HazeLayerController {
   private hoveredId: string | null = null;
 
   private readonly particles = new ParticleSystem(TRAIL);
+  private readonly limiter = new FrameLimiter(PARTICLE_FPS);
+  private readonly budget = new AdaptiveBudget(MAX_PARTICLES, { min: MIN_PARTICLES });
+  /** Particles wanted for the visible grid area (before the budget). */
+  private areaCount = 0;
+  private lastRawT = 0;
   private box: ParticleBox | null = null;
   private segBufs: { from: Float32Array; to: Float32Array; color: Uint8Array }[] = [];
   private segFlip = 0;
@@ -200,7 +212,7 @@ export class HazeLayerController {
     if (sliceKey !== this.sliceKey) {
       this.sliceKey = sliceKey;
       this.slice = wantParticles && input.windGrid ? windSlice(input.windGrid, input.timeISO) : null;
-      if (this.slice && this.particles.count === 0) this.onViewChange();
+      if (this.slice && this.particles.capacity === 0) this.onViewChange();
     }
     this.buildHaze();
     this.buildCities();
@@ -245,13 +257,16 @@ export class HazeLayerController {
       const area = Math.abs(c.x - a.x) * Math.abs(c.y - a.y);
       n = Math.min(MAX_PARTICLES, Math.round(area / PX_PER_PARTICLE));
     }
-    if (Math.abs(n - this.particles.count) > this.particles.count * 0.15 || n === 0 || this.particles.count === 0) {
+    this.areaCount = n;
+    const cap = this.particles.capacity;
+    if (Math.abs(n - cap) > cap * 0.15 || n === 0 || cap === 0) {
       this.particles.reset(n, box);
       const segs = n * TRAIL;
       this.segBufs = [0, 1].map(() => ({ from: new Float32Array(segs * 2), to: new Float32Array(segs * 2), color: new Uint8Array(segs * 4) }));
     } else if (box) {
       this.particles.recycleOutside(box);
     }
+    this.particles.setActive(Math.min(n, this.budget.value), box);
     this.streakKey = '';
     this.buildStreaks();
     this.syncLoop();
@@ -271,10 +286,11 @@ export class HazeLayerController {
     if (!this.raf) this.render();
   };
 
+  /** Animate only when particles are on, some grid is in view, and the map is visible on screen. */
   private animating(): boolean {
     const i = this.input;
     return Boolean(
-      !this.destroyed && i && i.visible.particles && this.slice && this.box && this.particles.count > 0 && !this.reduced && !this.hidden && this.onScreen,
+      !this.destroyed && i && i.visible.particles && this.slice && this.box && this.particles.capacity > 0 && !this.reduced && !this.hidden && this.onScreen,
     );
   }
 
@@ -282,6 +298,8 @@ export class HazeLayerController {
     if (this.animating()) {
       if (!this.raf) {
         this.lastT = 0;
+        this.lastRawT = 0;
+        this.limiter.reset();
         this.raf = requestAnimationFrame(this.frame);
       }
     } else if (this.raf) {
@@ -293,19 +311,32 @@ export class HazeLayerController {
   private readonly frame = (t: number): void => {
     this.raf = 0;
     if (!this.animating() || !this.slice || !this.box) return;
-    const dt = this.lastT ? Math.min(0.05, Math.max(0, (t - this.lastT) / 1000)) : 1 / 60;
-    this.lastT = t;
-    const degPerPx = 360 / (512 * 2 ** this.map.getZoom());
-    this.particles.step(this.slice, this.box, degPerPx, PX_PER_S_PER_MS * dt);
-    this.render();
-    this.fpsCount += 1;
-    if (t - this.fpsT >= 1000) {
-      this.fps = Math.round((this.fpsCount * 1000) / (t - this.fpsT || 1000));
-      this.fpsCount = 0;
-      this.fpsT = t;
+    // Raw rAF interval feeds the adaptive budget; it sees real jank, not our 30 fps cap.
+    if (this.lastRawT) {
+      const want = Math.min(this.areaCount, this.budget.record(t - this.lastRawT));
+      if (want !== this.particles.count) this.particles.setActive(want, this.box);
+    }
+    this.lastRawT = t;
+    if (this.limiter.shouldRender(t)) {
+      const dt = this.lastT ? Math.min(0.1, Math.max(0, (t - this.lastT) / 1000)) : 1 / PARTICLE_FPS;
+      this.lastT = t;
+      const degPerPx = 360 / (512 * 2 ** this.map.getZoom());
+      this.particles.step(this.slice, this.box, degPerPx, PX_PER_S_PER_MS * dt);
+      this.render();
+      this.fpsCount += 1;
+      if (t - this.fpsT >= 1000) {
+        this.fps = Math.round((this.fpsCount * 1000) / (t - this.fpsT || 1000));
+        this.fpsCount = 0;
+        this.fpsT = t;
+      }
     }
     this.raf = requestAnimationFrame(this.frame);
   };
+
+  /** Live particles after the adaptive budget (diagnostics). */
+  get particleBudget(): number {
+    return this.budget.value;
+  }
 
   // --- layers --------------------------------------------------------------------------------
 
@@ -554,14 +585,15 @@ export class HazeLayerController {
     this.segFlip ^= 1;
     const buf = this.segBufs[this.segFlip];
     if (!buf) return null;
-    const visible = this.particles.segments(buf, rgb, i.dark ? 0.5 : 0.62, SEG_ORIGIN);
+    const drawTrail = trailForZoom(this.map.getZoom(), TRAIL);
+    const visible = this.particles.segments(buf, rgb, i.dark ? 0.5 : 0.62, SEG_ORIGIN, drawTrail);
     if (visible === 0) return null;
     return new LineLayer({
       id: 'haze-wind-particles',
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT_OFFSETS,
       coordinateOrigin: [SEG_ORIGIN[0], SEG_ORIGIN[1], 0],
       data: {
-        length: this.particles.count * TRAIL,
+        length: this.particles.count * drawTrail,
         attributes: {
           getSourcePosition: { value: buf.from, size: 2 },
           getTargetPosition: { value: buf.to, size: 2 },

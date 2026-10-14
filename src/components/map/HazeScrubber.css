@@ -16,6 +16,9 @@
   --hs-badge-fg: var(--mode-modelled-fg, #4a2f8d);
   --hs-badge-border: var(--mode-modelled-border, #c6b6ea);
   --hs-track: var(--track, #d5dae1);
+  --hs-snap-bg: var(--mode-historical-bg, #e3f1ea);
+  --hs-snap-fg: var(--mode-historical-fg, #1a5e44);
+  --hs-snap-border: var(--mode-historical-border, #a4d0bf);
   box-sizing: border-box;
   width: min(440px, calc(100vw - 32px));
   padding: 8px 10px 7px;
@@ -41,6 +44,10 @@
   --hs-badge-fg: #cdbff0;
   --hs-badge-border: #6c5ca3;
   --hs-track: rgba(236, 228, 214, 0.22);
+  /* SNAPSHOT badge: #c4ecd0 on #183324, 11.6:1. */
+  --hs-snap-bg: #183324;
+  --hs-snap-fg: #c4ecd0;
+  --hs-snap-border: #3f7a55;
 }
 
 .haze-scrubber.is-dark .haze-scrubber__play,
@@ -278,6 +285,31 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
+}
+
+.haze-scrubber__mode-badge {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--hs-control);
+  border-radius: var(--radius-sm, 3px);
+  color: var(--hs-fg);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 18px;
+}
+
+.haze-scrubber__mode-badge + .haze-scrubber__jump {
+  margin-left: 0;
+}
+
+/* SNAPSHOT uses the historical-mode tokens (green family), prominent beside the title. */
+.haze-scrubber__mode-badge.is-snapshot,
+.haze-scrubber__badge.is-snapshot {
+  border-color: var(--hs-snap-border);
+  background: var(--hs-snap-bg);
+  color: var(--hs-snap-fg);
 }
 
 .haze-scrubber__mode {

@@ -1170,3 +1170,116 @@
 .map-view.is-narrow .mv-scrub-box[open] .mv-scrubber {
   width: 100%;
 }
+
+/* Ash drift (modelled): neutral cream and tan lines, never the reserved official red. ------------- */
+
+.mv-ash-swatch {
+  flex: none;
+  width: 16px;
+  height: 9px;
+  margin-top: 4px;
+  border-top: 2.5px solid rgb(150 120 78);
+  border-bottom: 1.5px solid rgb(82 58 32);
+}
+
+.map-view.is-dark .mv-ash-swatch {
+  border-top-color: rgb(247 239 222);
+  border-bottom-color: rgb(190 152 102);
+}
+
+.mv-caption-ash a {
+  white-space: nowrap;
+}
+
+/* Small text button inside captions and the tsunami panel. */
+.mv-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mv-link);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.mv-linkbtn:focus-visible {
+  outline: 2px solid var(--mv-focus);
+  outline-offset: 1px;
+}
+
+.mv-layer.mv-layer-sub {
+  font-size: 12px;
+}
+
+/* Official BMKG tsunami warning areas: reserved official style, verbatim level always visible. ------ */
+
+.mv-tarea-level {
+  position: absolute;
+  top: 50%;
+  left: calc(100% - 3px);
+  translate: 0 -50%;
+  padding: 0 4px;
+  border-left: 2px solid var(--mv-official);
+  border-radius: var(--radius-sm);
+  background: var(--mv-solid);
+  color: var(--mv-text);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.45;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mv-tarea.is-ended .mv-tarea-level {
+  border-left: 2px dashed var(--mv-muted);
+}
+
+.mv-tarea:hover .mv-tarea-level,
+.mv-tarea:focus-visible .mv-tarea-level {
+  display: none;
+}
+
+.mv-wmarker.mv-tobs {
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+}
+
+.mv-tobs .mv-wsymbol {
+  inset: 4px;
+  width: 14px;
+  height: 14px;
+}
+
+.mv-tsunami {
+  max-width: 380px;
+  border-left: 3px solid var(--mv-official);
+}
+
+.mv-tsunami .mv-tsunami-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  font-weight: 600;
+}
+
+.mv-tsunami-meta,
+.mv-tsunami-why {
+  color: var(--mv-muted);
+}
+
+.mv-tsunami-unplaced summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mv-tsunami-unplaced ul {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  max-height: 96px;
+  overflow: auto;
+}

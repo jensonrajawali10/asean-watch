@@ -137,6 +137,18 @@ export class ParticleSystem {
     if (box) for (let p = 0; p < this.count; p += 1) this.respawn(p, box, true);
   }
 
+  /** Allocated particles (the most `setActive` can turn on without a reset). */
+  get capacity(): number {
+    return this.age.length;
+  }
+
+  /** Change the number of live particles within capacity; newly enabled ones spawn inside `box`. */
+  setActive(n: number, box: ParticleBox | null): void {
+    const next = box ? Math.max(0, Math.min(this.capacity, Math.floor(n))) : 0;
+    if (box) for (let p = this.count; p < next; p += 1) this.respawn(p, box, true);
+    this.count = next;
+  }
+
   /** Put particle `p` at a random point in `box`, collapsing its trail. */
   respawn(p: number, box: ParticleBox, randomAge = false): void {
     const slots = this.trail + 1;
@@ -192,7 +204,7 @@ export class ParticleSystem {
   }
 
   /**
-   * Trail segments into fixed slots (particle p, segment k → slot p·trail + k) for a deck.gl LineLayer
+   * Trail segments into fixed slots (particle p, segment k → slot p·drawTrail + k) for a deck.gl LineLayer
    * with binary attributes: from → to positions as (lon, lat) offsets from `origin` (Float32 is exact
    * enough for offsets; use COORDINATE_SYSTEM.LNGLAT_OFFSETS) and RGBA colours fading along the trail
    * and in/out with age. Every slot is written (unused ones get alpha 0), so the buffer size never
@@ -203,15 +215,17 @@ export class ParticleSystem {
     rgb: [number, number, number],
     maxAlpha: number,
     origin: readonly [number, number] = [0, 0],
+    drawTrail: number = this.trail,
   ): number {
     const slots = this.trail + 1;
+    const segs = Math.max(1, Math.min(this.trail, Math.floor(drawTrail)));
     let visible = 0;
     for (let p = 0; p < this.count; p += 1) {
       const base = p * slots * 2;
       const lifeFade = Math.min(1, this.age[p] / 8, (this.maxAge[p] - this.age[p]) / 12);
       const speedA = Math.min(1, 0.35 + this.speed[p] / 12);
-      for (let k = 0; k < this.trail; k += 1) {
-        const n = p * this.trail + k;
+      for (let k = 0; k < segs; k += 1) {
+        const n = p * segs + k;
         const a = (this.head - k + slots) % slots;
         const b = (this.head - k - 1 + slots) % slots;
         const x1 = this.hist[base + a * 2];
@@ -226,7 +240,7 @@ export class ParticleSystem {
         out.color[n * 4 + 1] = rgb[1];
         out.color[n * 4 + 2] = rgb[2];
         const show = lifeFade > 0 && k < this.age[p] && (x0 !== x1 || y0 !== y1);
-        out.color[n * 4 + 3] = show ? Math.round(255 * maxAlpha * lifeFade * speedA * (1 - k / this.trail)) : 0;
+        out.color[n * 4 + 3] = show ? Math.round(255 * maxAlpha * lifeFade * speedA * (1 - k / segs)) : 0;
         if (show) visible += 1;
       }
     }
@@ -277,4 +291,151 @@ export function streakArrows(slice: WindSlice, box: ParticleBox, spacingDeg: num
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Frame pacing and adaptive particle budget (pure, unit-tested)
+
+/** Caps an rAF loop at `fps`: shouldRender(t) is true on frames that keep a steady cadence at most `fps`. */
+export class FrameLimiter {
+  readonly intervalMs: number;
+  private last = Number.NEGATIVE_INFINITY;
+
+  constructor(fps: number) {
+    this.intervalMs = 1000 / fps;
+  }
+
+  /** `t` is the rAF timestamp (ms). A 1 ms tolerance absorbs rAF jitter. */
+  shouldRender(t: number): boolean {
+    const elapsed = t - this.last;
+    if (elapsed < this.intervalMs - 1) return false;
+    // Advance on the cadence grid so 60 Hz gives exactly every second frame; resync after a long gap.
+    this.last = elapsed > this.intervalMs * 3 ? t : this.last + this.intervalMs * Math.max(1, Math.floor(elapsed / this.intervalMs));
+    return true;
+  }
+
+  reset(): void {
+    this.last = Number.NEGATIVE_INFINITY;
+  }
+}
+
+export interface BudgetOptions {
+  min?: number;
+  /** Frames per averaging window. */
+  window?: number;
+  /** Step down when the window's mean frame time is above this (ms). */
+  slowMs?: number;
+  /** Count a window as calm when its mean frame time is below this (ms). */
+  fastMs?: number;
+  down?: number;
+  up?: number;
+  /** Calm windows in a row before one step up (slow restore). */
+  calmWindows?: number;
+}
+
+/**
+ * Particle budget that steps down (×0.75) when the mean raw frame time over a window exceeds ~33 ms
+ * and creeps back up (×1.15) only after several calm windows. Frame times above 1 s (tab switch,
+ * breakpoint) are ignored.
+ */
+export class AdaptiveBudget {
+  readonly max: number;
+  readonly min: number;
+  value: number;
+  private readonly o: Required<Omit<BudgetOptions, 'min'>>;
+  private sum = 0;
+  private n = 0;
+  private calm = 0;
+
+  constructor(max: number, opts: BudgetOptions = {}) {
+    this.max = max;
+    this.min = Math.min(max, opts.min ?? 600);
+    this.value = max;
+    this.o = {
+      window: opts.window ?? 30,
+      slowMs: opts.slowMs ?? 36,
+      fastMs: opts.fastMs ?? 22,
+      down: opts.down ?? 0.75,
+      up: opts.up ?? 1.15,
+      calmWindows: opts.calmWindows ?? 4,
+    };
+  }
+
+  /** Record one raw frame time (ms between rAF callbacks); returns the current budget. */
+  record(frameMs: number): number {
+    if (!(frameMs > 0) || frameMs > 1000) return this.value;
+    this.sum += frameMs;
+    this.n += 1;
+    if (this.n < this.o.window) return this.value;
+    const mean = this.sum / this.n;
+    this.sum = 0;
+    this.n = 0;
+    if (mean > this.o.slowMs) {
+      this.value = Math.max(this.min, Math.floor(this.value * this.o.down));
+      this.calm = 0;
+    } else if (mean < this.o.fastMs) {
+      this.calm += 1;
+      if (this.calm >= this.o.calmWindows && this.value < this.max) {
+        this.value = Math.min(this.max, Math.ceil(this.value * this.o.up));
+        this.calm = 0;
+      }
+    } else {
+      this.calm = 0;
+    }
+    return this.value;
+  }
+}
+
+/** Trail segments drawn per particle by zoom: fewer vertices at low zoom, where trails are tiny anyway. */
+export function trailForZoom(zoom: number, max: number): number {
+  const t = zoom < 4.5 ? 3 : zoom < 6.5 ? 4 : max;
+  return Math.max(1, Math.min(max, t));
+}
+
+// ---------------------------------------------------------------------------
+// Scrubber labels: a snapshot's anchor is its capture time, never "now".
+
+export interface ScrubLabels {
+  /** Panel title. */
+  title: string;
+  /** Selected step relative to the anchor, e.g. "now +6 h" or "snapshot run −3 h". */
+  offset: string;
+  /** Text of the jump-to-anchor button. */
+  jump: string;
+  /** Tick under the anchor on the slider. */
+  tick: string;
+  /** Prominent data-mode badge text. */
+  mode: 'LIVE' | 'SNAPSHOT' | null;
+  /** "14 Oct 07:19 UTC" (model run retrieval or snapshot capture), or null without data. */
+  run: string | null;
+}
+
+const signed = (h: number) => (h < 0 ? `−${Math.abs(h)}` : `+${h}`);
+
+function runLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })} ${d.toISOString().slice(11, 16)} UTC`;
+}
+
+export function scrubLabels(data: { dataMode: 'live' | 'historical'; retrievedAt: string } | null, offsetH: number): ScrubLabels {
+  const run = data ? runLabel(data.retrievedAt) : null;
+  if (data?.dataMode === 'historical') {
+    return {
+      title: `Haze & wind model: snapshot run −24 h … +48 h`,
+      offset: offsetH === 0 ? `snapshot run ${run}` : `snapshot run ${signed(offsetH)} h`,
+      jump: 'Snapshot run',
+      tick: 'run',
+      mode: 'SNAPSHOT',
+      run,
+    };
+  }
+  return {
+    title: `Haze & wind model: now −24 h … +48 h`,
+    offset: offsetH === 0 ? 'now' : `now ${signed(offsetH)} h`,
+    jump: 'Now',
+    tick: 'now',
+    mode: data ? 'LIVE' : null,
+    run,
+  };
 }

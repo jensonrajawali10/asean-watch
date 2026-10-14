@@ -123,3 +123,12 @@ The same texts are stored per source in `data/real/meta.json` (`attribution`, `l
 ## Other snapshots
 
 `data/nea-snapshot.json` (NEA wind and haze) and `data/warnings-snapshot.json` (official warnings) are owned and documented by the logic builder (`scripts/capture-nea-snapshot.mjs`, `scripts/capture-warnings-snapshot.mjs`).
+
+## Ash drift winds and tsunami warning areas (added 2026-10-14)
+
+| File | What | Source and licence | Refresh |
+|---|---|---|---|
+| `data/ash-wind-snapshot.json` | MODELLED hourly wind at 700, 500 and 300 hPa (~3, ~5.5, ~9 km) at each watched volcano's Smithsonian GVP summit point, 3 days from 00 UTC. Fallback for the illustrative ash-drift lines (`src/lib/ashDrift.ts`); the app fetches the same variables live first. Variables verified 2026-10-14: `wind_speed_{700,500,300}hPa`, `wind_direction_{700,500,300}hPa` (m/s, FROM). | Weather data by Open-Meteo.com, CC BY 4.0 (https://open-meteo.com/en/licence). The capture uses the Forecast API, or the Historical Forecast API (archived forecasts of the same models) when the Forecast API refuses; `source` records which. The 2026-10-14 11:48 UTC capture came from the Historical Forecast API (Forecast API hourly limit reached). | `npm run refresh:ashwind` |
+| `data/idn-adm2-centroids.json` | 519 Indonesian regency and city centre points (area-weighted centroid of the largest polygon), used to place BMKG InaTEWS `<wzarea>` districts at approximate positions (`src/lib/tsunamiAreas.ts`). | geoBoundaries gbOpen IDN ADM2 (2020), https://www.geoboundaries.org/api/current/gbOpen/IDN/ADM2/, from Badan Pusat Statistik (BPS), World Food Programme and OCHA ROAP. Licence: Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO). Attribution: "District centres derived from geoBoundaries (Runfola et al. 2020, www.geoboundaries.org), IDN ADM2 from BPS, WFP, OCHA ROAP; CC BY 3.0 IGO." | `npm run build:idn-centroids` |
+
+Tsunami warning areas and observed heights are BMKG InaTEWS (`last30tsunamievent.xml`), relayed verbatim; see `data/warnings-snapshot.json`.
