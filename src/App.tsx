@@ -16,8 +16,11 @@ import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warnings
 import type { OfficialWarningsResult } from './lib/warnings';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
-import { loadWindField } from './lib/windField';
-import type { WindLoadResult } from './lib/windField';
+import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
+import type { WindGrid, WindLoadResult } from './lib/windField';
+import { loadAirQuality } from './lib/airQuality';
+import type { AirQualityData } from './lib/airQuality';
+import { useHazeHour } from './components/map/useHazeHour';
 import { computeTrajectories, hazeSourcesFromFixtures, sampleWind } from './lib/transport';
 import AppHeader from './components/AppHeader';
 import ReplayBar from './components/ReplayBar';
@@ -242,6 +245,10 @@ export default function App() {
   /** Modelled wind field (Open-Meteo, live or snapshot); null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
+  /** Modelled haze layer inputs (CAMS PM2.5 and 925 hPa wind via Open-Meteo, live or snapshot); null until loaded. */
+  const [airQuality, setAirQuality] = useState<AirQualityData | null>(null);
+  const [wind925, setWind925] = useState<WindGrid | null>(null);
+  const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
   /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -517,6 +524,24 @@ export default function App() {
     };
   }, []);
 
+  // Modelled haze inputs for the map's haze layer: loaded once; both loaders never throw and fall back to snapshots.
+  useEffect(() => {
+    let alive = true;
+    loadAirQuality()
+      .then((result) => {
+        if (alive) setAirQuality(result.data);
+      })
+      .catch((err: unknown) => console.error('Air quality could not be loaded:', err));
+    loadWindField({ level: PARTICLE_WIND_LEVEL })
+      .then((result) => {
+        if (alive) setWind925(result.grid);
+      })
+      .catch((err: unknown) => console.error('925 hPa wind could not be loaded:', err));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // Official warnings: loaded once, live first with per-feed snapshot fallback; never throws.
   useEffect(() => {
     let alive = true;
@@ -619,7 +644,9 @@ export default function App() {
     onClearSelection: () => selectIncident(null),
     transport,
     hotspots,
-    windGrid: windResult?.grid ?? null,
+    windGrid: wind925,
+    airQuality,
+    hazeHour,
     hazeTimeISO: transport?.time ?? null,
     incidents: INCIDENTS,
     selectedId: incident?.id ?? null,
@@ -834,6 +861,7 @@ export default function App() {
                 filename={incident ? briefingFilename(incident, currentStep) : null}
                 onGenerate={generateBrief}
                 onDownload={downloadBrief}
+                dayIndex={currentStep?.index ?? null}
               />
             </div>
           </aside>

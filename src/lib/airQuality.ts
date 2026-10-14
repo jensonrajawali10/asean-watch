@@ -39,19 +39,17 @@ export interface Pm25Band {
   min: number;
   /** Exclusive upper bound, µg/m³ (Infinity for the last band). */
   max: number;
-  /** Marker fill (data colour, EPA-style hue family). */
+  /** Marker colour: a desaturated EPA-like hue (green, yellow, orange, red, purple, maroon). */
   color: string;
-  /** Text colour on `color` (≥ 4.5:1). */
-  ink: string;
 }
 
 export const PM25_BANDS: readonly Pm25Band[] = [
-  { key: 'good', label: 'Good', min: 0, max: 15, color: '#3f9b5f', ink: '#ffffff' },
-  { key: 'moderate', label: 'Moderate', min: 15, max: 35, color: '#e2c23a', ink: '#141a22' },
-  { key: 'usg', label: 'Unhealthy for sensitive groups', min: 35, max: 55, color: '#ec8a2f', ink: '#141a22' },
-  { key: 'unhealthy', label: 'Unhealthy', min: 55, max: 150, color: '#d23f3f', ink: '#ffffff' },
-  { key: 'very-unhealthy', label: 'Very unhealthy', min: 150, max: 250, color: '#8a3f99', ink: '#ffffff' },
-  { key: 'hazardous', label: 'Hazardous', min: 250, max: Number.POSITIVE_INFINITY, color: '#7a1f2e', ink: '#ffffff' },
+  { key: 'good', label: 'Good', min: 0, max: 15, color: '#62b77a' },
+  { key: 'moderate', label: 'Moderate', min: 15, max: 35, color: '#e3c95a' },
+  { key: 'usg', label: 'Unhealthy for sensitive groups', min: 35, max: 55, color: '#e99a54' },
+  { key: 'unhealthy', label: 'Unhealthy', min: 55, max: 150, color: '#dc6262' },
+  { key: 'very-unhealthy', label: 'Very unhealthy', min: 150, max: 250, color: '#a774c4' },
+  { key: 'hazardous', label: 'Hazardous', min: 250, max: Number.POSITIVE_INFINITY, color: '#9c4a72' },
 ];
 
 /** Band for a PM2.5 value (negative or non-finite values have no band). */

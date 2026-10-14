@@ -3,6 +3,7 @@ import {
   arrowAngleDeg,
   buildOfflineStyle,
   conePolygon,
+  dashedPaths,
   destination,
   featureBounds,
   hotspotsUpToDay,
@@ -190,5 +191,21 @@ describe('hotspotsUpToDay', () => {
     expect(hotspotsUpToDay(observations, members, null, 3)).toEqual([]);
     expect(hotspotsUpToDay(observations, undefined, 'merapi', 3)).toEqual([]);
     expect(hotspotsUpToDay(observations, members, 'merapi', 0)).toEqual([]);
+  });
+});
+
+describe('dashedPaths', () => {
+  it('splits a ring into evenly spaced dashes that share their end points with the ring', () => {
+    const ring = ringPolygon(110, -7.5, 10, 12);
+    const dashes = dashedPaths(ring, 2, 1);
+    expect(dashes).toHaveLength(4);
+    expect(dashes[0]).toEqual(ring.slice(0, 3));
+    expect(dashes[1]).toEqual(ring.slice(3, 6));
+    for (const d of dashes) expect(d.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('returns nothing for degenerate input', () => {
+    expect(dashedPaths([[0, 0]])).toEqual([]);
+    expect(dashedPaths([[0, 0], [1, 1]], 0, 1)).toEqual([]);
   });
 });

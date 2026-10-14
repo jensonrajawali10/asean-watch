@@ -6,12 +6,14 @@
 //     overlay.setProps with a LineLayer of trail segments (binary attributes, no React per frame). Paused
 //     when the tab is hidden or the map is off-screen; static streak arrows under prefers-reduced-motion.
 //     Particle count scales with the visible grid area (CPU cap).
-//   - City markers coloured by EPA-style PM2.5 band (MODELLED), labels on hover or when zoomed in;
+//   - City markers coloured by EPA-style PM2.5 band (MODELLED), glowing on the dark map (CARTO Dark
+//     Matter) with cream halo labels, boxed labels on the light map; labels on hover or when zoomed in;
 //     Singapore also shows NEA MEASURED 24-h PSI with its LIVE/SNAPSHOT tag in a visibly different chip.
 // The overlay's container is placed directly above the map canvas (below MapLibre markers, popups and
 // controls, and below any overlay MapView adds as a control), so haze never tints MapView's markers.
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { BitmapLayer, LineLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { BitmapLayer, IconLayer, LineLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
+import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import type { Layer, PickingInfo } from '@deck.gl/core';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import type { HazeReading } from '../../types';
@@ -68,9 +70,52 @@ const PX_PER_S_PER_MS = 6;
 /** MapLibre zoom from which every city label shows. */
 const LABEL_ZOOM = 6;
 const SINGAPORE_ID = 'singapore';
+/**
+ * Particle segments are uploaded as Float32 (lon, lat) offsets from this origin (LNGLAT_OFFSETS) in
+ * fixed-size, double-buffered arrays. Measured on Intel UHD (headless Chrome, 1366×680, 3.1k particles):
+ * 133 fps, against 7.6 fps for per-frame variable-length Float64 positions (deck.gl fp64 split + buffer
+ * reallocation every frame).
+ */
+const SEG_ORIGIN: [number, number] = [107.5, 1];
 
 type Rgb = [number, number, number];
-type Rgba = [number, number, number, number];
+
+/** Additive colour blending (overlapping trails and glows brighten), alpha composited normally. */
+const ADDITIVE = {
+  blend: true,
+  blendColorOperation: 'add',
+  blendColorSrcFactor: 'src-alpha',
+  blendColorDstFactor: 'one',
+  blendAlphaOperation: 'add',
+  blendAlphaSrcFactor: 'one',
+  blendAlphaDstFactor: 'one-minus-src-alpha',
+} as const;
+/** Cream trails on the dark map; slate on the light map. */
+const PARTICLE_DARK: Rgb = [246, 239, 222];
+const PARTICLE_LIGHT: Rgb = [36, 48, 66];
+
+const GLOW_PX = 64;
+let glowUrl: string | null = null;
+/** A white radial-gradient sprite (data URL) for the city glow; tinted per band with mask: true. */
+function glowSprite(): string {
+  if (glowUrl) return glowUrl;
+  const c = document.createElement('canvas');
+  c.width = GLOW_PX;
+  c.height = GLOW_PX;
+  const g = c.getContext('2d');
+  if (g) {
+    const r = GLOW_PX / 2;
+    const grad = g.createRadialGradient(r, r, 0, r, r, r);
+    grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grad.addColorStop(0.25, 'rgba(255,255,255,0.45)');
+    grad.addColorStop(0.6, 'rgba(255,255,255,0.12)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, GLOW_PX, GLOW_PX);
+  }
+  glowUrl = c.toDataURL('image/png');
+  return glowUrl;
+}
 
 function hexRgb(hex: string): Rgb {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -106,7 +151,8 @@ export class HazeLayerController {
 
   private readonly particles = new ParticleSystem(TRAIL);
   private box: ParticleBox | null = null;
-  private seg = { from: new Float64Array(0), to: new Float64Array(0), color: new Uint8Array(0) };
+  private segBufs: { from: Float32Array; to: Float32Array; color: Uint8Array }[] = [];
+  private segFlip = 0;
   private raf = 0;
   private lastT = 0;
   private hidden = typeof document !== 'undefined' ? document.hidden : false;
@@ -202,7 +248,7 @@ export class HazeLayerController {
     if (Math.abs(n - this.particles.count) > this.particles.count * 0.15 || n === 0 || this.particles.count === 0) {
       this.particles.reset(n, box);
       const segs = n * TRAIL;
-      this.seg = { from: new Float64Array(segs * 2), to: new Float64Array(segs * 2), color: new Uint8Array(segs * 4) };
+      this.segBufs = [0, 1].map(() => ({ from: new Float32Array(segs * 2), to: new Float32Array(segs * 2), color: new Uint8Array(segs * 4) }));
     } else if (box) {
       this.particles.recycleOutside(box);
     }
@@ -315,11 +361,11 @@ export class HazeLayerController {
     this.cityKey = key;
     const dark = i.dark;
     const data = this.cityData();
-    const halo: Rgba = dark ? [14, 17, 22, 255] : [255, 255, 255, 255];
-    const fill = (d: HazeCity): Rgba => {
+    const bandRgb = (d: HazeCity): Rgb => {
       const b = pm25Band(d.pm25);
-      return b ? [...hexRgb(b.color), 255] : [128, 128, 128, 255];
+      return b ? hexRgb(b.color) : [150, 150, 150];
     };
+    const focus = (d: HazeCity) => d.id === i.selectedCityId || d.id === this.hoveredId;
     const onClick = (info: PickingInfo<HazeCity>) => {
       if (info.object) this.input?.onCityClick?.(info.object, { x: info.x, y: info.y });
       return true;
@@ -332,7 +378,7 @@ export class HazeLayerController {
       this.buildCities();
       if (!this.raf) this.render();
     };
-    const showLabel = (d: HazeCity) => zoomed || d.id === this.hoveredId || d.id === i.selectedCityId;
+    const showLabel = (d: HazeCity) => zoomed || focus(d);
     const labelled = data.filter(showLabel);
     const sg = data.find((d) => d.id === SINGAPORE_ID);
     const psiValues = nea ? Object.values(nea.psi24h).filter((v) => Number.isFinite(v)) : [];
@@ -343,8 +389,26 @@ export class HazeLayerController {
         : null;
     const font = "'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif";
     const layers: Layer[] = [];
+    if (dark) {
+      // Soft glow under each dot: a radial-gradient sprite tinted by band, blended additively.
+      layers.push(
+        new IconLayer<HazeCity>({
+          id: 'haze-city-glow',
+          data,
+          iconAtlas: glowSprite(),
+          iconMapping: { glow: { x: 0, y: 0, width: GLOW_PX, height: GLOW_PX, mask: true } },
+          getIcon: () => 'glow',
+          getPosition: (d) => [d.lon, d.lat],
+          sizeUnits: 'pixels',
+          getSize: (d) => (focus(d) ? 44 : d.kind === 'fire-area' ? 28 : 34),
+          getColor: (d) => [...bandRgb(d), focus(d) ? 230 : 170],
+          parameters: ADDITIVE,
+          updateTriggers: { getColor: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId], getSize: [this.hoveredId, i.selectedCityId] },
+        }),
+      );
+    }
     if (sg && neaText) {
-      // Measured (NEA) ring around Singapore's modelled dot: a second, square-cornered cue in NEA ink.
+      // Measured (NEA) ring around Singapore's modelled dot: a second cue in the NEA chip's colours.
       layers.push(
         new ScatterplotLayer<HazeCity>({
           id: 'haze-nea-ring',
@@ -355,7 +419,7 @@ export class HazeLayerController {
           filled: false,
           stroked: true,
           lineWidthUnits: 'pixels',
-          getLineWidth: 2.5,
+          getLineWidth: 2,
           getLineColor: dark ? [255, 210, 122, 255] : [20, 26, 34, 255],
           updateTriggers: { getLineColor: [dark] },
         }),
@@ -366,22 +430,46 @@ export class HazeLayerController {
         id: 'haze-cities-modelled',
         data,
         pickable: true,
-        autoHighlight: false,
         getPosition: (d) => [d.lon, d.lat],
         radiusUnits: 'pixels',
-        getRadius: (d) => (d.id === i.selectedCityId || d.id === this.hoveredId ? 8 : d.kind === 'fire-area' ? 5 : 6.5),
+        getRadius: (d) => (focus(d) ? 7.5 : d.kind === 'fire-area' ? 4.5 : 5.5),
         filled: true,
         stroked: true,
         lineWidthUnits: 'pixels',
-        getLineWidth: (d) => (d.kind === 'fire-area' ? 2.5 : 1.5),
-        getFillColor: fill,
-        getLineColor: (d) => (d.kind === 'fire-area' ? (dark ? [255, 170, 90, 255] : [110, 52, 18, 255]) : halo),
+        getLineWidth: (d) => (d.kind === 'fire-area' ? 2 : 1),
+        getFillColor: (d) => [...bandRgb(d), 255],
+        getLineColor: (d) =>
+          d.kind === 'fire-area' ? (dark ? [255, 176, 96, 255] : [110, 52, 18, 255]) : dark ? [10, 12, 16, 230] : [255, 255, 255, 255],
         updateTriggers: { getFillColor: [i.timeISO, i.airQuality.retrievedAt], getLineColor: [dark], getRadius: [this.hoveredId, i.selectedCityId] },
         onClick,
         onHover,
       }),
     );
-    if (labelled.length) {
+    const labelText = (d: HazeCity) => `${d.name}${d.kind === 'fire-area' ? ' · fire-prone area' : ''}\nPM2.5 ${Math.round(d.pm25)} µg/m³ (modelled)`;
+    if (labelled.length && dark) {
+      // Cream labels with a dark SDF halo (≥ 4.5:1 on any map colour under the halo).
+      layers.push(
+        new TextLayer<HazeCity>({
+          id: 'haze-city-labels',
+          data: labelled,
+          characterSet: 'auto',
+          fontFamily: font,
+          fontWeight: 600,
+          fontSettings: { sdf: true, fontSize: 64, buffer: 6, radius: 16 },
+          outlineWidth: 0.32,
+          outlineColor: [8, 10, 14, 235],
+          getPosition: (d) => [d.lon, d.lat],
+          getText: labelText,
+          getSize: 12.5,
+          lineHeight: 1.2,
+          getTextAnchor: 'middle',
+          getAlignmentBaseline: 'bottom',
+          getPixelOffset: [0, -11],
+          getColor: [243, 234, 216, 255],
+          updateTriggers: { getText: [i.timeISO] },
+        }),
+      );
+    } else if (labelled.length) {
       layers.push(
         new TextLayer<HazeCity>({
           id: 'haze-city-labels',
@@ -390,19 +478,19 @@ export class HazeLayerController {
           fontFamily: font,
           fontWeight: 600,
           getPosition: (d) => [d.lon, d.lat],
-          getText: (d) => `${d.name}${d.kind === 'fire-area' ? ' · fire-prone area' : ''}\nPM2.5 ${Math.round(d.pm25)} µg/m³ (modelled)`,
+          getText: labelText,
           getSize: 12,
           lineHeight: 1.25,
           getTextAnchor: 'middle',
           getAlignmentBaseline: 'bottom',
           getPixelOffset: [0, -12],
-          getColor: dark ? [236, 239, 243, 255] : [20, 26, 34, 255],
+          getColor: [20, 26, 34, 255],
           background: true,
-          getBackgroundColor: dark ? [22, 26, 33, 236] : [255, 255, 255, 240],
-          getBorderColor: dark ? [90, 100, 114, 255] : [127, 138, 152, 255],
+          getBackgroundColor: [255, 255, 255, 240],
+          getBorderColor: [127, 138, 152, 255],
           getBorderWidth: 1,
           backgroundPadding: [5, 3],
-          updateTriggers: { getText: [i.timeISO], getColor: [dark], getBackgroundColor: [dark], getBorderColor: [dark] },
+          updateTriggers: { getText: [i.timeISO] },
         }),
       );
     }
@@ -452,7 +540,7 @@ export class HazeLayerController {
       getWidth: 1.4,
       jointRounded: true,
       capRounded: true,
-      getColor: i.dark ? [238, 232, 218, 190] : [36, 48, 66, 170],
+      getColor: i.dark ? [...PARTICLE_DARK, 170] : [...PARTICLE_LIGHT, 170],
       updateTriggers: { getColor: [i.dark] },
     });
   }
@@ -460,23 +548,29 @@ export class HazeLayerController {
   private particleLayer(): Layer | null {
     const i = this.input;
     if (!i || !i.visible.particles || this.reduced || !this.slice || this.particles.count === 0) return null;
-    const rgb: Rgb = i.dark ? [238, 232, 218] : [36, 48, 66];
-    const n = this.particles.segments(this.seg, rgb, i.dark ? 0.8 : 0.62);
-    if (n === 0) return null;
-    // Fresh subarray views each frame: deck.gl re-uploads an external buffer only when its reference changes.
-    const data = {
-      length: n,
-      attributes: {
-        getSourcePosition: { value: this.seg.from.subarray(0, n * 2), size: 2 },
-        getTargetPosition: { value: this.seg.to.subarray(0, n * 2), size: 2 },
-        getColor: { value: this.seg.color.subarray(0, n * 4), size: 4, normalized: true },
-      },
-    };
+    const rgb: Rgb = i.dark ? PARTICLE_DARK : PARTICLE_LIGHT;
+    // Alternate two same-size buffer sets: deck.gl re-uploads an external buffer only when its reference
+    // changes, and a constant size avoids reallocating GPU buffers every frame.
+    this.segFlip ^= 1;
+    const buf = this.segBufs[this.segFlip];
+    if (!buf) return null;
+    const visible = this.particles.segments(buf, rgb, i.dark ? 0.5 : 0.62, SEG_ORIGIN);
+    if (visible === 0) return null;
     return new LineLayer({
       id: 'haze-wind-particles',
-      data: data as never,
+      coordinateSystem: COORDINATE_SYSTEM.LNGLAT_OFFSETS,
+      coordinateOrigin: [SEG_ORIGIN[0], SEG_ORIGIN[1], 0],
+      data: {
+        length: this.particles.count * TRAIL,
+        attributes: {
+          getSourcePosition: { value: buf.from, size: 2 },
+          getTargetPosition: { value: buf.to, size: 2 },
+          getColor: { value: buf.color, size: 4, normalized: true },
+        },
+      } as never,
       widthUnits: 'pixels',
-      getWidth: 1.3,
+      getWidth: i.dark ? 1.1 : 1.3,
+      parameters: i.dark ? ADDITIVE : undefined,
       pickable: false,
     });
   }

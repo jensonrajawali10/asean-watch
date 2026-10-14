@@ -284,3 +284,18 @@ export function hotspotsUpToDay(
   }
   return out;
 }
+
+/**
+ * Split a path into dashes: `on` segments drawn, then `off` skipped, repeating (deck.gl's core path
+ * layer has no dash support without the extensions package). Each dash is its own path.
+ */
+export function dashedPaths(points: readonly LonLat[], on = 2, off = 1): LonLat[][] {
+  const out: LonLat[][] = [];
+  if (on < 1 || points.length < 2) return out;
+  const period = on + Math.max(0, off);
+  for (let i = 0; i < points.length - 1; i += period) {
+    const dash = points.slice(i, Math.min(points.length, i + on + 1));
+    if (dash.length >= 2) out.push(dash as LonLat[]);
+  }
+  return out;
+}

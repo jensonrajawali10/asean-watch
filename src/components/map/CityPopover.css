@@ -1,14 +1,14 @@
 /* City popover: light panel tokens by default, .is-dark for the dark map (same verified palette as
-   HazeScrubber.css). The NEA chip uses the banner pair (#ffd27a on #141a22, 12.3:1) so measured data
-   never looks like the modelled value above it. */
+   HazeScrubber.css). The NEA chip uses the banner pair (light #ffd27a on #141a22, 12.3:1; dark #14110c on
+   #d9b77f, 9.9:1) so measured data never looks like the modelled value above it. */
 .city-popover {
   --cp-bg: var(--panel, #ffffff);
   --cp-fg: var(--text, #141a22);
   --cp-muted: var(--text-muted, #4e5967);
   --cp-border: var(--border-strong, #7f8a98);
   --cp-line: var(--accent, #1b58a8);
-  --cp-area: rgba(27, 88, 168, 0.12);
-  --cp-guide: #b7bfc9;
+  --cp-area: color-mix(in srgb, var(--accent, #1b58a8) 12%, transparent);
+  --cp-guide: var(--border, #b7bfc9);
   --cp-focus: var(--focus, #1b58a8);
   --cp-badge-bg: var(--mode-modelled-bg, #ece6f9);
   --cp-badge-fg: var(--mode-modelled-fg, #4a2f8d);
@@ -25,22 +25,22 @@
   color: var(--cp-fg);
   font-size: 13px;
   line-height: 18px;
-  box-shadow: 0 2px 10px rgba(20, 26, 34, 0.18);
+  box-shadow: var(--shadow, 0 2px 10px rgba(20, 26, 34, 0.18));
   cursor: default;
 }
 
 .city-popover.is-dark {
-  --cp-bg: #1a1f27;
-  --cp-fg: #e8ebef;
-  --cp-muted: #b4bcc7;
-  --cp-border: #5a6472;
-  --cp-line: #8fb8f0;
-  --cp-area: rgba(143, 184, 240, 0.16);
-  --cp-guide: #4a5360;
-  --cp-focus: #ffd27a;
-  --cp-badge-bg: #2e2547;
-  --cp-badge-fg: #dccfff;
-  --cp-badge-border: #5d4b94;
+  --cp-bg: rgba(14, 18, 22, 0.9);
+  --cp-fg: #ece4d6;
+  --cp-muted: #a9a193;
+  --cp-border: #857c6d;
+  --cp-line: #c9a675;
+  --cp-area: rgba(201, 166, 117, 0.16);
+  --cp-guide: #4a443b;
+  --cp-focus: #d8b680;
+  --cp-badge-bg: #221d31;
+  --cp-badge-fg: #cdbff0;
+  --cp-badge-border: #6c5ca3;
 }
 
 .city-popover:not(.is-anchored) {
@@ -202,16 +202,16 @@
   margin-top: 6px;
   padding: 3px 6px;
   border-radius: 0;
-  background: #141a22;
-  color: #ffd27a;
+  background: var(--nea-chip-bg, #141a22);
+  color: var(--nea-chip-fg, #ffd27a);
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .city-popover.is-dark .city-popover__nea {
-  background: #ffd27a;
-  color: #141a22;
+  background: #d9b77f;
+  color: #14110c;
 }
 
 .city-popover__nea .city-popover__nea-tag {

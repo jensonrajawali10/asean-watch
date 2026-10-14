@@ -19,15 +19,16 @@ const SMOKE_LIGHT: readonly Stop[] = [
   { v: 150, c: [150, 100, 58], a: 0.52 },
   { v: 400, c: [104, 66, 36], a: 0.62 },
 ];
+/** Dark basemap (CARTO Dark Matter): a warm tan smoke around #c9a675, never above 0.55 opacity. */
 const SMOKE_DARK: readonly Stop[] = [
-  { v: 12, c: [196, 170, 128], a: 0 },
-  { v: 25, c: [196, 168, 122], a: 0.2 },
-  { v: 55, c: [212, 160, 96], a: 0.34 },
-  { v: 150, c: [214, 128, 70], a: 0.48 },
-  { v: 400, c: [196, 96, 58], a: 0.6 },
+  { v: 12, c: [201, 166, 117], a: 0 },
+  { v: 25, c: [201, 166, 117], a: 0.14 },
+  { v: 55, c: [201, 166, 117], a: 0.27 },
+  { v: 150, c: [196, 156, 104], a: 0.42 },
+  { v: 400, c: [188, 142, 92], a: 0.55 },
 ];
 
-/** Smoke colour for a PM2.5 value: transparent when clean, warm tan to brown (light map) or amber (dark map). */
+/** Smoke colour for a PM2.5 value: transparent when clean, warm tan to brown (light map) or tan smoke (dark map). */
 export function smokeRgba(v: number, dark: boolean): Rgba {
   const stops = dark ? SMOKE_DARK : SMOKE_LIGHT;
   if (!(v > stops[0].v)) return [stops[0].c[0], stops[0].c[1], stops[0].c[2], 0];
@@ -191,38 +192,45 @@ export class ParticleSystem {
   }
 
   /**
-   * Trail segments as flat arrays for a deck.gl LineLayer with binary attributes: from → to positions
-   * (lon, lat) and RGBA colours fading along the trail and in/out with age. Returns the segment count.
+   * Trail segments into fixed slots (particle p, segment k → slot p·trail + k) for a deck.gl LineLayer
+   * with binary attributes: from → to positions as (lon, lat) offsets from `origin` (Float32 is exact
+   * enough for offsets; use COORDINATE_SYSTEM.LNGLAT_OFFSETS) and RGBA colours fading along the trail
+   * and in/out with age. Every slot is written (unused ones get alpha 0), so the buffer size never
+   * changes between frames. Returns the number of visible segments.
    */
-  segments(out: { from: Float64Array; to: Float64Array; color: Uint8Array }, rgb: [number, number, number], maxAlpha: number): number {
+  segments(
+    out: { from: Float32Array | Float64Array; to: Float32Array | Float64Array; color: Uint8Array },
+    rgb: [number, number, number],
+    maxAlpha: number,
+    origin: readonly [number, number] = [0, 0],
+  ): number {
     const slots = this.trail + 1;
-    let n = 0;
+    let visible = 0;
     for (let p = 0; p < this.count; p += 1) {
       const base = p * slots * 2;
       const lifeFade = Math.min(1, this.age[p] / 8, (this.maxAge[p] - this.age[p]) / 12);
-      if (lifeFade <= 0) continue;
       const speedA = Math.min(1, 0.35 + this.speed[p] / 12);
       for (let k = 0; k < this.trail; k += 1) {
+        const n = p * this.trail + k;
         const a = (this.head - k + slots) % slots;
         const b = (this.head - k - 1 + slots) % slots;
-        if (k >= this.age[p]) break;
         const x1 = this.hist[base + a * 2];
         const y1 = this.hist[base + a * 2 + 1];
         const x0 = this.hist[base + b * 2];
         const y0 = this.hist[base + b * 2 + 1];
-        if (x0 === x1 && y0 === y1) continue;
-        out.from[n * 2] = x0;
-        out.from[n * 2 + 1] = y0;
-        out.to[n * 2] = x1;
-        out.to[n * 2 + 1] = y1;
+        out.from[n * 2] = x0 - origin[0];
+        out.from[n * 2 + 1] = y0 - origin[1];
+        out.to[n * 2] = x1 - origin[0];
+        out.to[n * 2 + 1] = y1 - origin[1];
         out.color[n * 4] = rgb[0];
         out.color[n * 4 + 1] = rgb[1];
         out.color[n * 4 + 2] = rgb[2];
-        out.color[n * 4 + 3] = Math.round(255 * maxAlpha * lifeFade * speedA * (1 - k / this.trail));
-        n += 1;
+        const show = lifeFade > 0 && k < this.age[p] && (x0 !== x1 || y0 !== y1);
+        out.color[n * 4 + 3] = show ? Math.round(255 * maxAlpha * lifeFade * speedA * (1 - k / this.trail)) : 0;
+        if (show) visible += 1;
       }
     }
-    return n;
+    return visible;
   }
 }
 

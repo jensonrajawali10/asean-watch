@@ -14,6 +14,12 @@ describe('smokeRgba', () => {
     }
   });
 
+  it('uses a tan smoke capped at 0.55 opacity on the dark map', () => {
+    const top = smokeRgba(5000, true);
+    expect(top[3]).toBeLessThanOrEqual(Math.round(0.55 * 255));
+    expect(top[0]).toBeGreaterThan(top[2]); // warm (red > blue)
+  });
+
   it('darkens to brown on the light map', () => {
     const lo = smokeRgba(30, false);
     const hi = smokeRgba(400, false);

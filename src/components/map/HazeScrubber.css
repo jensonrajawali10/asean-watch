@@ -1,6 +1,8 @@
 /* Forecast-hour control for the modelled haze and wind layers. Light panel tokens by default; .is-dark
-   matches the dark map (ratios: text #e8ebef on #1a1f27 14.6:1, muted #b4bcc7 on #1a1f27 8.9:1,
-   modelled badge #dccfff on #2e2547 10.9:1). */
+   is a dark translucent panel for the CARTO Dark Matter map (no blur). Worst-case backdrop is the
+   densest tan smoke (0.55) over the dark map, which composites under the panel to about #1e1e1e:
+   text #ece4d6 13.2:1, muted #a9a193 6.5:1, control edge #857c6d 4.1:1, modelled badge #cdbff0 on
+   #221d31 9.6:1. Colours follow the dark theme tokens (index.css); the light panel reads them live. */
 .haze-scrubber {
   --hs-bg: var(--panel, #ffffff);
   --hs-fg: var(--text, #141a22);
@@ -13,7 +15,7 @@
   --hs-badge-bg: var(--mode-modelled-bg, #ece6f9);
   --hs-badge-fg: var(--mode-modelled-fg, #4a2f8d);
   --hs-badge-border: var(--mode-modelled-border, #c6b6ea);
-  --hs-track: #d5dae1;
+  --hs-track: var(--track, #d5dae1);
   box-sizing: border-box;
   width: min(440px, calc(100vw - 32px));
   padding: 8px 10px 7px;
@@ -27,18 +29,27 @@
 }
 
 .haze-scrubber.is-dark {
-  --hs-bg: #1a1f27;
-  --hs-fg: #e8ebef;
-  --hs-muted: #b4bcc7;
-  --hs-border: #3d4652;
-  --hs-control: #8792a0;
-  --hs-hover: #252b35;
-  --hs-accent: #8fb8f0;
-  --hs-focus: #ffd27a;
-  --hs-badge-bg: #2e2547;
-  --hs-badge-fg: #dccfff;
-  --hs-badge-border: #5d4b94;
-  --hs-track: #3d4652;
+  --hs-bg: rgba(14, 18, 22, 0.86);
+  --hs-fg: #ece4d6;
+  --hs-muted: #a9a193;
+  --hs-border: #4a443b;
+  --hs-control: #857c6d;
+  --hs-hover: rgba(236, 228, 214, 0.08);
+  --hs-accent: #c9a675;
+  --hs-focus: #d8b680;
+  --hs-badge-bg: #221d31;
+  --hs-badge-fg: #cdbff0;
+  --hs-badge-border: #6c5ca3;
+  --hs-track: rgba(236, 228, 214, 0.22);
+}
+
+.haze-scrubber.is-dark .haze-scrubber__play,
+.haze-scrubber.is-dark .haze-scrubber__jump {
+  background: rgba(236, 228, 214, 0.04);
+}
+
+.haze-scrubber.is-dark .haze-scrubber__range::-webkit-slider-thumb {
+  border-color: #0e1216;
 }
 
 .haze-scrubber p,
@@ -152,11 +163,11 @@
   width: 100%;
   border-radius: 1px 1px 0 0;
   /* A hairline edge keeps pale bands (Moderate) visible on the light panel. */
-  box-shadow: inset 0 0 0 1px rgba(20, 26, 34, 0.22);
+  box-shadow: inset 0 0 0 1px var(--hairline-on-fill, rgba(20, 26, 34, 0.22));
 }
 
 .haze-scrubber.is-dark .haze-scrubber__bar span {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(236, 228, 214, 0.35);
 }
 
 .haze-scrubber__bar:hover span,

@@ -1,8 +1,8 @@
 // Regional map on MapLibre GL JS + deck.gl. Drop-in replacement for RegionMap (same props, plus the
 // optional inputs the haze layer needs).
 //
-// - Basemap: OpenFreeMap vector styles (positron light, dark), with 3D building extrusions from the
-//   vector tiles at zoom 15 and above. If the style does not load within 5 s (or its tiles all fail),
+// - Basemap: CARTO Dark Matter by default (dark theme), OpenFreeMap positron as the "Light map" option
+//   for projectors, with 3D building extrusions from the vector tiles' building layer at zoom 15 and above. If the style does not load within 5 s (or its tiles all fail),
 //   a local style built from the bundled Natural Earth countries (data/region.geojson) takes over, so
 //   the map still draws with no network.
 // - Heavy geographic layers (distance rings, PSI haze shading, NEA wind arrow and drift cone, modelled
@@ -38,10 +38,14 @@ import type { WindGrid } from '../../lib/windField';
 import { psiBand } from '../../lib/nea';
 import { HAZE_ATTRIBUTION, HazeLayerController } from './HazeLayerController';
 import type { AirQualityData, HazeCity, HazeLayerInput } from './HazeLayerController';
+import HazeScrubber from './HazeScrubber';
+import CityPopover from './CityPopover';
+import type { HazeHour } from './useHazeHour';
 import {
   arrowAngleDeg,
   buildOfflineStyle,
   conePolygon,
+  dashedPaths,
   destination,
   featureBounds,
   keepAtStride,
@@ -101,21 +105,30 @@ export interface MapViewProps {
   windGrid?: WindGrid | null;
   /** Modelled air quality (CAMS via Open-Meteo) for the haze layer. */
   airQuality?: AirQualityData | null;
-  /** ISO 8601 UTC hour the haze layer shows; defaults to the transport time. */
+  /** ISO 8601 UTC hour the haze layer shows when there is no forecast scrubber; defaults to the transport time. */
   hazeTimeISO?: string | null;
+  /** Forecast hour state (useHazeHour, held by App). With `airQuality` it shows the haze scrubber. */
+  hazeHour?: HazeHour | null;
   /** Called when a haze-layer city marker is clicked, with its pixel position in the map container. */
   onCityClick?: (city: HazeCity, at: { x: number; y: number }) => void;
   /** Haze-layer city to highlight (e.g. while its popover is open). */
   selectedCityId?: string | null;
+  /**
+   * Basemap and map chrome theme. Without it the map follows document.documentElement.dataset.theme
+   * (dark unless "light"); the "Light map" toggle can still switch the basemap.
+   */
+  theme?: 'dark' | 'light';
 }
 
 // ---------------------------------------------------------------------------------------------
 // Constants
 
 const STYLE_URLS = {
+  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
   light: 'https://tiles.openfreemap.org/styles/positron',
-  dark: 'https://tiles.openfreemap.org/styles/dark',
 } as const;
+/** Vector sources that carry an OpenMapTiles-style building layer (render_height), per basemap. */
+const BUILDING_SOURCES = ['carto', 'openmaptiles'];
 const STYLE_TIMEOUT_MS = 5000;
 const BUILDINGS_LAYER = 'mv-buildings-3d';
 const BUILDINGS_MIN_ZOOM = 15;
@@ -144,11 +157,12 @@ const MAGMA_URL = 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas';
 const SINGAPORE: LonLat = [103.8198, 1.3521];
 const DRIFT_LENGTH_KM = 111.2;
 const DRIFT_HALF_ANGLE_DEG = 15;
-const WIND_HALF_LENGTH_KM = 35.6;
 const MAX_WARNING_MARKERS = 120;
 const MAX_GAUGE_MARKERS = 40;
 /** Container width at or below which the compact arrangement applies. */
 const NARROW_MAX = 520;
+/** Visible map width (between the panels) below which the legend starts closed and the caption is trimmed. */
+const TIGHT_MAX = 760;
 /** Extra room around a fitted selection, on top of the panel padding. */
 const FIT_MARGIN = { top: 72, bottom: 72, left: 56, right: 56 };
 const REGION_MARGIN = { top: 24, bottom: 36, left: 16, right: 16 };
@@ -165,7 +179,7 @@ const HOTSPOT: RGB = [196, 78, 18];
 const NO_HOTSPOTS: MapHotspot[] = [];
 
 const ARROW_ICON = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path d="M4 28.5h38V17l20 15-20 15V35.5H4z" fill="#fff"/></svg>',
+  '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path d="M4 26.5h34V14l24 18-24 18V37.5H4z" fill="#fff"/></svg>',
 )}`;
 const ARROW_MAPPING = { arrow: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true } };
 
@@ -384,7 +398,7 @@ interface Rect {
   w: number;
   h: number;
 }
-type TagPos = 'right' | 'left' | 'below' | 'above';
+type TagPos = 'right' | 'left' | 'below' | 'above' | 'below-right' | 'above-right' | 'below-left' | 'above-left';
 
 function overlap(a: Rect, b: Rect): number {
   const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
@@ -407,14 +421,32 @@ function tagRect(px: number, py: number, pos: TagPos, w: number, h: number, gap:
       return { x: px - w / 2, y: py + gap, w, h };
     case 'above':
       return { x: px - w / 2, y: py - gap - h, w, h };
+    case 'below-right':
+      return { x: px + gap * 0.6, y: py + gap * 0.6, w, h };
+    case 'above-right':
+      return { x: px + gap * 0.6, y: py - gap * 0.6 - h, w, h };
+    case 'below-left':
+      return { x: px - gap * 0.6 - w, y: py + gap * 0.6, w, h };
+    case 'above-left':
+      return { x: px - gap * 0.6 - w, y: py - gap * 0.6 - h, w, h };
   }
 }
 
-const TAG_POSITIONS: TagPos[] = ['right', 'left', 'below', 'above'];
+const TAG_POSITIONS: TagPos[] = ['right', 'left', 'below', 'above', 'below-right', 'above-right', 'below-left', 'above-left'];
 
 const num = (v: string | undefined) => Number(v);
 
 // ---------------------------------------------------------------------------------------------
+
+/** The theme from the prop, else the document's data-theme (dark unless "light"). */
+function resolveTheme(theme: 'dark' | 'light' | undefined): 'dark' | 'light' {
+  if (theme) return theme;
+  try {
+    return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
 
 interface LayerToggles {
   watch: boolean;
@@ -422,6 +454,7 @@ interface LayerToggles {
   nea: boolean;
   transport: boolean;
   haze: boolean;
+  particles: boolean;
   rings: boolean;
   buildings: boolean;
 }
@@ -447,6 +480,8 @@ export default function MapView({
   hazeTimeISO = null,
   onCityClick,
   selectedCityId = null,
+  hazeHour = null,
+  theme,
 }: MapViewProps) {
   const calloutId = useId();
   const layersTitleId = useId();
@@ -456,15 +491,20 @@ export default function MapView({
     nea: true,
     transport: true,
     haze: true,
+    particles: true,
     rings: true,
     buildings: true,
   });
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(() => resolveTheme(theme) === 'dark');
   const [narrow, setNarrow] = useState(false);
+  /** The map visible between the panels is narrow (under TIGHT_MAX px): legend closed, caption trimmed. */
+  const [tight, setTight] = useState(false);
   const [offline, setOffline] = useState(false);
   const [ready, setReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [stride, setStride] = useState(4);
+  /** Haze-layer city whose popover is open, with the click point in the map container. */
+  const [city, setCity] = useState<{ id: string; at: { x: number; y: number } } | null>(null);
   /** Roving tabindex for the official/gauge markers: index of the one tab stop. */
   const [officialActive, setOfficialActive] = useState(0);
 
@@ -478,7 +518,7 @@ export default function MapView({
   const hazeRef = useRef<HazeLayerController | null>(null);
   const padRef = useRef({ left: 0, right: 0 });
   const sizeRef = useRef({ w: 0, h: 0 });
-  const darkRef = useRef(false);
+  const darkRef = useRef(dark);
   const narrowRef = useRef(false);
   const buildingsRef = useRef(true);
   const anchorsRef = useRef<HTMLElement[]>([]);
@@ -574,9 +614,12 @@ export default function MapView({
 
   const deckLayers = useMemo<LayersList>(() => {
     const out: LayersList = [];
-    const slate: RGB = dark ? [196, 210, 224] : [51, 71, 91];
-    const ink: RGB = dark ? [236, 240, 245] : [20, 26, 34];
-    const halo: RGB = dark ? [20, 26, 34] : [255, 255, 255];
+    // Dark (default): cream rings, tan smoke, light amber paths, dark halos. Light: slate, brown haze, violet paths.
+    const ringInk: RGB = dark ? [236, 228, 214] : [51, 71, 91];
+    const ink: RGB = dark ? [236, 228, 214] : [20, 26, 34];
+    const halo: RGB = dark ? [10, 18, 24] : [255, 255, 255];
+    const smoke: RGB = dark ? [210, 180, 140] : HAZE_TINT;
+    const pathColor: RGB = dark ? [255, 200, 120] : MODELLED;
 
     if (hazeRegions) {
       out.push(
@@ -586,23 +629,41 @@ export default function MapView({
           getPosition: (d) => [d.lon, d.lat],
           radiusUnits: 'meters',
           getRadius: PSI_RADIUS_M,
-          getFillColor: (d) => [...HAZE_TINT, Math.round(psiHazeAlpha(d.band) * 255)],
+          getFillColor: (d) => [...smoke, Math.round(Math.min(1, psiHazeAlpha(d.band) * (dark ? 1.2 : 1)) * 255)],
           stroked: false,
+          updateTriggers: { getFillColor: [dark] },
         }),
       );
     }
     if (rings) {
       out.push(
+        // Reference distances: a faint fill that darkens toward the summit, and thin dashed outlines with a halo.
         new PolygonLayer<(typeof rings)[number]>({
           id: 'mv-rings',
           data: [...rings].reverse(),
           getPolygon: (d) => d.polygon,
           filled: true,
-          getFillColor: [...slate, 20],
-          stroked: true,
-          getLineColor: [...slate, 215],
-          lineWidthUnits: 'pixels',
-          getLineWidth: 1.5,
+          getFillColor: [...ringInk, dark ? 14 : 20],
+          stroked: false,
+          updateTriggers: { getFillColor: [dark] },
+        }),
+        new PathLayer<LonLat[]>({
+          id: 'mv-rings-halo',
+          data: rings.flatMap((r) => dashedPaths(r.polygon, 2, 1)),
+          getPath: (d) => d,
+          getColor: [...halo, dark ? 150 : 120],
+          getWidth: 3.5,
+          widthUnits: 'pixels',
+          updateTriggers: { getColor: [dark] },
+        }),
+        new PathLayer<LonLat[]>({
+          id: 'mv-rings-dash',
+          data: rings.flatMap((r) => dashedPaths(r.polygon, 2, 1)),
+          getPath: (d) => d,
+          getColor: [...ringInk, 230],
+          getWidth: 1.5,
+          widthUnits: 'pixels',
+          updateTriggers: { getColor: [dark] },
         }),
       );
     }
@@ -613,52 +674,51 @@ export default function MapView({
           data: [{ polygon: driftCone.polygon }],
           getPolygon: (d) => d.polygon,
           filled: true,
-          getFillColor: dark ? [198, 206, 218, 46] : [78, 89, 103, 42],
+          getFillColor: dark ? [236, 228, 214, 34] : [78, 89, 103, 42],
           stroked: true,
-          getLineColor: dark ? [198, 206, 218, 150] : [78, 89, 103, 150],
+          getLineColor: dark ? [236, 228, 214, 140] : [78, 89, 103, 150],
           lineWidthUnits: 'pixels',
           getLineWidth: 1,
         }),
       );
     }
     if (seaWindToward !== null) {
-      const tail = destination(SINGAPORE[0], SINGAPORE[1], seaWindToward + 180, WIND_HALF_LENGTH_KM);
-      const head = destination(SINGAPORE[0], SINGAPORE[1], seaWindToward, WIND_HALF_LENGTH_KM);
-      const tip = destination(head[0], head[1], seaWindToward, 12);
-      const tri: LonLat[] = [
-        tip,
-        destination(head[0], head[1], seaWindToward + 90, 7),
-        destination(head[0], head[1], seaWindToward - 90, 7),
-        tip,
-      ];
+      // NEA station wind at Singapore: a fixed-size arrow (pixels), so it reads the same at every zoom.
+      const angle = 90 - seaWindToward;
       const alpha = windVariable ? 150 : 255;
+      const at = [{ position: SINGAPORE }];
       out.push(
-        new PathLayer<{ path: LonLat[]; width: number; color: [number, number, number, number] }>({
-          id: 'mv-nea-wind',
-          data: [
-            { path: [tail, head], width: 6, color: [...halo, 200] },
-            { path: [tail, head], width: 2.5, color: [...ink, alpha] },
-          ],
-          getPath: (d) => d.path,
-          getWidth: (d) => d.width,
-          getColor: (d) => d.color,
-          widthUnits: 'pixels',
-          capRounded: true,
+        new IconLayer<{ position: LonLat }>({
+          id: 'mv-nea-wind-halo',
+          data: at,
+          iconAtlas: ARROW_ICON,
+          iconMapping: ARROW_MAPPING,
+          getIcon: () => 'arrow',
+          getPosition: (d) => d.position,
+          getAngle: () => angle,
+          getSize: 64,
+          sizeUnits: 'pixels',
+          getColor: [...halo, 210],
+          updateTriggers: { getAngle: [angle], getColor: [dark] },
         }),
-        new PolygonLayer<{ polygon: LonLat[] }>({
-          id: 'mv-nea-wind-tip',
-          data: [{ polygon: tri }],
-          getPolygon: (d) => d.polygon,
-          getFillColor: [...ink, alpha],
-          stroked: true,
-          getLineColor: [...halo, 200],
-          lineWidthUnits: 'pixels',
-          getLineWidth: 1,
+        new IconLayer<{ position: LonLat }>({
+          id: 'mv-nea-wind',
+          data: at,
+          iconAtlas: ARROW_ICON,
+          iconMapping: ARROW_MAPPING,
+          getIcon: () => 'arrow',
+          getPosition: (d) => d.position,
+          getAngle: () => angle,
+          getSize: 56,
+          sizeUnits: 'pixels',
+          getColor: [...ink, alpha],
+          updateTriggers: { getAngle: [angle], getColor: [dark, alpha] },
         }),
       );
     }
     if (transport && transportShown) {
-      const arrows = transport.arrows.filter((a) => keepAtStride(a.lat, a.lon, stride) && Math.hypot(a.u, a.v) > 0.05);
+      // The haze layer's 925 hPa particles replace the 10 m arrows when its wind grid is loaded; the paths stay.
+      const arrows = windGrid ? [] : transport.arrows.filter((a) => keepAtStride(a.lat, a.lon, stride) && Math.hypot(a.u, a.v) > 0.05);
       out.push(
         new IconLayer<(typeof arrows)[number]>({
           id: 'mv-wind-arrows',
@@ -670,18 +730,17 @@ export default function MapView({
           getAngle: (d) => arrowAngleDeg(d.u, d.v),
           getSize: (d) => 10 + Math.min(Math.hypot(d.u, d.v), 15) * 1.4,
           sizeUnits: 'pixels',
-          getColor: dark ? [205, 190, 245, 140] : [...MODELLED, 120],
+          getColor: dark ? [255, 200, 120, 165] : [...MODELLED, 165],
           updateTriggers: { getColor: [dark] },
         }),
       );
       const paths = transport.paths.filter((t) => t.points.length > 1);
-      const pathColor: RGB = dark ? [190, 172, 245] : MODELLED;
       out.push(
         new PathLayer<(typeof paths)[number]>({
           id: 'mv-haze-paths',
           data: paths,
           getPath: (d) => d.points.map((p) => [p.lon, p.lat] as LonLat),
-          getColor: (d) => [...pathColor, d.reaches ? 220 : 150],
+          getColor: (d) => [...pathColor, d.reaches ? 235 : 170],
           getWidth: (d) => (d.reaches ? 2.75 : 2),
           widthUnits: 'pixels',
           jointRounded: true,
@@ -723,7 +782,7 @@ export default function MapView({
       );
     }
     return out;
-  }, [hazeRegions, rings, driftCone, seaWindToward, windVariable, transport, transportShown, stride, hotspotsShown, dark]);
+  }, [hazeRegions, rings, driftCone, seaWindToward, windVariable, transport, transportShown, stride, hotspotsShown, dark, windGrid]);
 
   useEffect(() => {
     deckLayersRef.current = deckLayers;
@@ -732,18 +791,26 @@ export default function MapView({
 
   // --- Haze layer controller (owned by the haze agent) ----------------------------------------
 
+  const handleCityClick = useCallback(
+    (c: HazeCity, at: { x: number; y: number }) => {
+      setCity({ id: c.id, at });
+      onCityClick?.(c, at);
+    },
+    [onCityClick],
+  );
+  const hazeTimeShown = hazeHour?.timeISO ?? hazeTimeISO ?? transport?.time ?? windGrid?.times[0] ?? '';
   const hazeInput = useMemo<HazeLayerInput>(
     () => ({
       windGrid,
       airQuality,
-      timeISO: hazeTimeISO ?? transport?.time ?? windGrid?.times[0] ?? '',
+      timeISO: hazeTimeShown,
       dark,
-      visible: { particles: layers.transport, haze: layers.haze, cities: layers.haze },
-      onCityClick,
+      visible: { particles: layers.particles, haze: layers.haze, cities: layers.haze },
+      onCityClick: handleCityClick,
       neaHaze: layers.nea ? (nea?.haze ?? null) : null,
-      selectedCityId,
+      selectedCityId: selectedCityId ?? city?.id ?? null,
     }),
-    [windGrid, airQuality, hazeTimeISO, transport, dark, layers.transport, layers.haze, layers.nea, onCityClick, nea, selectedCityId],
+    [windGrid, airQuality, hazeTimeShown, dark, layers.particles, layers.haze, layers.nea, handleCityClick, nea, selectedCityId, city],
   );
   useEffect(() => {
     hazeInputRef.current = hazeInput;
@@ -785,12 +852,12 @@ export default function MapView({
     const markers = Array.from(root.querySelectorAll<HTMLElement>('.mv-marker')).filter((el) => el.dataset.off !== '1');
     markers.sort((a, b) => Number(b.classList.contains('is-selected')) - Number(a.classList.contains('is-selected')));
     const pts = markers.map((el) => map.project([num(el.dataset.lon), num(el.dataset.lat)]));
-    const occupied: Rect[] = pts.map((p) => ({ x: p.x - 17, y: p.y - 17, w: 34, h: 34 }));
+    const occupied: (Rect & { weight?: number })[] = pts.map((p) => ({ x: p.x - 17, y: p.y - 17, w: 34, h: 34 }));
     // The map's own cards (legend, NEA, caption, All APAC) count as obstacles for the tags.
     const base = root.getBoundingClientRect();
-    rootRef.current?.querySelectorAll<HTMLElement>('.mv-legend, .mv-compact, .mv-nea, .mv-caption, .mv-home').forEach((card) => {
+    rootRef.current?.querySelectorAll<HTMLElement>('.mv-legend, .mv-compact, .mv-nea, .mv-caption, .mv-scrubber, .mv-home').forEach((card) => {
       const b = card.getBoundingClientRect();
-      if (b.width > 0 && b.height > 0) occupied.push({ x: b.left - base.left, y: b.top - base.top, w: b.width, h: b.height });
+      if (b.width > 0 && b.height > 0) occupied.push({ x: b.left - base.left, y: b.top - base.top, w: b.width, h: b.height, weight: 3 });
     });
     const wmarkers = Array.from(root.querySelectorAll<HTMLElement>('.mv-wmarker')).filter((el) => el.dataset.off !== '1');
     for (const el of wmarkers) {
@@ -809,7 +876,7 @@ export default function MapView({
         const rect = tagRect(pts[i].x, pts[i].y, pos, tw, th, gap);
         let score = outside(rect, frame) * 3;
         occupied.forEach((o, j) => {
-          if (j !== i) score += overlap(rect, o);
+          if (j !== i) score += overlap(rect, o) * (o.weight ?? 1);
         });
         if (!best || score < best.score) best = { pos, rect, score };
         if (score === 0) break;
@@ -837,6 +904,8 @@ export default function MapView({
     const width = root.clientWidth;
     const next = overlayPadding(probeLRef.current?.offsetWidth ?? 0, probeRRef.current?.offsetWidth ?? 0, width);
     padRef.current = next;
+    const isTight = width - next.left - next.right < TIGHT_MAX;
+    setTight((prev) => (prev === isTight ? prev : isTight));
     const prev = map.getPadding();
     if (prev.left === next.left && prev.right === next.right) return;
     const padding = { top: 0, bottom: 0, left: next.left, right: next.right };
@@ -857,9 +926,12 @@ export default function MapView({
       const { w, h } = sizeRef.current;
       const visW = Math.max(0, w - padRef.current.left - padRef.current.right);
       const want = incident ? FIT_MARGIN : REGION_MARGIN;
+      // The bottom dock (forecast scrubber, caption) covers the lower map: keep the fit above it.
+      const dock = rootRef.current?.querySelector<HTMLElement>('.mv-dock');
+      const dockH = dock ? dock.offsetHeight + 40 : 0;
       const m = {
         top: Math.min(want.top, h / 5),
-        bottom: Math.min(want.bottom, h / 5),
+        bottom: Math.min(Math.max(want.bottom, dockH), h * 0.4),
         left: Math.min(want.left, visW / 6),
         right: Math.min(want.right, visW / 6),
       };
@@ -870,7 +942,8 @@ export default function MapView({
         duration,
         maxZoom: 14,
         essential: false,
-        ...(incident ? {} : { bearing: 0, pitch: 0 }),
+        bearing: 0,
+        pitch: 0,
       });
     },
     [syncPadding],
@@ -885,7 +958,7 @@ export default function MapView({
     try {
       map = new MapLibreMap({
         container: el,
-        style: STYLE_URLS.light,
+        style: darkRef.current ? STYLE_URLS.dark : STYLE_URLS.light,
         bounds: apacBounds(),
         fitBoundsOptions: { padding: 24 },
         attributionControl: false,
@@ -943,18 +1016,24 @@ export default function MapView({
     map.on('style.load', () => {
       styleLoaded = true;
       clearTimer();
-      if (offlineMode || !map.getSource('openmaptiles') || map.getLayer(BUILDINGS_LAYER)) return;
+      // Compact attribution starts collapsed on phones (the "i" button opens it).
+      if (el.clientWidth <= NARROW_MAX) {
+        el.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show');
+      }
+      const buildingSource = BUILDING_SOURCES.find((id) => map.getSource(id));
+      if (offlineMode || !buildingSource || map.getLayer(BUILDINGS_LAYER)) return;
       const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
       map.addLayer(
         {
           id: BUILDINGS_LAYER,
           type: 'fill-extrusion',
-          source: 'openmaptiles',
+          source: buildingSource,
           'source-layer': 'building',
           minzoom: BUILDINGS_MIN_ZOOM,
+          filter: ['!=', ['get', 'hide_3d'], true],
           layout: { visibility: buildingsRef.current ? 'visible' : 'none' },
           paint: {
-            'fill-extrusion-color': darkRef.current ? '#3a424d' : '#d8d4cb',
+            'fill-extrusion-color': darkRef.current ? '#2b2f35' : '#d8d4cb',
             'fill-extrusion-height': [
               'interpolate',
               ['linear'],
@@ -965,14 +1044,14 @@ export default function MapView({
               ['coalesce', ['get', 'render_height'], 6],
             ],
             'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
-            'fill-extrusion-opacity': 0.72,
+            'fill-extrusion-opacity': darkRef.current ? 0.85 : 0.72,
           },
         },
         firstSymbol,
       );
     });
     map.on('sourcedata', (e: MapSourceDataEvent) => {
-      if (e.sourceId === 'openmaptiles' && e.tile) tilesOk = true;
+      if (BUILDING_SOURCES.includes(e.sourceId) && e.tile) tilesOk = true;
     });
     map.on('error', (e) => {
       // Handled here, so MapLibre does not log it: a failed style goes offline at once; tiles after 3 failures with none loaded.
@@ -982,7 +1061,7 @@ export default function MapView({
         return;
       }
       const sourceId = (e as unknown as { sourceId?: string }).sourceId;
-      if (!tilesOk && sourceId === 'openmaptiles') {
+      if (!tilesOk && sourceId !== undefined && BUILDING_SOURCES.includes(sourceId)) {
         tileErrors += 1;
         if (tileErrors >= 3) goOffline();
       }
@@ -1014,6 +1093,9 @@ export default function MapView({
     });
 
     map.on('move', positionOverlays);
+    map.on('movestart', (e) => {
+      if ((e as { originalEvent?: unknown }).originalEvent) setCity(null);
+    });
     map.on('moveend', () => {
       positionOverlays();
       layoutTags();
@@ -1071,6 +1153,7 @@ export default function MapView({
   useEffect(() => {
     if (!ready) return;
     const animate = !firstFit.current || selectedIncident !== null;
+    setCity(null);
     firstFit.current = false;
     fitTo(selectedIncident, animate);
     // Only a change of selection refits; free zoom and pan are left alone otherwise.
@@ -1078,6 +1161,7 @@ export default function MapView({
   }, [fitKey, ready]);
 
   const goHome = () => {
+    setCity(null);
     if (selectedId !== null && onClearSelection) onClearSelection();
     else fitTo(null, true);
   };
@@ -1096,11 +1180,24 @@ export default function MapView({
     }
   };
 
-  const toggleDark = (on: boolean) => {
+  const setBasemapDark = useCallback((on: boolean) => {
+    if (darkRef.current === on) return;
     setDark(on);
     darkRef.current = on;
     applyStyleRef.current?.(on);
-  };
+  }, []);
+
+  // Follow the app theme: the prop when given, else the document's data-theme (set by the theme switcher).
+  useEffect(() => {
+    if (theme) {
+      setBasemapDark(theme === 'dark');
+      return;
+    }
+    if (typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(() => setBasemapDark(resolveTheme(undefined) === 'dark'));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, [theme, setBasemapDark]);
 
   // --- Official markers: one tab stop, arrow keys move between the visible ones ----------------
 
@@ -1259,16 +1356,22 @@ export default function MapView({
           <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
           <span>NEA wind and haze</span>
         </label>
-        {(transport || windGrid) && (
+        {transport && (
           <label className="mv-layer">
             <input type="checkbox" checked={layers.transport} onChange={(e) => toggleLayer('transport', e.currentTarget.checked)} />
             <span>Haze transport (modelled)</span>
           </label>
         )}
+        {windGrid && (
+          <label className="mv-layer">
+            <input type="checkbox" checked={layers.particles} onChange={(e) => toggleLayer('particles', e.currentTarget.checked)} />
+            <span>Wind particles (modelled, 925 hPa)</span>
+          </label>
+        )}
         {airQuality != null && (
           <label className="mv-layer">
             <input type="checkbox" checked={layers.haze} onChange={(e) => toggleLayer('haze', e.currentTarget.checked)} />
-            <span>Modelled haze (CAMS)</span>
+            <span>Haze (modelled PM2.5, CAMS)</span>
           </label>
         )}
         <label className="mv-layer">
@@ -1282,8 +1385,8 @@ export default function MapView({
           </label>
         )}
         <label className="mv-layer">
-          <input type="checkbox" checked={dark} onChange={(e) => toggleDark(e.currentTarget.checked)} />
-          <span>Dark map</span>
+          <input type="checkbox" checked={!dark} onChange={(e) => setBasemapDark(!e.currentTarget.checked)} />
+          <span>Light map</span>
         </label>
       </div>
       {offline && <p className="mv-legend-note">Offline map: street tiles unavailable, showing bundled country outlines.</p>}
@@ -1293,7 +1396,7 @@ export default function MapView({
   const showCaption = rings !== null || transportShown || hotspotsShown.length > 0;
 
   return (
-    <div ref={rootRef} className={`map-view${dark ? ' is-dark' : ''}${narrow ? ' is-narrow' : ''}${className ? ` ${className}` : ''}`}>
+    <div ref={rootRef} className={`map-view${dark ? ' is-dark' : ' is-light'}${narrow ? ' is-narrow' : ''}${tight ? ' is-tight' : ''}${className ? ` ${className}` : ''}`}>
       <div ref={mapElRef} className="mv-map" />
       <span ref={probeLRef} className="mv-probe is-left" aria-hidden="true" />
       <span ref={probeRRef} className="mv-probe is-right" aria-hidden="true" />
@@ -1314,8 +1417,8 @@ export default function MapView({
         {nea && seaWindToward !== null && (
           <span
             className="mv-wind-label mv-near-only"
-            data-lon={destination(SINGAPORE[0], SINGAPORE[1], 200, 22)[0]}
-            data-lat={destination(SINGAPORE[0], SINGAPORE[1], 200, 22)[1]}
+            data-lon={SINGAPORE[0]}
+            data-lat={SINGAPORE[1]}
           >
             Wind {windLine(nea)} · NEA stations
           </span>
@@ -1445,18 +1548,17 @@ export default function MapView({
           })}
       </div>
 
-      {narrow ? (
-        <details className="mv-compact">
-          <summary className="mv-compact-summary">Legend and layers</summary>
-          <div className="mv-legend is-inline" role="group" aria-label="Map legend and layers">
-            {legendBody}
-          </div>
-        </details>
-      ) : (
-        <div className="mv-legend" role="group" aria-label="Map legend and layers">
+      {/* Legend and layer toggles: one disclosure, open by default on wide maps, closed on phones. */}
+      <details
+        key={narrow ? 'narrow' : tight ? 'tight' : 'wide'}
+        className={narrow ? 'mv-compact' : 'mv-compact is-wide'}
+        open={!narrow && !tight}
+      >
+        <summary className="mv-compact-summary">Legend and layers</summary>
+        <div className="mv-legend is-inline" role="group" aria-label="Map legend and layers">
           {legendBody}
         </div>
-      )}
+      </details>
 
       {neaShown && nea && drift && (
         <div className="mv-nea" title={nea.attribution}>
@@ -1491,42 +1593,71 @@ export default function MapView({
         All APAC
       </button>
 
-      {showCaption && (
-        <div className="mv-caption">
-          {rings && (
-            <p>
-              <span className="mv-caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}
-              <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
-                Official danger zone and recommendations: PVMBG / MAGMA <span aria-hidden="true">↗</span>
-                <span className="visually-hidden"> (opens in a new tab)</span>
-              </a>
-            </p>
-          )}
-          {hotspotsShown.length > 0 && (
-            <p>
-              <span className="mv-caption-key">NASA FIRMS hotspots:</span>{' '}
-              <span className="mv-caption-meta">
-                {hotspotsToday} on this replay day (filled), {hotspotsShown.length - hotspotsToday} earlier (faded); satellite
-                detections, not confirmed fires
-              </span>
-            </p>
-          )}
-          {transportShown && transport && (
-            <>
+      {city && airQuality && hazeHour && layers.haze && (
+        <CityPopover
+          cityId={city.id}
+          airQuality={airQuality}
+          timeISO={hazeHour.timeISO}
+          nowISO={hazeHour.steps.times[hazeHour.steps.nowIndex] ?? hazeHour.timeISO}
+          neaHaze={layers.nea ? (nea?.haze ?? null) : null}
+          anchor={city.at}
+          dark={dark}
+          onClose={() => setCity(null)}
+        />
+      )}
+
+      <div className="mv-dock">
+        {airQuality && hazeHour && (layers.haze || layers.particles) && (
+          // Phones: the forecast scrubber folds into a disclosure so it never covers the whole map.
+          <details key={narrow ? 'narrow' : 'wide'} className="mv-scrub-box" open={!narrow}>
+            <summary className="mv-scrub-summary">Haze forecast (modelled)</summary>
+            <HazeScrubber
+              className="mv-scrubber"
+              steps={hazeHour.steps}
+              index={hazeHour.index}
+              onIndexChange={hazeHour.setIndex}
+              airQuality={airQuality}
+              dark={dark}
+            />
+          </details>
+        )}
+        {showCaption && (
+          <div className="mv-caption">
+            {rings && (
               <p>
-                <span className="mv-caption-key">
-                  MODELLED wind (Open-Meteo, {transport.level}) · illustrative haze paths, not a dispersion model
-                </span>{' '}
+                <span className="mv-caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}
+                <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
+                  Official danger zone and recommendations: PVMBG / MAGMA <span aria-hidden="true">↗</span>
+                  <span className="visually-hidden"> (opens in a new tab)</span>
+                </a>
+              </p>
+            )}
+            {hotspotsShown.length > 0 && (
+              <p className="mv-caption-firms">
+                <span className="mv-caption-key">NASA FIRMS hotspots:</span>{' '}
                 <span className="mv-caption-meta">
-                  {transport.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · from{' '}
-                  <time dateTime={transport.time}>{formatUtc(transport.time)}</time>, dots every 12 h
+                  {hotspotsToday} on this replay day (filled), {hotspotsShown.length - hotspotsToday} earlier (faded); satellite
+                  detections, not confirmed fires
                 </span>
               </p>
-              {transport.summary && !rings && <p className="mv-caption-summary">{transport.summary}</p>}
-            </>
-          )}
-        </div>
-      )}
+            )}
+            {transportShown && transport && (
+              <>
+                <p>
+                  <span className="mv-caption-key">
+                    MODELLED wind (Open-Meteo, {transport.level}) · illustrative haze paths, not a dispersion model
+                  </span>{' '}
+                  <span className="mv-caption-meta">
+                    {transport.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · from{' '}
+                    <time dateTime={transport.time}>{formatUtc(transport.time)}</time>, dots every 12 h
+                  </span>
+                </p>
+                {transport.summary && !rings && <p className="mv-caption-summary">{transport.summary}</p>}
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
