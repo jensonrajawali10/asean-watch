@@ -68,6 +68,7 @@ import {
   windArrowStride,
 } from './mapGeometry';
 import type { Bounds, LonLat, MapHotspot, RegionCollection } from './mapGeometry';
+import { PTWC_NATIONAL_AUTHORITIES_NOTE } from '../../lib/ptwc';
 import './MapView.css';
 
 export type { MapHotspot } from './mapGeometry';
@@ -2205,6 +2206,11 @@ export default function MapView({
                     <span lang={w.language || undefined}>{w.level}</span>
                     {w.ended && <span className="mv-wcallout-meta">Ended</span>}
                     {!official && <span className="mv-wcallout-meta">Impact estimate, not a warning</span>}
+                    {w.issuer.startsWith('Pacific Tsunami Warning Center') && (
+                      <span className="mv-wcallout-meta" title={PTWC_NATIONAL_AUTHORITIES_NOTE}>
+                        For national authorities; follow your national agency
+                      </span>
+                    )}
                   </span>
                 </button>
               );
