@@ -583,6 +583,14 @@ export default function MapView({
   const anchorsRef = useRef<HTMLElement[]>([]);
   const officialRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const applyStyleRef = useRef<((dark: boolean) => void) | null>(null);
+  /**
+   * True from 'style.load' until the style is swapped (applyStyle, goOffline, retryStyle). Sources and
+   * layers can be added then. map.isStyleLoaded() is not usable for that: in MapLibre 6.14 it is false
+   * whenever any tiles are in flight, and still false inside 'style.load' while the sprite loads.
+   */
+  const styleReadyRef = useRef(false);
+  /** A GIBS sync is already queued for the next 'style.load'. */
+  const gibsDeferredRef = useRef(false);
   /** Retries the live basemap after the offline fallback (the online event or the Retry button). */
   const retryStyleRef = useRef<(() => void) | null>(null);
   const deckLayersRef = useRef<LayersList>([]);
@@ -1230,7 +1238,18 @@ export default function MapView({
   const syncGibsRef = useRef<() => void>(() => {});
   syncGibsRef.current = () => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
+    if (!styleReadyRef.current) {
+      // A basemap swap is in progress (addSource would throw): sync once the new style has loaded.
+      if (!gibsDeferredRef.current) {
+        gibsDeferredRef.current = true;
+        map.once('style.load', () => {
+          gibsDeferredRef.current = false;
+          syncGibsRef.current();
+        });
+      }
+      return;
+    }
     const want = gibsRef.current;
     for (const [spec, on] of [
       [gibsTrue, want.tc],
@@ -1337,7 +1356,7 @@ export default function MapView({
     map.addControl(new AttributionControl({ compact: true, customAttribution: CREDITS }), 'bottom-right');
 
     let timer: number | undefined;
-    let styleLoaded = false;
+    styleReadyRef.current = false;
     let offlineMode = false;
     let tilesOk = false;
     let tileErrors = 0;
@@ -1350,20 +1369,20 @@ export default function MapView({
       offlineMode = true;
       clearTimer();
       setOffline(true);
-      styleLoaded = false;
+      styleReadyRef.current = false;
       map.setStyle(buildOfflineStyle(getRegion(), darkRef.current), { diff: false });
     };
     const arm = () => {
       clearTimer();
       timer = window.setTimeout(() => {
-        if (!styleLoaded) goOffline();
+        if (!styleReadyRef.current) goOffline();
       }, STYLE_TIMEOUT_MS);
     };
     retryStyleRef.current = () => {
       if (!offlineMode) return;
       offlineMode = false;
       setOffline(false);
-      styleLoaded = false;
+      styleReadyRef.current = false;
       tilesOk = false;
       tileErrors = 0;
       map.setStyle(darkRef.current ? STYLE_URLS.dark : STYLE_URLS.light, { diff: false });
@@ -1372,7 +1391,7 @@ export default function MapView({
     const onOnline = () => retryStyleRef.current?.();
     window.addEventListener('online', onOnline);
     applyStyleRef.current = (isDark: boolean) => {
-      styleLoaded = false;
+      styleReadyRef.current = false;
       tilesOk = false;
       tileErrors = 0;
       if (offlineMode) {
@@ -1385,7 +1404,7 @@ export default function MapView({
     arm();
 
     map.on('style.load', () => {
-      styleLoaded = true;
+      styleReadyRef.current = true;
       clearTimer();
       syncGibsRef.current();
       // Compact attribution starts collapsed on phones (the "i" button opens it).
@@ -1428,7 +1447,7 @@ export default function MapView({
     map.on('error', (e) => {
       // Handled here, so MapLibre does not log it: a failed style goes offline at once; tiles after 3 failures with none loaded.
       if (offlineMode) return;
-      if (!styleLoaded) {
+      if (!styleReadyRef.current) {
         goOffline();
         return;
       }
@@ -1488,6 +1507,8 @@ export default function MapView({
       window.removeEventListener('online', onOnline);
       retryStyleRef.current = null;
       applyStyleRef.current = null;
+      styleReadyRef.current = false;
+      gibsDeferredRef.current = false;
       try {
         hazeRef.current?.destroy();
       } catch (err) {
