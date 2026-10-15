@@ -13,8 +13,11 @@ import { formatUtc } from '../format';
 import { MapCard } from '../ui/MapCard';
 import { FireIcon, VolcanoIcon, WarningIcon } from '../shell/icons';
 import type { MapSelection, SectionId } from '../shell/workspace';
-import type { FireCounts } from '../analyst/InterimSections';
+import { clusterAt, regionalBadges } from '../../lib/fires';
+import type { FireSnapshot } from '../../lib/fires';
 import CityCard from './CityPopover';
+import { FireCard } from './FireCard';
+import type { FirePick } from './fireLayers';
 import type { HazeHour } from './useHazeHour';
 import type { OfficialVolcanoLevel } from './volcanoLevels';
 
@@ -34,8 +37,10 @@ export interface MapCardsProps {
   /** Watch id whose ash scenario is playing. */
   scenarioId: string | null;
   onPlayScenario: (watchId: string) => void;
-  /** Interim fire figures per watch area (bundled FIRMS snapshot). */
-  fires: FireCounts[];
+  /** The FIRMS whole-region snapshot (fires module); null when it could not be read. */
+  fireSnapshot: FireSnapshot | null;
+  /** The fire object selected on the map (resolved from the selection id). */
+  firePick: FirePick | null;
   warnings: OfficialWarning[];
   onInspectWarning: (id: string) => void;
 }
@@ -69,18 +74,21 @@ export default function MapCards(p: MapCardsProps) {
     return <WarningCard w={w} onClose={close} onInspect={() => p.onInspectWarning(w.id)} onOpenWorkspace={() => p.onOpenWorkspace('warnings')} />;
   }
 
-  if (sel.kind === 'fire') {
-    return (
-      <MapCard
-        icon={<FireIcon size={18} />}
-        eyebrow="Fire cluster"
-        title="Fire cluster"
-        kind="measured"
+  const fireCard = (pick: FirePick) =>
+    p.fireSnapshot ? (
+      <FireCard
+        pick={pick}
+        snapshot={p.fireSnapshot}
+        windGrid={p.wind925}
+        smokeStartISO={p.hazeHour.timeISO || undefined}
+        onOpenWorkspace={() => p.onOpenWorkspace('fires')}
         onClose={close}
-        sentence="Fire-cluster figures arrive with the fires layer. The Fires section lists the hotspots behind each watch area meanwhile."
-        action={{ label: 'Open in workspace', onClick: () => p.onOpenWorkspace('fires') }}
       />
-    );
+    ) : null;
+
+  if (sel.kind === 'fire') {
+    const card = p.firePick ? fireCard(p.firePick) : null;
+    return card ?? <LoadingCard title="Fires" onClose={close} what="this fire cluster (it is not in the current snapshot)" />;
   }
 
   // A watch area: a volcano, or the Riau haze watch box.
@@ -102,7 +110,14 @@ export default function MapCards(p: MapCardsProps) {
       />
     );
   }
-  const fire = p.fires.find((f) => f.watchId === incident.id) ?? null;
+  // The haze watch box (Riau): the fire cluster there, else its province, from the whole-region snapshot.
+  const snap = p.fireSnapshot;
+  if (snap) {
+    const cluster = clusterAt(snap, incident.lat, incident.lon);
+    if (cluster) return fireCard({ kind: 'fire-cluster', cluster });
+    const badge = regionalBadges(snap, '24h', 40).find((b) => b.name.toLowerCase() === name.toLowerCase()) ?? null;
+    if (badge) return fireCard({ kind: 'fire-region', badge });
+  }
   return (
     <MapCard
       icon={<FireIcon size={18} />}
@@ -111,18 +126,9 @@ export default function MapCards(p: MapCardsProps) {
       kind="measured"
       kindLabel="MEASURED · SATELLITE"
       onClose={close}
-      facts={
-        fire
-          ? [
-              { label: 'Hotspots, last 24 h', value: String(fire.last24h), note: 'of the saved week' },
-              { label: 'Hotspots, 7 days', value: String(fire.last7d) },
-              { label: 'Fire power, 7 days', value: Math.round(fire.frp7d).toLocaleString('en-US'), unit: 'MW', note: 'summed FRP' },
-            ]
-          : undefined
-      }
-      sentence="Satellite heat detections inside the watch box. They are not confirmed fires, and cloud or smoke can hide them."
-      action={{ label: 'Open in workspace', onClick: () => p.onOpenWorkspace('fires'), title: 'Fires section: daily counts and fire power' }}
-      source="NASA FIRMS (VIIRS and MODIS), bundled snapshot"
+      sentence="No satellite fire cluster is listed here in the current snapshot. That is not an all-clear: cloud and smoke hide hotspots."
+      action={{ label: 'Open in workspace', onClick: () => p.onOpenWorkspace('fires'), title: 'Fires section: counts and fire power by region' }}
+      source="NASA FIRMS (VIIRS and MODIS)"
     />
   );
 }

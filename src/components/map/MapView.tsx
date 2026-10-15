@@ -143,6 +143,10 @@ export interface MapViewProps {
   extraLayers?: ((ctx: MapLayerContext) => LayersList) | null;
   quakes?: QuakesResult | null;
   riverFlow?: RiverDischargeSeries[] | null;
+  /** Where to look when the selection is a fire (a cluster, cell or region centre). */
+  focusPoint?: { lat: number; lon: number } | null;
+  /** A one-off camera request (a workspace "Fly to"); a new seq flies again. */
+  flyRequest?: { lat: number; lon: number; zoom?: number; seq: number } | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -475,6 +479,8 @@ export default function MapView({
   extraLayers = null,
   quakes = null,
   riverFlow = null,
+  focusPoint = null,
+  flyRequest = null,
 }: MapViewProps) {
   /** Open chart popover (analyst layers): a tide gauge (code) or a river point (id), at a point in the map container. */
   const [chart, setChart] = useState<{ kind: 'tide' | 'river'; id: string; at: { x: number; y: number } } | null>(null);
@@ -1635,8 +1641,9 @@ export default function MapView({
       const w = (warnings ?? []).find((x) => x.id === selection.id);
       return w?.location ? { kind: 'point' as const, lon: w.location.lon, lat: w.location.lat } : null;
     }
+    if (selection.kind === 'fire' && focusPoint) return { kind: 'point' as const, lon: focusPoint.lon, lat: focusPoint.lat };
     return null;
-  }, [selection, selectedIncident, airQuality, warnings]);
+  }, [selection, selectedIncident, airQuality, warnings, focusPoint]);
   const targetKey = selection && target ? `${selection.kind}:${selection.id}` : '';
   const firstFit = useRef(true);
   useEffect(() => {
@@ -1654,6 +1661,17 @@ export default function MapView({
     // Only a change of selection refits; free zoom and pan are left alone otherwise.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetKey, ready]);
+
+  // A workspace "Fly to" (fire cluster, province, city row).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map || !flyRequest) return;
+    syncPadding();
+    const zoom = flyRequest.zoom ?? Math.max(POINT_ZOOM.min, map.getZoom());
+    map.flyTo({ center: [flyRequest.lon, flyRequest.lat], zoom, padding: padRef.current, duration: prefersReducedMotion() ? 0 : 1300, essential: false, curve: 1.3 });
+    // Only a new request flies.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, flyRequest?.seq]);
 
   const setBasemapDark = useCallback((on: boolean) => {
     if (darkRef.current === on) return;

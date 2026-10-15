@@ -31,7 +31,7 @@ import type { FloodModelResult } from './lib/floodModel';
 import { loadPtwc, loadPtwcSnapshot } from './lib/ptwc';
 import type { PtwcResult } from './lib/ptwc';
 import type { WindGrid, WindLoadResult } from './lib/windField';
-import { loadAirQuality, placePm25At } from './lib/airQuality';
+import { loadAirQuality } from './lib/airQuality';
 import type { AirQualityData } from './lib/airQuality';
 import { loadSeaLevelStations } from './lib/seaLevel';
 import { useHazeHour } from './components/map/useHazeHour';
@@ -48,7 +48,6 @@ import WorkspaceDrawer from './components/shell/WorkspaceDrawer';
 import { buildHash, parseHash, sameSelection, selToHash, selectionFromSel } from './components/shell/workspace';
 import type { MapSelection, SectionId } from './components/shell/workspace';
 import { alertsPill } from './components/shell/alerts';
-import { headlineSentence } from './components/shell/headline';
 import { DEFAULT_LAYERS } from './components/map/layerCatalog';
 import type { LayerKey, MapLayerState } from './components/map/layerCatalog';
 import { officialVolcanoLevel } from './components/map/volcanoLevels';
@@ -58,7 +57,21 @@ import VolcanoesSection from './components/analyst/VolcanoesSection';
 import WarningsSection from './components/analyst/WarningsSection';
 import WaterSection from './components/analyst/WaterSection';
 import LayersSection from './components/analyst/LayersSection';
-import { FiresInterim, HazeInterim, ReportInterim, SituationInterim, SourcesInterim, fireCounts } from './components/analyst/InterimSections';
+import SituationSection from './components/analyst/SituationSection';
+import HazeAirSection from './components/analyst/HazeAirSection';
+import ReportSection from './components/analyst/ReportSection';
+import SourcesSection from './components/analyst/SourcesSection';
+import { FiresSection } from './components/analyst/FiresSection';
+import BriefPanel from './components/BriefPanel';
+import AiBriefPanel from './components/AiBriefPanel';
+import { firesSummaryFromSnapshot, headline as situationHeadline } from './lib/situation';
+import type { SituationInput } from './lib/situation';
+import { loadFireSnapshot } from './lib/fires';
+import type { FireSnapshot } from './lib/fires';
+import { buildFireLayers } from './components/map/fireLayers';
+import type { FirePick } from './components/map/fireLayers';
+import { firePoint, fireSelectionId, resolveFirePick } from './components/map/fireSelection';
+import type { MapLayerContext } from './components/map/MapView';
 import './App.css';
 import './components/shell/shell.css';
 
@@ -164,18 +177,30 @@ const WARNINGS_SNAPSHOT: OfficialWarningsResult = (() => {
   }
 })();
 
-/** Hotspots per watch area from the bundled FIRMS snapshot (interim Fires data until the fires module lands). */
-const FIRE_COUNTS = (() => {
+/** The FIRMS whole-region snapshot (fires module): the Fires chip's heat grid, the fire cards and section. */
+const FIRE_SNAP: FireSnapshot | null = loadFireSnapshot();
+const FIRES_SUMMARY = (() => {
   try {
-    return fireCounts(FIXTURES);
+    return FIRE_SNAP ? firesSummaryFromSnapshot(FIRE_SNAP) : null;
   } catch (err) {
-    console.error('Fire counts could not be derived:', err);
+    console.error('Fire summary could not be derived:', err);
+    return null;
+  }
+})();
+
+/** The watch-area FIRMS clusters the haze paths start from. */
+const HAZE_SOURCES = (() => {
+  try {
+    return hazeSourcesFromFixtures(FIXTURES);
+  } catch (err) {
+    console.error('Haze sources could not be derived:', err);
     return [];
   }
 })();
 
-/** Every snapshot hotspot behind every watch's thermal records over the seven days (the Fires chip's interim layer). */
-const ALL_HOTSPOTS: MapHotspot[] = (() => {
+/** Fallback for the Fires chip when the whole-region snapshot is missing: the hotspots behind the watch areas. */
+const WATCH_HOTSPOTS: MapHotspot[] = (() => {
+  if (FIRE_SNAP) return [];
   try {
     return INCIDENTS.flatMap((i) => hotspotsUpToDay(FIXTURES.observations, MEMBERS, i.id, LAST_STEP));
   } catch {
@@ -218,7 +243,7 @@ function buildTransport(result: WindLoadResult | null): HazeTransportView | null
         if (w && Number.isFinite(w.u) && Number.isFinite(w.v)) arrows.push({ lat, lon, u: w.u, v: w.v });
       }
     }
-    const trajectories = computeTrajectories(grid, hazeSourcesFromFixtures(FIXTURES), time, 48, 30);
+    const trajectories = computeTrajectories(grid, HAZE_SOURCES, time, 48, 30);
     const closest = trajectories.reduce<(typeof trajectories)[number] | null>(
       (best, t) => (best === null || t.receptor.closestKm < best.receptor.closestKm ? t : best),
       null,
@@ -308,6 +333,10 @@ export default function App() {
   const [inspectedWarningId, setInspectedWarningId] = useState<string | null>(null);
   /** Volcano watch id whose "If it erupted now" ash scenario plays on the map; null when none. */
   const [scenarioId, setScenarioId] = useState<string | null>(null);
+  /** The last fire object picked on the map or in the Fires section (cells and regions are not in the hash). */
+  const [lastFirePick, setLastFirePick] = useState<FirePick | null>(null);
+  /** A one-off camera request from a workspace row ("Fly to"); seq makes repeats count. */
+  const [flyRequest, setFlyRequest] = useState<{ lat: number; lon: number; zoom?: number; seq: number } | null>(null);
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
   /** The snapshot until the live load settles. */
@@ -362,6 +391,21 @@ export default function App() {
 
   const selectedIncidentId = selection?.kind === 'area' ? selection.id : null;
   const selectedCityId = selection?.kind === 'city' ? selection.id : null;
+  const firePick = useMemo(
+    () => (selection?.kind === 'fire' ? resolveFirePick(FIRE_SNAP, selection.id, lastFirePick) : null),
+    [selection, lastFirePick],
+  );
+  const selectedClusterId = firePick?.kind === 'fire-cluster' ? firePick.cluster.id : null;
+  const selectFire = useCallback(
+    (pick: FirePick) => {
+      setLastFirePick(pick);
+      setSelection({ kind: 'fire', id: fireSelectionId(pick) });
+    },
+    [setSelection],
+  );
+  const flyTo = useCallback((lat: number, lon: number, zoom?: number) => {
+    setFlyRequest((prev) => ({ lat, lon, zoom, seq: (prev?.seq ?? 0) + 1 }));
+  }, []);
 
   const reviews = useMemo(() => {
     const out: Record<string, ReviewResult> = {};
@@ -458,28 +502,29 @@ export default function App() {
 
   const alerts = useMemo(() => alertsPill(allWarnings), [allWarnings]);
 
-  /** The worst modelled city at the scrubber's hour, and the 925 hPa wind there (for the headline). */
-  const worst = useMemo(() => {
-    if (!airQuality || !hazeHour.timeISO) return null;
-    let best: { name: string; pm25: number; lat: number; lon: number } | null = null;
-    for (const p of airQuality.places) {
-      const v = placePm25At(airQuality, p, hazeHour.timeISO);
-      if (Number.isFinite(v) && (!best || v > best.pm25)) best = { name: cleanPlace(p.name), pm25: v, lat: p.lat, lon: p.lon };
-    }
-    return best;
-  }, [airQuality, hazeHour.timeISO]);
-  const headline = useMemo(() => {
-    const w = worst && wind925 ? sampleWind(wind925, worst.lat, worst.lon, hazeHour.timeISO) : null;
-    const speed = w ? Math.hypot(w.u, w.v) : null;
-    const toward = w && speed ? ((Math.atan2(w.u, w.v) * 180) / Math.PI + 360) % 360 : null;
-    return headlineSentence({
-      worst,
-      offsetH: hazeHour.steps.offsetsH[hazeHour.index] ?? 0,
-      snapshot: airQuality?.dataMode === 'historical',
-      windTowardDeg: toward,
-      windSpeedMs: speed,
-    });
-  }, [worst, wind925, hazeHour, airQuality]);
+  /** Everything the situation report, the headline and the content sections are built from. */
+  const situationInput = useMemo<SituationInput>(
+    () => ({
+      airQuality,
+      wind10m: windResult?.grid ?? null,
+      wind925,
+      hazeSources: HAZE_SOURCES,
+      hotspotSnapshot: FIXTURES.snapshot ?? null,
+      transportStartISO: transport?.time ?? null,
+      nea,
+      neaError: neaResult?.error ?? null,
+      warnings: allWarnings,
+      warningFeeds: allFeeds,
+      fires: FIRES_SUMMARY,
+      ashWind,
+      riverFlow,
+      quakes,
+    }),
+    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, ashWind, riverFlow, quakes],
+  );
+  /** One live sentence that follows the scrubber; a snapshot never says "now". */
+  const head = useMemo(() => situationHeadline(situationInput, { atISO: hazeHour.timeISO || null }), [situationInput, hazeHour.timeISO]);
+  const headline = head.text;
 
   /**
    * The context a brief is built from: the NEA reading (when it applies), the nearby official warnings and
@@ -754,50 +799,69 @@ export default function App() {
     ...(incident?.hazard === 'volcano' ? {} : { rings: 'Shown when a volcano is selected.', ash: 'Shown when a volcano is selected.' }),
   };
 
-  const connectors = [
-    { label: 'CAMS PM2.5 via Open-Meteo', kind: 'modelled', url: 'https://open-meteo.com/en/docs/air-quality-api', status: { status: airQuality ? (airQuality.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: airQuality?.retrievedAt ?? null, message: null } },
-    { label: `Wind ${wind925?.level ?? '925 hPa'} via Open-Meteo`, kind: 'modelled', url: 'https://open-meteo.com/', status: { status: wind925 ? (wind925.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: wind925?.retrievedAt ?? null, message: null } },
-    { label: 'Ash-drift winds (pressure levels) via Open-Meteo', kind: 'modelled', url: 'https://open-meteo.com/', status: { status: ashWind ? (ashWind.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: ashWind?.retrievedAt ?? null, message: null } },
-    ...quakes.statuses.map((s) => ({ label: s.sourceName, kind: 'measured', status: s })),
-    { label: riverFlow.status.sourceName, kind: 'modelled', url: 'https://open-meteo.com/en/docs/flood-api', status: riverFlow.status },
-    { label: 'NEA Singapore (wind, PSI)', kind: 'measured', url: 'https://data.gov.sg/', status: { status: nea ? (nea.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: nea?.retrievedAt ?? null, message: null } },
-  ];
+
+  /** The fires module's heat grid and badges, through MapView's layer seam. */
+  const fireLayers = useCallback(
+    (ctx: MapLayerContext) =>
+      buildFireLayers({
+        snapshot: FIRE_SNAP,
+        theme: ctx.theme,
+        zoom: ctx.zoom,
+        visible: layers.fires,
+        selectedClusterId,
+        onClick: (pick) => selectFire(pick),
+      }),
+    [layers.fires, selectedClusterId, selectFire],
+  );
 
   let section: ReactNode = null;
   switch (ws) {
     case 'situation':
       section = (
-        <SituationInterim
-          headline={headline}
-          airQuality={airQuality}
-          hazeHour={hazeHour}
-          warnings={allWarnings}
-          incidents={INCIDENTS}
-          placeNames={PLACE_NAMES}
-          levels={levels}
-          fires={FIRE_COUNTS}
-          onInspectWarning={openWarning}
-          onOpenVolcano={(id) => {
-            selectArea(id);
-            openSection('volcanoes');
-          }}
+        <SituationSection
+          input={situationInput}
+          onOpenSection={openSection}
+          aiBrief={
+            incident ? (
+              <AiBriefPanel watchId={incident.id} dayIndex={currentStep?.index ?? null} />
+            ) : (
+              <p className="an-muted">Pick a watch area (map or Volcanoes section) to ask for an AI-written summary of it.</p>
+            )
+          }
         />
       );
       break;
     case 'haze':
       section = (
-        <HazeInterim
+        <HazeAirSection
           airQuality={airQuality}
-          hazeHour={hazeHour}
-          neaHaze={nea?.haze ?? null}
-          transportSummary={transport?.summary ?? null}
+          nea={nea}
+          neaError={neaResult?.error ?? null}
+          neaLoading={neaResult === null}
+          wind10m={windResult?.grid ?? null}
+          wind925={wind925}
+          hazeSources={HAZE_SOURCES}
+          hotspotSnapshot={FIXTURES.snapshot ?? null}
+          fires={FIRES_SUMMARY}
+          transportStartISO={transport?.time ?? null}
+          scrubberISO={hazeHour.timeISO || null}
           selectedCityId={selectedCityId}
+          onFlyTo={(lat, lon) => flyTo(lat, lon, 6.5)}
           onSelectCity={(id) => setSelection({ kind: 'city', id })}
         />
       );
       break;
     case 'fires':
-      section = <FiresInterim fires={FIRE_COUNTS} snapshotAt={DATA_AS_OF} onFlyTo={(id) => selectArea(id)} />;
+      section = (
+        <FiresSection
+          snapshot={FIRE_SNAP}
+          windGrid={wind925}
+          smokeStartISO={hazeHour.timeISO || undefined}
+          onFlyTo={flyTo}
+          selectedClusterId={selectedClusterId}
+          onSelectCluster={(cluster) => selectFire({ kind: 'fire-cluster', cluster })}
+        />
+      );
       break;
     case 'volcanoes':
       section = (
@@ -879,10 +943,23 @@ export default function App() {
       );
       break;
     case 'report':
-      section = <ReportInterim brief={briefProps} headline={headline} onOpenVolcanoes={() => openSection('volcanoes')} />;
+      section = (
+        <ReportSection input={situationInput} incidentBrief={brief && incident ? { title: `${selectedName ?? incident.title}: watch-area summary`, text: brief.text } : null}>
+          {briefProps ? (
+            <BriefPanel {...briefProps} />
+          ) : (
+            <p className="an-muted">
+              Pick a watch area to add its seven-day summary.{' '}
+              <button type="button" className="an-row-btn" onClick={() => openSection('volcanoes')}>
+                Open the Volcanoes section
+              </button>
+            </p>
+          )}
+        </ReportSection>
+      );
       break;
     case 'sources':
-      section = <SourcesInterim snapshotSources={FIXTURES.snapshot?.sources ?? []} snapshotAt={DATA_AS_OF} feeds={allFeeds} connectors={connectors} />;
+      section = <SourcesSection input={situationInput} />;
       break;
     case 'layers':
       section = <LayersSection layers={layers} onLayersChange={patchLayers} unavailable={layerUnavailable} />;
@@ -893,6 +970,8 @@ export default function App() {
 
   const card = (
     <MapCards
+      fireSnapshot={FIRE_SNAP}
+      firePick={firePick}
       selection={selection}
       onClose={() => setSelection(null)}
       onOpenWorkspace={openFromCard}
@@ -907,7 +986,6 @@ export default function App() {
       ashWind={ashWind}
       scenarioId={scenarioId}
       onPlayScenario={playScenario}
-      fires={FIRE_COUNTS}
       warnings={allWarnings}
       onInspectWarning={openWarning}
     />
@@ -929,7 +1007,10 @@ export default function App() {
     warnings: allWarnings,
     gauges: warningsResult.gauges,
     transport,
-    hotspots: ALL_HOTSPOTS,
+    hotspots: WATCH_HOTSPOTS,
+    extraLayers: fireLayers,
+    flyRequest,
+    focusPoint: firePick ? firePoint(firePick) : null,
     windGrid: wind925,
     airQuality,
     hazeHour,
@@ -939,9 +1020,8 @@ export default function App() {
     riverFlow: riverFlow.series,
   };
 
-  const freshness = airQuality
-    ? { mode: airQuality.dataMode === 'historical' ? ('SNAPSHOT' as const) : ('LIVE' as const), run: runLabel(airQuality.retrievedAt) }
-    : null;
+  const freshness =
+    head.freshness === 'UNAVAILABLE' || !head.asOf ? null : { mode: head.freshness, run: runLabel(head.asOf) };
   const subtitle = selectedName ? `Selected: ${selectedName}` : cityName ? `Selected: ${cleanPlace(cityName)}` : undefined;
 
   return (

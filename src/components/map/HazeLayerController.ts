@@ -29,6 +29,7 @@ import type { WindGrid, WindSlice } from '../../lib/windField';
 import { AdaptiveBudget, FrameLimiter, intersectBox, ParticleSystem, rasterisePm25, streakArrows, trailForZoom } from './hazeRender';
 import type { ParticleBox } from './hazeRender';
 import { cityBandStyle, getMapPalette } from './mapPalette';
+import { cityRadiusPx, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
 
 export type { AirQualityData };
 
@@ -68,9 +69,13 @@ const GRID_BOX: ParticleBox = {
   north: WIND_GRID_SPEC.maxLat,
 };
 /** One particle per this many visible grid pixels, capped by MAX_PARTICLES and the adaptive budget. */
-const PX_PER_PARTICLE = 300;
-const MAX_PARTICLES = 3500;
-const MIN_PARTICLES = 600;
+const PX_PER_PARTICLE = 170;
+const MAX_PARTICLES = 6000;
+const MIN_PARTICLES = 800;
+/** Haze cross-fade between forecast hours (ms); instant under prefers-reduced-motion. */
+const HAZE_FADE_MS = 650;
+/** Wide faint pass under each particle trail (HazeView's "flow glow"): width multiple and opacity. */
+const TRAIL_GLOW = { width: 3.2, opacity: 0.14 };
 /** Particle frames per second (trails are tuned for this rate). */
 const PARTICLE_FPS = 30;
 const TRAIL = 6;
@@ -150,6 +155,14 @@ export class HazeLayerController {
   private sliceKey = '';
   private hazeLayer: Layer | null = null;
   private hazeKey = '';
+  /** The previous hour's haze image while the new one fades in, and when the fade started. */
+  private prevHaze: { image: HTMLCanvasElement; bounds: [number, number, number, number] } | null = null;
+  private hazeImg: { image: HTMLCanvasElement; bounds: [number, number, number, number] } | null = null;
+  private fadeStart = 0;
+  /** Bumped on every map move end, so city labels are re-placed for the new view. */
+  private viewSeq = 0;
+  /** The worst city's id and radius at the current hour (for the pulse). */
+  private worst: { id: string; lon: number; lat: number; r: number; rgb: Rgb } | null = null;
   private readonly hazeCache = new Map<string, { canvas: HTMLCanvasElement; bounds: [number, number, number, number] }>();
   private cityLayers: Layer[] = [];
   private cityKey = '';
@@ -270,6 +283,8 @@ export class HazeLayerController {
     this.particles.setActive(Math.min(n, this.budget.value), box);
     this.streakKey = '';
     this.buildStreaks();
+    // City labels are placed in screen space: re-place them for the new view.
+    this.viewSeq += 1;
     this.syncLoop();
     if (!this.raf) this.render();
   };
@@ -287,12 +302,24 @@ export class HazeLayerController {
     if (!this.raf) this.render();
   };
 
-  /** Animate only when particles are on, some grid is in view, and the map is visible on screen. */
-  private animating(): boolean {
+  /** Particles move only when they are on, some grid is in view, and motion is allowed. */
+  private particlesOn(): boolean {
     const i = this.input;
-    return Boolean(
-      !this.destroyed && i && i.visible.particles && this.slice && this.box && this.particles.capacity > 0 && !this.reduced && !this.hidden && this.onScreen,
-    );
+    return Boolean(i && i.visible.particles && this.slice && this.box && this.particles.capacity > 0 && !this.reduced);
+  }
+
+  /** The worst city's pulse runs while the cities are shown and motion is allowed. */
+  private pulsing(): boolean {
+    return Boolean(this.input?.visible.cities && this.worst && !this.reduced);
+  }
+
+  private fading(): boolean {
+    return this.prevHaze !== null && performance.now() - this.fadeStart < HAZE_FADE_MS;
+  }
+
+  /** Animate (particles, the pulse, a haze cross-fade) only while the map is visible on screen. */
+  private animating(): boolean {
+    return Boolean(!this.destroyed && this.input && !this.hidden && this.onScreen && (this.particlesOn() || this.pulsing() || this.fading()));
   }
 
   private syncLoop(): void {
@@ -311,18 +338,22 @@ export class HazeLayerController {
 
   private readonly frame = (t: number): void => {
     this.raf = 0;
-    if (!this.animating() || !this.slice || !this.box) return;
+    if (!this.animating()) return;
+    const moving = this.particlesOn() && this.slice !== null && this.box !== null;
     // Raw rAF interval feeds the adaptive budget; it sees real jank, not our 30 fps cap.
-    if (this.lastRawT) {
+    if (moving && this.lastRawT && this.box) {
       const want = Math.min(this.areaCount, this.budget.record(t - this.lastRawT));
       if (want !== this.particles.count) this.particles.setActive(want, this.box);
     }
     this.lastRawT = t;
+    if (this.prevHaze && !this.fading()) this.prevHaze = null;
     if (this.limiter.shouldRender(t)) {
       const dt = this.lastT ? Math.min(0.1, Math.max(0, (t - this.lastT) / 1000)) : 1 / PARTICLE_FPS;
       this.lastT = t;
-      const degPerPx = 360 / (512 * 2 ** this.map.getZoom());
-      this.particles.step(this.slice, this.box, degPerPx, PX_PER_S_PER_MS * dt);
+      if (moving && this.slice && this.box) {
+        const degPerPx = 360 / (512 * 2 ** this.map.getZoom());
+        this.particles.step(this.slice, this.box, degPerPx, PX_PER_S_PER_MS * dt);
+      }
       this.render();
       this.fpsCount += 1;
       if (t - this.fpsT >= 1000) {
@@ -346,11 +377,21 @@ export class HazeLayerController {
     const aq = i?.airQuality ?? null;
     if (!i || !aq || !i.visible.haze) {
       this.hazeLayer = null;
+      this.hazeImg = null;
+      this.prevHaze = null;
       this.hazeKey = '';
       return;
     }
     const key = `${aq.retrievedAt}|${i.timeISO}|${i.dark ? 'd' : 'l'}`;
     if (key === this.hazeKey && this.hazeLayer) return;
+    // A new forecast hour fades in over the last one (same run and theme only; instant when reduced).
+    const sameRun = this.hazeKey.split('|')[0] === aq.retrievedAt && this.hazeKey.endsWith(i.dark ? 'd' : 'l');
+    if (this.hazeImg && sameRun && !this.reduced) {
+      this.prevHaze = this.hazeImg;
+      this.fadeStart = performance.now();
+    } else {
+      this.prevHaze = null;
+    }
     this.hazeKey = key;
     let img = this.hazeCache.get(key);
     if (!img) {
@@ -363,6 +404,7 @@ export class HazeLayerController {
       if (this.hazeCache.size > 60) this.hazeCache.clear();
       this.hazeCache.set(key, img);
     }
+    this.hazeImg = { image: img.canvas, bounds: img.bounds };
     this.hazeLayer = new BitmapLayer({
       id: 'haze-pm25-modelled',
       image: img.canvas,
@@ -388,12 +430,16 @@ export class HazeLayerController {
     }
     const zoomed = this.map.getZoom() >= LABEL_ZOOM;
     const nea = i.neaHaze ?? null;
-    const key = [i.airQuality.retrievedAt, i.timeISO, i.dark, zoomed, this.hoveredId, i.selectedCityId, nea?.observedAt, nea?.dataMode].join('|');
+    const key = [i.airQuality.retrievedAt, i.timeISO, i.dark, zoomed, this.viewSeq, this.hoveredId, i.selectedCityId, nea?.observedAt, nea?.dataMode].join('|');
     if (key === this.cityKey) return;
     this.cityKey = key;
     const dark = i.dark;
     const pal = paletteOf(i);
     const data = this.cityData();
+    // HazeView-style circles: radius grows with the square root of PM2.5 (6 to 26 px), a little larger in focus.
+    const radius = (d: HazeCity) => cityRadiusPx(d.pm25) * (d.kind === 'fire-area' ? 0.85 : 1) + (d.id === i.selectedCityId || d.id === this.hoveredId ? 2 : 0);
+    const worst = worstId(data);
+    const worstCity = worst ? (data.find((d) => d.id === worst) ?? null) : null;
     const bandRgb = (d: HazeCity): Rgb => {
       const b = pm25Band(d.pm25);
       return b ? hexRgb(b.color) : [150, 150, 150];
@@ -411,8 +457,19 @@ export class HazeLayerController {
       this.buildCities();
       if (!this.raf) this.render();
     };
-    const showLabel = (d: HazeCity) => zoomed || focus(d);
-    const labelled = data.filter(showLabel);
+    this.worst = worstCity ? { id: worstCity.id, lon: worstCity.lon, lat: worstCity.lat, r: radius(worstCity), rgb: bandRgb(worstCity) } : null;
+    // Every circle carries its value; names are added where they fit (worst first, no overlaps).
+    const { width: vw, height: vh } = this.map.getContainer().getBoundingClientRect();
+    const placed = placeCityLabels(
+      data.map((d) => {
+        const pt = this.map.project([d.lon, d.lat]);
+        return { id: d.id, x: pt.x, y: pt.y, r: radius(d), name: shortCityName(d.name), value: valueText(d.pm25), priority: Number.isFinite(d.pm25) ? d.pm25 : -1, force: focus(d) };
+      }),
+      { charPx: 7.2, heightPx: 16, gapPx: 6, viewport: { w: vw, h: vh } },
+    );
+    const labelOf = new Map(placed.map((l) => [l.id, l]));
+    const labelled = data.filter((d) => labelOf.has(d.id));
+    const showLabel = (d: HazeCity) => zoomed || focus(d) || labelOf.get(d.id)?.kind === 'full';
     const sg = data.find((d) => d.id === SINGAPORE_ID);
     const psiValues = nea ? Object.values(nea.psi24h).filter((v) => Number.isFinite(v)) : [];
     const psiMax = psiValues.length ? Math.max(...psiValues) : null;
@@ -434,10 +491,14 @@ export class HazeLayerController {
           getIcon: () => 'glow',
           getPosition: (d) => [d.lon, d.lat],
           sizeUnits: 'pixels',
-          getSize: (d) => (focus(d) ? 44 : d.kind === 'fire-area' ? 28 : 34),
+          // The sprite's visible glow reaches about a third of its size: about 3.4 radii keeps it hugging the circle.
+          getSize: (d) => radius(d) * 3.4,
           getColor: (d) => [...bandRgb(d), focus(d) ? pal.city.glowAlpha.focus : pal.city.glowAlpha.rest],
           parameters: pal.city.glowBlend === 'additive' ? ADDITIVE : undefined,
-          updateTriggers: { getColor: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId, dark], getSize: [this.hoveredId, i.selectedCityId] },
+          updateTriggers: {
+            getColor: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId, dark],
+            getSize: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId],
+          },
         }),
       );
     }
@@ -449,13 +510,13 @@ export class HazeLayerController {
           data: [sg],
           getPosition: (d) => [d.lon, d.lat],
           radiusUnits: 'pixels',
-          getRadius: 11,
+          getRadius: (d) => radius(d) + 4,
           filled: false,
           stroked: true,
           lineWidthUnits: 'pixels',
           getLineWidth: 2,
           getLineColor: pal.city.neaRing,
-          updateTriggers: { getLineColor: [dark] },
+          updateTriggers: { getLineColor: [dark], getRadius: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId] },
         }),
       );
     }
@@ -466,25 +527,27 @@ export class HazeLayerController {
         pickable: true,
         getPosition: (d) => [d.lon, d.lat],
         radiusUnits: 'pixels',
-        getRadius: (d) => (focus(d) ? 7.5 : d.kind === 'fire-area' ? 4.5 : 5.5),
+        getRadius: radius,
         filled: true,
         stroked: true,
         lineWidthUnits: 'pixels',
-        // Light map: a 1.5 px ink outline carries the edge (pale band fills are < 3:1 on white).
-        getLineWidth: (d) => (d.kind === 'fire-area' ? 2 : dark ? 1 : 1.5),
+        // Light map: an ink outline carries the edge (pale band fills are < 3:1 on white). Dark: a dark rim, as HazeView.
+        getLineWidth: (d) => (d.kind === 'fire-area' ? 2 : focus(d) ? 2.5 : dark ? 2 : 1.5),
         getFillColor: (d) => [...bandRgb(d), 255],
         getLineColor: (d) => (d.kind === 'fire-area' ? pal.city.fireAreaOutline : cityBandStyle(pal, d.pm25).outline),
         updateTriggers: {
           getFillColor: [i.timeISO, i.airQuality.retrievedAt],
           getLineColor: [dark, i.timeISO],
-          getLineWidth: [dark],
-          getRadius: [this.hoveredId, i.selectedCityId],
+          getLineWidth: [dark, this.hoveredId, i.selectedCityId],
+          getRadius: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId],
         },
         onClick,
         onHover,
       }),
     );
-    const labelText = (d: HazeCity) => `${d.name}${d.kind === 'fire-area' ? ' · fire-prone area' : ''}\nPM2.5 ${Math.round(d.pm25)} µg/m³ (modelled)`;
+    // "Palangka Raya  719" right of the circle (the value alone where the name would collide). Modelled
+    // values: the scrubber and every card say MODELLED; the circle label stays short, as on HazeView.
+    const labelText = (d: HazeCity) => labelOf.get(d.id)?.text ?? valueText(d.pm25);
     if (labelled.length) {
       // Labels with an SDF halo in both themes: cream on a dark halo, ink on a white halo (>= 4.5:1 on any
       // map colour under the halo; mapPalette `label`).
@@ -500,13 +563,17 @@ export class HazeLayerController {
           outlineColor: pal.label.halo,
           getPosition: (d) => [d.lon, d.lat],
           getText: labelText,
-          getSize: 12.5,
-          lineHeight: 1.2,
-          getTextAnchor: 'middle',
-          getAlignmentBaseline: 'bottom',
-          getPixelOffset: [0, -11],
+          getSize: (d) => (focus(d) || d.id === worst ? 13.5 : 12.5),
+          getTextAnchor: 'start',
+          getAlignmentBaseline: 'center',
+          getPixelOffset: (d) => [radius(d) + 6, 0],
           getColor: pal.label.text,
-          updateTriggers: { getText: [i.timeISO], getColor: [dark] },
+          updateTriggers: {
+            getText: [i.timeISO, this.viewSeq, this.hoveredId, i.selectedCityId],
+            getColor: [dark],
+            getSize: [i.timeISO, this.hoveredId, i.selectedCityId],
+            getPixelOffset: [i.timeISO, this.hoveredId, i.selectedCityId],
+          },
         }),
       );
     }
@@ -523,7 +590,7 @@ export class HazeLayerController {
           getSize: 11.5,
           getTextAnchor: 'middle',
           getAlignmentBaseline: 'top',
-          getPixelOffset: [0, 14],
+          getPixelOffset: (d) => [0, radius(d) + 8],
           getColor: pal.city.neaChip.text,
           background: true,
           getBackgroundColor: pal.city.neaChip.bg,
@@ -561,35 +628,92 @@ export class HazeLayerController {
     });
   }
 
-  private particleLayer(): Layer | null {
+  private particleLayers(): Layer[] {
     const i = this.input;
-    if (!i || !i.visible.particles || this.reduced || !this.slice || this.particles.count === 0) return null;
+    if (!i || !i.visible.particles || this.reduced || !this.slice || this.particles.count === 0) return [];
     const pp = paletteOf(i).particles;
     const rgb: Rgb = pp.color;
     // Alternate two same-size buffer sets: deck.gl re-uploads an external buffer only when its reference
     // changes, and a constant size avoids reallocating GPU buffers every frame.
     this.segFlip ^= 1;
     const buf = this.segBufs[this.segFlip];
-    if (!buf) return null;
+    if (!buf) return [];
     const drawTrail = trailForZoom(this.map.getZoom(), TRAIL);
     const visible = this.particles.segments(buf, rgb, pp.alpha, SEG_ORIGIN, drawTrail);
-    if (visible === 0) return null;
-    return new LineLayer({
-      id: 'haze-wind-particles',
+    if (visible === 0) return [];
+    const data = {
+      length: this.particles.count * drawTrail,
+      attributes: {
+        getSourcePosition: { value: buf.from, size: 2 },
+        getTargetPosition: { value: buf.to, size: 2 },
+        getColor: { value: buf.color, size: 4, normalized: true },
+      },
+    } as never;
+    const common = {
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT_OFFSETS,
-      coordinateOrigin: [SEG_ORIGIN[0], SEG_ORIGIN[1], 0],
-      data: {
-        length: this.particles.count * drawTrail,
-        attributes: {
-          getSourcePosition: { value: buf.from, size: 2 },
-          getTargetPosition: { value: buf.to, size: 2 },
-          getColor: { value: buf.color, size: 4, normalized: true },
-        },
-      } as never,
-      widthUnits: 'pixels',
-      getWidth: pp.width,
+      coordinateOrigin: [SEG_ORIGIN[0], SEG_ORIGIN[1], 0] as [number, number, number],
+      data,
+      widthUnits: 'pixels' as const,
       parameters: pp.blend === 'additive' ? ADDITIVE : undefined,
       pickable: false,
+    };
+    // Two passes over the same buffers: a wide faint glow under a crisp core trail (HazeView's flow).
+    return [
+      new LineLayer({ ...common, id: 'haze-wind-particles-glow', getWidth: pp.width * TRAIL_GLOW.width, opacity: TRAIL_GLOW.opacity }),
+      new LineLayer({ ...common, id: 'haze-wind-particles', getWidth: pp.width }),
+    ];
+  }
+
+  /** The haze image(s): the new hour fading in over the previous one. */
+  private hazeLayers(): Layer[] {
+    if (!this.hazeImg) return [];
+    const f = this.prevHaze ? Math.min(1, (performance.now() - this.fadeStart) / HAZE_FADE_MS) : 1;
+    const out: Layer[] = [];
+    if (this.prevHaze && f < 1) {
+      out.push(
+        new BitmapLayer({
+          id: 'haze-pm25-modelled-prev',
+          image: this.prevHaze.image,
+          bounds: this.prevHaze.bounds,
+          opacity: 1 - f,
+          pickable: false,
+          textureParameters: { minFilter: 'linear', magFilter: 'linear' },
+        }),
+      );
+    }
+    out.push(
+      f >= 1 && this.hazeLayer
+        ? this.hazeLayer
+        : new BitmapLayer({
+            id: 'haze-pm25-modelled',
+            image: this.hazeImg.image,
+            bounds: this.hazeImg.bounds,
+            opacity: f,
+            pickable: false,
+            textureParameters: { minFilter: 'linear', magFilter: 'linear' },
+          }),
+    );
+    return out;
+  }
+
+  /** A slow ring that grows out of the worst city and fades (HazeView's pulse); off under reduced motion. */
+  private pulseLayer(): Layer | null {
+    const w = this.worst;
+    if (!w || !this.pulsing()) return null;
+    const ring = pulseRing(w.r, performance.now());
+    return new ScatterplotLayer<{ p: [number, number] }>({
+      id: 'haze-worst-pulse',
+      data: [{ p: [w.lon, w.lat] }],
+      getPosition: (d) => d.p,
+      radiusUnits: 'pixels',
+      getRadius: ring.radius,
+      filled: false,
+      stroked: true,
+      lineWidthUnits: 'pixels',
+      getLineWidth: 2,
+      getLineColor: [...w.rgb, ring.alpha],
+      pickable: false,
+      updateTriggers: { getRadius: [ring.radius], getLineColor: [ring.alpha, w.rgb.join(',')] },
     });
   }
 
@@ -597,11 +721,10 @@ export class HazeLayerController {
     if (this.destroyed) return;
     // Labels depend on zoom; rebuild cheaply when the threshold is crossed (key-guarded).
     this.buildCities();
-    const layers: Layer[] = [];
-    if (this.hazeLayer) layers.push(this.hazeLayer);
-    const p = this.particleLayer();
-    if (p) layers.push(p);
+    const layers: Layer[] = [...this.hazeLayers(), ...this.particleLayers()];
     if (this.streakLayer) layers.push(this.streakLayer);
+    const pulse = this.pulseLayer();
+    if (pulse) layers.push(pulse);
     layers.push(...this.cityLayers);
     this.overlay.setProps({ layers });
   }
