@@ -171,6 +171,36 @@ describe('sanitiseAiBriefText', () => {
     expect(out).toContain('Tracking.');
   });
 
+  it('keeps a citation-led line that quotes an official evacuation instruction verbatim', () => {
+    // The instruction is BMKG InaTEWS text as relayed in data/warnings-snapshot.json.
+    const instruction =
+      'Pemerintah Propinsi/Kab/Kota yang berada pada status "Awas" diharap memperhatikan dan segera mengarahkan ' +
+      'masyarakat untuk melakukan evakuasi menyeluruh';
+    const line = `[W1]: BMKG InaTEWS, HISTORICAL, issued 2026-08-15 07:31 UTC, in force as relayed: "${instruction}".`;
+    const model = ['What the data shows', '- One thermal record [E1].', 'Official warnings in the brief', line, 'Gaps and caveats', '- Snapshot data.'].join(
+      '\n',
+    );
+    const out = sanitiseAiBriefText(model, { allowedUrls, allowedCitations });
+    expect(out).toContain(`\nOfficial warnings in the brief\n${line}\nGaps and caveats`);
+    expect(out).toContain(instruction);
+
+    // Other citation-led lines survive too, even when they carry a URL (the URL alone is dropped).
+    const more = sanitiseAiBriefText('[E1]: FIRMS VIIRS hotspot, 3 km from the summit.\n  [W1]: see https://evil.example/x for details', {
+      allowedUrls,
+      allowedCitations,
+    });
+    expect(more).toBe(`${AI_BRIEF_ALL_CLEAR_LINE}\n[E1]: FIRMS VIIRS hotspot, 3 km from the summit.\n  [W1]: see [link removed] for details`);
+  });
+
+  it('still strips real reference-link definitions, and only those', () => {
+    const out = sanitiseAiBriefText(
+      ['Text one.', '[1]: https://evil.example/a', '  [ref]: <HTTPS://evil.example/b> "title"', '[note]: not a link, kept as text', 'Text two.'].join('\n'),
+      { allowedUrls, allowedCitations },
+    );
+    expect(out).toBe(`${AI_BRIEF_ALL_CLEAR_LINE}\nText one.\n\n[note]: not a link, kept as text\nText two.`);
+    expect(out).not.toContain('evil.example');
+  });
+
   it('strips Markdown emphasis and headings and marks unknown citations', () => {
     const out = sanitiseAiBriefText('## What the data shows\n**One** thermal record [E1] [E9].\n* item [W1]', { allowedUrls, allowedCitations });
     expect(out).toBe(`${AI_BRIEF_ALL_CLEAR_LINE}\nWhat the data shows\nOne thermal record [E1] [unverified citation].\n- item [W1]`);
