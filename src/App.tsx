@@ -14,6 +14,7 @@ import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
 import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
 import type { OfficialWarningsResult } from './lib/warnings';
+import { mergeWarnings } from './lib/warningsView';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
@@ -332,8 +333,8 @@ export default function App() {
   }, [incident, nea]);
 
   // PTWC messages are official and relayed verbatim alongside the other feeds (its feed status carries the
-  // "for national authorities" note).
-  const allWarnings = useMemo(() => [...warningsResult.warnings, ...ptwc.warnings], [warningsResult.warnings, ptwc.warnings]);
+  // "for national authorities" note). Merged newest first, so a new PTWC message is inside the newest 20.
+  const allWarnings = useMemo(() => mergeWarnings(warningsResult.warnings, ptwc.warnings), [warningsResult.warnings, ptwc.warnings]);
   const allFeeds = useMemo(() => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }], [warningsResult.feeds, ptwc]);
   /** Warnings near the selected area, or every warning (APAC-wide) when nothing is selected. */
   const nearWarnings = useMemo<OfficialWarning[]>(() => {
