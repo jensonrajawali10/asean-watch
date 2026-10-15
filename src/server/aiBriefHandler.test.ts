@@ -3,10 +3,12 @@ import { AI_BRIEF_FALLBACK_BETA, BRIEF_TAG, WARNINGS_TAG } from '../lib/aiBrief'
 import {
   CACHE_TTL_MS,
   RATE_LIMIT_MAX,
+  TRUNCATED_CACHE_TTL_MS,
   buildFactsFor,
   clientIpFrom,
   handleAiBriefRequest,
   knownWatchIds,
+  rateLimitKey,
   resetAiBriefCache,
   resetAiBriefRateLimit,
 } from './aiBriefHandler';
@@ -36,6 +38,27 @@ function upstreamOk(text: string, extra: Record<string, unknown> = {}) {
     }),
   );
 }
+
+/** An upstream that holds every reply until release() is called, so requests overlap. */
+function gatedUpstream(reply: () => Response) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fetchImpl = vi.fn(async () => {
+    await gate;
+    return reply();
+  });
+  return { fetchImpl, release };
+}
+
+const okReply =
+  (text: string, extra: Record<string, unknown> = {}) =>
+  () =>
+    new Response(JSON.stringify({ model: 'claude-sonnet-5-5', stop_reason: 'end_turn', content: [{ type: 'text', text }], ...extra }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
 
 beforeEach(() => {
   resetAiBriefRateLimit();
@@ -243,5 +266,190 @@ describe('handleAiBriefRequest', () => {
     expect(clientIpFrom(new Headers({ 'x-forwarded-for': '198.51.100.1, 10.0.0.1' }))).toBe('198.51.100.1');
     expect(clientIpFrom(new Headers({ 'x-real-ip': '198.51.100.2', 'x-forwarded-for': '1.1.1.1' }))).toBe('198.51.100.2');
     expect(clientIpFrom(new Headers())).toBe('unknown');
+  });
+});
+
+describe('rateLimitKey', () => {
+  it('keys IPv4 by address and IPv4-mapped IPv6 by the IPv4 address', () => {
+    expect(rateLimitKey('203.0.113.9')).toBe('203.0.113.9');
+    expect(rateLimitKey(' 203.0.113.9 ')).toBe('203.0.113.9');
+    expect(rateLimitKey('203.0.113.9:51234')).toBe('203.0.113.9');
+    expect(rateLimitKey('::ffff:203.0.113.9')).toBe('203.0.113.9');
+    expect(rateLimitKey('::FFFF:203.0.113.9')).toBe('203.0.113.9');
+    expect(rateLimitKey('::ffff:cb00:7109')).toBe('203.0.113.9');
+    expect(rateLimitKey('0:0:0:0:0:ffff:cb00:7109')).toBe('203.0.113.9');
+    expect(rateLimitKey('[::ffff:203.0.113.9]:443')).toBe('203.0.113.9');
+  });
+
+  it('keys IPv6 by its /64 prefix, whatever the spelling', () => {
+    const key = '2001:db8:1:2::/64';
+    for (const ip of [
+      '2001:db8:1:2::1',
+      '2001:db8:1:2::abcd',
+      '2001:DB8:1:2:ffff:ffff:ffff:ffff',
+      '2001:0db8:0001:0002:0000:0000:0000:0001',
+      '[2001:db8:1:2::1]:8443',
+      '2001:db8:1:2::1%eth0',
+      '2001:db8:1:2:a:b:1.2.3.4',
+    ]) {
+      expect(rateLimitKey(ip), ip).toBe(key);
+    }
+    expect(rateLimitKey('2001:db8:1:3::1')).toBe('2001:db8:1:3::/64');
+    expect(rateLimitKey('::1')).toBe('0:0:0:0::/64');
+    expect(rateLimitKey('2001:db8::')).toBe('2001:db8:0:0::/64');
+  });
+
+  it('keys anything unparseable as given, trimmed, lower-cased and capped', () => {
+    expect(rateLimitKey('')).toBe('unknown');
+    expect(rateLimitKey('unknown')).toBe('unknown');
+    expect(rateLimitKey('local')).toBe('local');
+    expect(rateLimitKey('2001:db8::1::2')).toBe('2001:db8::1::2');
+    expect(rateLimitKey('1:2:3:4:5:6:7:8:9')).toBe('1:2:3:4:5:6:7:8:9');
+    expect(rateLimitKey('999.1.1.1')).toBe('999.1.1.1');
+    expect(rateLimitKey('X'.repeat(200))).toBe('x'.repeat(64));
+  });
+});
+
+describe('handleAiBriefRequest cost controls', () => {
+  const env = { ANTHROPIC_API_KEY: KEY };
+
+  it('rate-limits a whole IPv6 /64 as one client', async () => {
+    const fetchImpl = upstreamOk('What the data shows\nx');
+    let i = 0;
+    for (const [w, d] of DISTINCT) {
+      i += 1;
+      const res = await handleAiBriefRequest(validFor(w, d), { env, clientIp: `2001:db8:1:2::${i.toString(16)}`, fetchImpl, now: () => T0 });
+      expect(res.status).toBe(200);
+    }
+    const sameSlash64 = await handleAiBriefRequest(validFor('watch-sinabung', 0), { env, clientIp: '2001:db8:1:2:ffff::1', fetchImpl, now: () => T0 });
+    expect(sameSlash64.status).toBe(429);
+    const otherSlash64 = await handleAiBriefRequest(validFor('watch-sinabung', 0), { env, clientIp: '2001:db8:1:3::1', fetchImpl, now: () => T0 });
+    expect(otherSlash64.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledTimes(RATE_LIMIT_MAX + 1);
+  });
+
+  it('counts IPv4-mapped IPv6 and plain IPv4 for the same address together', async () => {
+    const fetchImpl = upstreamOk('What the data shows\nx');
+    for (const [w, d] of DISTINCT) {
+      expect((await handleAiBriefRequest(validFor(w, d), { env, clientIp: '::ffff:198.51.100.20', fetchImpl, now: () => T0 })).status).toBe(200);
+    }
+    expect((await handleAiBriefRequest(validFor('watch-sinabung', 0), { env, clientIp: '198.51.100.20', fetchImpl, now: () => T0 })).status).toBe(429);
+  });
+
+  it('makes one paid call for many simultaneous identical misses, and shares its answer', async () => {
+    const { fetchImpl, release } = gatedUpstream(okReply('What the data shows\nOne record [E1].'));
+    const pending = Array.from({ length: 20 }, (_, i) =>
+      handleAiBriefRequest(validFor('watch-merapi', 3), { env, clientIp: `198.51.100.${i + 1}`, fetchImpl, now: () => T0 }),
+    );
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    release();
+    const responses = await Promise.all(pending);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(responses.map((r) => r.status)).toEqual(new Array(20).fill(200));
+    const tags = responses.map((r) => r.headers.get('x-ai-brief-cache'));
+    expect(tags.filter((t) => t === 'miss')).toHaveLength(1);
+    expect(tags.filter((t) => t === 'shared')).toHaveLength(19);
+    const bodies = await Promise.all(responses.map((r) => r.json()));
+    for (const b of bodies) expect(b).toEqual(bodies[0]);
+    expect(bodies[0]).toMatchObject({ watchId: 'watch-merapi', dayIndex: 3, truncated: false });
+
+    // Once it lands, the answer is in the cache: no further call.
+    const after = await handleAiBriefRequest(validFor('watch-merapi', 3), { env, clientIp: '198.51.100.99', fetchImpl, now: () => T0 });
+    expect(after.headers.get('x-ai-brief-cache')).toBe('hit');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares a failed in-flight call too, then lets the next request try again', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { fetchImpl, release } = gatedUpstream(() => new Response('{"type":"error"}', { status: 529 }));
+    const pending = Array.from({ length: 5 }, (_, i) =>
+      handleAiBriefRequest(validFor('watch-semeru', 1), { env, clientIp: `203.0.113.${i + 1}`, fetchImpl, now: () => T0 }),
+    );
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    release();
+    const responses = await Promise.all(pending);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    for (const r of responses) {
+      expect(r.status).toBe(502);
+      expect(r.headers.get('cache-control')).toBe('no-store');
+      expect(await r.json()).toMatchObject({ error: 'upstream_error' });
+    }
+    // Failures are not cached and the in-flight entry is gone.
+    await handleAiBriefRequest(validFor('watch-semeru', 1), { env, clientIp: '203.0.113.50', fetchImpl, now: () => T0 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets a client whose quota is used up join a call already in flight, at no cost', async () => {
+    const busy = upstreamOk('What the data shows\nx');
+    for (const [w, d] of DISTINCT) {
+      expect((await handleAiBriefRequest(validFor(w, d), { env, clientIp: '192.0.2.7', fetchImpl: busy, now: () => T0 })).status).toBe(200);
+    }
+    const { fetchImpl, release } = gatedUpstream(okReply('What the data shows\nShared [E1].'));
+    const leader = handleAiBriefRequest(validFor('watch-sinabung', 4), { env, clientIp: '192.0.2.8', fetchImpl, now: () => T0 });
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
+    const follower = handleAiBriefRequest(validFor('watch-sinabung', 4), { env, clientIp: '192.0.2.7', fetchImpl, now: () => T0 });
+    release();
+    const [a, b] = await Promise.all([leader, follower]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(b.headers.get('x-ai-brief-cache')).toBe('shared');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    // A new paid call for that client is still refused.
+    expect((await handleAiBriefRequest(validFor('watch-sinabung', 5), { env, clientIp: '192.0.2.7', fetchImpl, now: () => T0 })).status).toBe(429);
+  });
+
+  it('serves repeats of a cut-off answer from a short cache, still marked truncated, then asks again', async () => {
+    let now = T0;
+    let stop = 'max_tokens';
+    const fetchImpl = vi.fn(async () => okReply('What the data shows\nPartial [E1]', { stop_reason: stop })());
+    const ask = (ip: string) => handleAiBriefRequest(validFor('watch-semeru', 6), { env, clientIp: ip, fetchImpl, now: () => now });
+    const shortCache = `public, s-maxage=${TRUNCATED_CACHE_TTL_MS / 1000}`;
+
+    const first = await ask('198.51.100.1');
+    expect(first.headers.get('x-ai-brief-cache')).toBe('miss');
+    expect(first.headers.get('cache-control')).toBe(shortCache);
+    expect(await first.json()).toMatchObject({ truncated: true });
+    for (let i = 2; i <= 5; i += 1) {
+      now = T0 + i * 60 * 1000;
+      const again = await ask(`198.51.100.${i}`);
+      expect(again.headers.get('x-ai-brief-cache')).toBe('hit');
+      expect(again.headers.get('cache-control')).toBe(shortCache);
+      expect(await again.json()).toMatchObject({ truncated: true });
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    // After the short window it asks again; a complete answer then gets the normal 6-hour cache.
+    expect(TRUNCATED_CACHE_TTL_MS).toBeLessThan(CACHE_TTL_MS);
+    now = T0 + TRUNCATED_CACHE_TTL_MS + 1;
+    stop = 'end_turn';
+    const fresh = await ask('198.51.100.6');
+    expect(fresh.headers.get('x-ai-brief-cache')).toBe('miss');
+    expect(fresh.headers.get('cache-control')).toBe(`public, s-maxage=${CACHE_TTL_MS / 1000}`);
+    expect(await fresh.json()).toMatchObject({ truncated: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    now += 60 * 60 * 1000;
+    const later = await ask('198.51.100.7');
+    expect(later.headers.get('x-ai-brief-cache')).toBe('hit');
+    expect(await later.json()).toMatchObject({ truncated: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('never puts the key in a response or a log line', async () => {
+    const logged: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    const responses = [
+      await handleAiBriefRequest(validFor('watch-merapi', 0), { env, clientIp: 'a', fetchImpl: vi.fn(async () => new Response('{}', { status: 401 })) }),
+      await handleAiBriefRequest(validFor('watch-merapi', 1), {
+        env,
+        clientIp: 'a',
+        fetchImpl: vi.fn(async () => Promise.reject(new TypeError(`bad header ${KEY}`))),
+      }),
+      await handleAiBriefRequest(validFor('watch-merapi', 2), { env, clientIp: 'a', fetchImpl: upstreamOk('What the data shows\nx') }),
+    ];
+    for (const r of responses) expect(await r.text()).not.toContain(KEY);
+    expect(logged.length).toBeGreaterThan(0);
+    for (const line of logged) expect(line).not.toContain(KEY);
   });
 });
