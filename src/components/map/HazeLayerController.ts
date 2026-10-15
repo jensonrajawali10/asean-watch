@@ -6,8 +6,9 @@
 //     overlay.setProps with a LineLayer of trail segments (binary attributes, no React per frame). Paused
 //     when the tab is hidden or the map is off-screen; static streak arrows under prefers-reduced-motion.
 //     Particle count scales with the visible grid area (CPU cap).
-//   - City markers coloured by EPA-style PM2.5 band (MODELLED), glowing on the dark map (CARTO Dark
-//     Matter) with cream halo labels, boxed labels on the light map; labels on hover or when zoomed in;
+//   - City markers coloured by EPA-style PM2.5 band (MODELLED), with a band-tinted glow and halo labels
+//     in both themes (colours from mapPalette.ts: cream on the dark map, ink outlines and white halos on
+//     the light map); labels on hover or when zoomed in;
 //     Singapore also shows NEA MEASURED 24-h PSI with its LIVE/SNAPSHOT tag in a visibly different chip.
 // The overlay's container is placed directly above the map canvas (below MapLibre markers, popups and
 // controls, and below any overlay MapView adds as a control), so haze never tints MapView's markers.
@@ -27,6 +28,7 @@ import { WIND_GRID_SPEC, windSlice } from '../../lib/windField';
 import type { WindGrid, WindSlice } from '../../lib/windField';
 import { AdaptiveBudget, FrameLimiter, intersectBox, ParticleSystem, rasterisePm25, streakArrows, trailForZoom } from './hazeRender';
 import type { ParticleBox } from './hazeRender';
+import { cityBandStyle, getMapPalette } from './mapPalette';
 
 export type { AirQualityData };
 
@@ -97,9 +99,8 @@ const ADDITIVE = {
   blendAlphaSrcFactor: 'one',
   blendAlphaDstFactor: 'one-minus-src-alpha',
 } as const;
-/** Cream trails on the dark map; slate on the light map. */
-const PARTICLE_DARK: Rgb = [246, 239, 222];
-const PARTICLE_LIGHT: Rgb = [36, 48, 66];
+/** Overlay colours for the input's theme (mapPalette): cream trails on the dark map, slate ink on the light map. */
+const paletteOf = (i: HazeLayerInput) => getMapPalette(i.dark);
 
 const GLOW_PX = 64;
 let glowUrl: string | null = null;
@@ -391,6 +392,7 @@ export class HazeLayerController {
     if (key === this.cityKey) return;
     this.cityKey = key;
     const dark = i.dark;
+    const pal = paletteOf(i);
     const data = this.cityData();
     const bandRgb = (d: HazeCity): Rgb => {
       const b = pm25Band(d.pm25);
@@ -420,8 +422,9 @@ export class HazeLayerController {
         : null;
     const font = "'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif";
     const layers: Layer[] = [];
-    if (dark) {
-      // Soft glow under each dot: a radial-gradient sprite tinted by band, blended additively.
+    {
+      // Soft glow under each dot: a radial-gradient sprite tinted by band; additive on the dark map, a
+      // normally blended band-tinted aura on the light map (additive glows vanish on white).
       layers.push(
         new IconLayer<HazeCity>({
           id: 'haze-city-glow',
@@ -432,9 +435,9 @@ export class HazeLayerController {
           getPosition: (d) => [d.lon, d.lat],
           sizeUnits: 'pixels',
           getSize: (d) => (focus(d) ? 44 : d.kind === 'fire-area' ? 28 : 34),
-          getColor: (d) => [...bandRgb(d), focus(d) ? 230 : 170],
-          parameters: ADDITIVE,
-          updateTriggers: { getColor: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId], getSize: [this.hoveredId, i.selectedCityId] },
+          getColor: (d) => [...bandRgb(d), focus(d) ? pal.city.glowAlpha.focus : pal.city.glowAlpha.rest],
+          parameters: pal.city.glowBlend === 'additive' ? ADDITIVE : undefined,
+          updateTriggers: { getColor: [i.timeISO, i.airQuality.retrievedAt, this.hoveredId, i.selectedCityId, dark], getSize: [this.hoveredId, i.selectedCityId] },
         }),
       );
     }
@@ -451,7 +454,7 @@ export class HazeLayerController {
           stroked: true,
           lineWidthUnits: 'pixels',
           getLineWidth: 2,
-          getLineColor: dark ? [255, 210, 122, 255] : [20, 26, 34, 255],
+          getLineColor: pal.city.neaRing,
           updateTriggers: { getLineColor: [dark] },
         }),
       );
@@ -467,18 +470,24 @@ export class HazeLayerController {
         filled: true,
         stroked: true,
         lineWidthUnits: 'pixels',
-        getLineWidth: (d) => (d.kind === 'fire-area' ? 2 : 1),
+        // Light map: a 1.5 px ink outline carries the edge (pale band fills are < 3:1 on white).
+        getLineWidth: (d) => (d.kind === 'fire-area' ? 2 : dark ? 1 : 1.5),
         getFillColor: (d) => [...bandRgb(d), 255],
-        getLineColor: (d) =>
-          d.kind === 'fire-area' ? (dark ? [255, 176, 96, 255] : [110, 52, 18, 255]) : dark ? [10, 12, 16, 230] : [255, 255, 255, 255],
-        updateTriggers: { getFillColor: [i.timeISO, i.airQuality.retrievedAt], getLineColor: [dark], getRadius: [this.hoveredId, i.selectedCityId] },
+        getLineColor: (d) => (d.kind === 'fire-area' ? pal.city.fireAreaOutline : cityBandStyle(pal, d.pm25).outline),
+        updateTriggers: {
+          getFillColor: [i.timeISO, i.airQuality.retrievedAt],
+          getLineColor: [dark, i.timeISO],
+          getLineWidth: [dark],
+          getRadius: [this.hoveredId, i.selectedCityId],
+        },
         onClick,
         onHover,
       }),
     );
     const labelText = (d: HazeCity) => `${d.name}${d.kind === 'fire-area' ? ' · fire-prone area' : ''}\nPM2.5 ${Math.round(d.pm25)} µg/m³ (modelled)`;
-    if (labelled.length && dark) {
-      // Cream labels with a dark SDF halo (≥ 4.5:1 on any map colour under the halo).
+    if (labelled.length) {
+      // Labels with an SDF halo in both themes: cream on a dark halo, ink on a white halo (>= 4.5:1 on any
+      // map colour under the halo; mapPalette `label`).
       layers.push(
         new TextLayer<HazeCity>({
           id: 'haze-city-labels',
@@ -487,8 +496,8 @@ export class HazeLayerController {
           fontFamily: font,
           fontWeight: 600,
           fontSettings: { sdf: true, fontSize: 64, buffer: 6, radius: 16 },
-          outlineWidth: 0.32,
-          outlineColor: [8, 10, 14, 235],
+          outlineWidth: pal.label.haloWidth,
+          outlineColor: pal.label.halo,
           getPosition: (d) => [d.lon, d.lat],
           getText: labelText,
           getSize: 12.5,
@@ -496,32 +505,8 @@ export class HazeLayerController {
           getTextAnchor: 'middle',
           getAlignmentBaseline: 'bottom',
           getPixelOffset: [0, -11],
-          getColor: [243, 234, 216, 255],
-          updateTriggers: { getText: [i.timeISO] },
-        }),
-      );
-    } else if (labelled.length) {
-      layers.push(
-        new TextLayer<HazeCity>({
-          id: 'haze-city-labels',
-          data: labelled,
-          characterSet: 'auto',
-          fontFamily: font,
-          fontWeight: 600,
-          getPosition: (d) => [d.lon, d.lat],
-          getText: labelText,
-          getSize: 12,
-          lineHeight: 1.25,
-          getTextAnchor: 'middle',
-          getAlignmentBaseline: 'bottom',
-          getPixelOffset: [0, -12],
-          getColor: [20, 26, 34, 255],
-          background: true,
-          getBackgroundColor: [255, 255, 255, 240],
-          getBorderColor: [127, 138, 152, 255],
-          getBorderWidth: 1,
-          backgroundPadding: [5, 3],
-          updateTriggers: { getText: [i.timeISO] },
+          getColor: pal.label.text,
+          updateTriggers: { getText: [i.timeISO], getColor: [dark] },
         }),
       );
     }
@@ -539,9 +524,9 @@ export class HazeLayerController {
           getTextAnchor: 'middle',
           getAlignmentBaseline: 'top',
           getPixelOffset: [0, 14],
-          getColor: dark ? [20, 26, 34, 255] : [255, 210, 122, 255],
+          getColor: pal.city.neaChip.text,
           background: true,
-          getBackgroundColor: dark ? [255, 210, 122, 245] : [20, 26, 34, 242],
+          getBackgroundColor: pal.city.neaChip.bg,
           backgroundPadding: [5, 3],
           updateTriggers: { getText: [neaText], getColor: [dark], getBackgroundColor: [dark] },
         }),
@@ -571,7 +556,7 @@ export class HazeLayerController {
       getWidth: 1.4,
       jointRounded: true,
       capRounded: true,
-      getColor: i.dark ? [...PARTICLE_DARK, 170] : [...PARTICLE_LIGHT, 170],
+      getColor: [...paletteOf(i).particles.color, Math.round(paletteOf(i).particles.streakAlpha * 255)],
       updateTriggers: { getColor: [i.dark] },
     });
   }
@@ -579,14 +564,15 @@ export class HazeLayerController {
   private particleLayer(): Layer | null {
     const i = this.input;
     if (!i || !i.visible.particles || this.reduced || !this.slice || this.particles.count === 0) return null;
-    const rgb: Rgb = i.dark ? PARTICLE_DARK : PARTICLE_LIGHT;
+    const pp = paletteOf(i).particles;
+    const rgb: Rgb = pp.color;
     // Alternate two same-size buffer sets: deck.gl re-uploads an external buffer only when its reference
     // changes, and a constant size avoids reallocating GPU buffers every frame.
     this.segFlip ^= 1;
     const buf = this.segBufs[this.segFlip];
     if (!buf) return null;
     const drawTrail = trailForZoom(this.map.getZoom(), TRAIL);
-    const visible = this.particles.segments(buf, rgb, i.dark ? 0.5 : 0.62, SEG_ORIGIN, drawTrail);
+    const visible = this.particles.segments(buf, rgb, pp.alpha, SEG_ORIGIN, drawTrail);
     if (visible === 0) return null;
     return new LineLayer({
       id: 'haze-wind-particles',
@@ -601,8 +587,8 @@ export class HazeLayerController {
         },
       } as never,
       widthUnits: 'pixels',
-      getWidth: i.dark ? 1.1 : 1.3,
-      parameters: i.dark ? ADDITIVE : undefined,
+      getWidth: pp.width,
+      parameters: pp.blend === 'additive' ? ADDITIVE : undefined,
       pickable: false,
     });
   }

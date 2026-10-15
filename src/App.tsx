@@ -1,7 +1,11 @@
-// ASEAN Watch app shell. App is the single owner of the selected watch area, the replay index, the
-// generated brief and the inspected object; everything else is derived from them, the real-data
-// snapshot loaded once below, and the two context feeds (NEA Singapore, official warnings) loaded
-// once after mount. Every watch area replays over the same seven UTC days of the snapshot.
+// ASEAN Watch app shell (docs/UX_V3.md). Two modes, one map:
+//   - Map mode: the full-bleed map, a floating top bar (brand, live headline, alerts pill), six layer chips
+//     and one forecast scrubber at the bottom, and one small card for whatever is selected.
+//   - Analyst workspace: a drawer opened from the left taskbar, dense on purpose, one section at a time.
+// App is the single owner of the selection (one thing on the map), the open workspace section (both in the
+// URL hash), the layer toggles, the forecast hour, the seven-day evidence replay, the generated brief and
+// the inspected record or warning. Everything else is derived from those, the real-data snapshot loaded
+// once below, and the live feeds loaded once after mount.
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
@@ -16,6 +20,7 @@ import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warnings
 import type { OfficialWarningsResult } from './lib/warnings';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
+import type { MapHotspot } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
 import { loadAshWind } from './lib/ashDrift';
 import type { AshWindData } from './lib/ashDrift';
@@ -26,26 +31,38 @@ import type { FloodModelResult } from './lib/floodModel';
 import { loadPtwc, loadPtwcSnapshot } from './lib/ptwc';
 import type { PtwcResult } from './lib/ptwc';
 import type { WindGrid, WindLoadResult } from './lib/windField';
-import { loadAirQuality } from './lib/airQuality';
+import { loadAirQuality, placePm25At } from './lib/airQuality';
 import type { AirQualityData } from './lib/airQuality';
+import { loadSeaLevelStations } from './lib/seaLevel';
 import { useHazeHour } from './components/map/useHazeHour';
 import { computeTrajectories, hazeSourcesFromFixtures, sampleWind } from './lib/transport';
 import AppHeader from './components/AppHeader';
-import ReplayBar from './components/ReplayBar';
-import IncidentQueue from './components/IncidentQueue';
-import IncidentDetail, { IncidentExtras } from './components/IncidentDetail';
-import EvidenceTimeline from './components/EvidenceTimeline';
 import RecordInspector from './components/RecordInspector';
-import BriefPanel from './components/BriefPanel';
 import type { GeneratedBrief } from './components/BriefPanel';
 import DataCheckNotice from './components/DataCheckNotice';
-import NeaContextCard from './components/NeaContextCard';
-import OfficialWarningsPanel, { WarningInspector, feedForWarning, gaugeForWarning } from './components/OfficialWarnings';
+import { WarningInspector, feedForWarning, gaugeForWarning } from './components/OfficialWarnings';
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNearSingapore } from './components/format';
+import Taskbar, { taskbarButtonId } from './components/shell/Taskbar';
+import WorkspaceDrawer from './components/shell/WorkspaceDrawer';
+import { buildHash, parseHash, sameSelection, selToHash, selectionFromSel } from './components/shell/workspace';
+import type { MapSelection, SectionId } from './components/shell/workspace';
+import { alertsPill } from './components/shell/alerts';
+import { headlineSentence } from './components/shell/headline';
+import { DEFAULT_LAYERS } from './components/map/layerCatalog';
+import type { LayerKey, MapLayerState } from './components/map/layerCatalog';
+import { officialVolcanoLevel } from './components/map/volcanoLevels';
+import type { OfficialVolcanoLevel } from './components/map/volcanoLevels';
+import MapCards from './components/map/MapCards';
+import VolcanoesSection from './components/analyst/VolcanoesSection';
+import WarningsSection from './components/analyst/WarningsSection';
+import WaterSection from './components/analyst/WaterSection';
+import LayersSection from './components/analyst/LayersSection';
+import { FiresInterim, HazeInterim, ReportInterim, SituationInterim, SourcesInterim, fireCounts } from './components/analyst/InterimSections';
 import './App.css';
+import './components/shell/shell.css';
 
-/** MapLibre + deck.gl are large: the map loads as its own chunk so the panels paint first. */
+/** MapLibre + deck.gl are large: the map loads as its own chunk so the shell paints first. */
 const MapView = lazy(() => import('./components/map/MapView'));
 
 // ---------------------------------------------------------------------------
@@ -76,28 +93,31 @@ const INCIDENTS: Incident[] = Array.isArray(FIXTURES.incidents) ? FIXTURES.incid
 /** The shared replay days (oldest first); every watch area replays over them. */
 const STEPS: ReplayStep[] = Array.isArray(FIXTURES.replaySteps) ? FIXTURES.replaySteps : [];
 const FIRST_STEP = STEPS[0]?.index ?? 0;
+/** The replay opens on the newest day (audit fix 3): the state a reader expects is today's. */
+const LAST_STEP = STEPS[STEPS.length - 1]?.index ?? 0;
 const PLAY_INTERVAL_MS = 1500;
 /** Official warnings within this distance of a watch area are listed next to it. */
 const NEAR_KM = 150;
-/** The watch area the overview offers to open first. */
 const FIRST_INCIDENT: Incident | null = INCIDENTS[0] ?? null;
 
 const DATA_AS_OF: string | null = FIXTURES.snapshot?.retrievedAt || null;
 const ATTRIBUTIONS: string[] = Array.isArray(FIXTURES.snapshot?.attributions) ? FIXTURES.snapshot.attributions : [];
-/** False while any loaded record or watch area is still a simulated fixture. */
-const ALL_REAL =
-  !FIXTURES.observations.some((o) => o.dataMode === 'simulated') && !INCIDENTS.some((i) => i.dataMode === 'simulated');
+const MEMBERS: Record<string, HotspotMember[]> = (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members ?? {};
 
 /**
- * Short place names for the map and the rail. A short watch title ("Anak Krakatau") is used as is;
- * a long one ("Riau peatland hotspots") is left to the map, which derives the place from the title.
+ * Short place names for the map and the lists. A short watch title ("Anak Krakatau") is used as is; a long
+ * one ("Riau peatland hotspots") falls back to the volcano name, else the map derives the place.
  */
+const HAZARD_WORDS = /\s+(?:volcanic|volcano|eruption|wildfires?|fires?|haze|smoke|hotspots?|peatlands?|floods?|flooding|observations?)\b.*$/i;
 const PLACE_NAMES: Record<string, string> = Object.fromEntries(
   INCIDENTS.flatMap((i) => {
     const title = i.title.trim();
     if (title && title.length <= 16) return [[i.id, title]];
     const volcano = findVolcano(FIXTURES.volcanoes, i.volcanoId);
-    return volcano?.name?.trim() ? [[i.id, volcano.name.trim()]] : [];
+    if (volcano?.name?.trim()) return [[i.id, volcano.name.trim()]];
+    // "Riau peatland hotspots" → "Riau".
+    const stripped = title.replace(HAZARD_WORDS, '').trim();
+    return stripped && stripped !== title ? [[i.id, stripped]] : [];
   }),
 );
 
@@ -134,13 +154,40 @@ const RULES_BY_WATCH: Record<string, string[]> = (() => {
   return out;
 })();
 
-/** Bundled official-warning snapshot, so the rail renders before any network reply (never throws). */
+/** Bundled official-warning snapshot, so the lists render before any network reply (never throws). */
 const WARNINGS_SNAPSHOT: OfficialWarningsResult = (() => {
   try {
     return loadWarningsSnapshot();
   } catch (err) {
     console.error('Official warnings snapshot could not be read:', err);
     return { warnings: [], feeds: [], gauges: [] };
+  }
+})();
+
+/** Hotspots per watch area from the bundled FIRMS snapshot (interim Fires data until the fires module lands). */
+const FIRE_COUNTS = (() => {
+  try {
+    return fireCounts(FIXTURES);
+  } catch (err) {
+    console.error('Fire counts could not be derived:', err);
+    return [];
+  }
+})();
+
+/** Every snapshot hotspot behind every watch's thermal records over the seven days (the Fires chip's interim layer). */
+const ALL_HOTSPOTS: MapHotspot[] = (() => {
+  try {
+    return INCIDENTS.flatMap((i) => hotspotsUpToDay(FIXTURES.observations, MEMBERS, i.id, LAST_STEP));
+  } catch {
+    return [];
+  }
+})();
+
+const TIDE: { stations: ReturnType<typeof loadSeaLevelStations>['stations']; listRetrievedAt: string | null } = (() => {
+  try {
+    return loadSeaLevelStations();
+  } catch {
+    return { stations: [], listRetrievedAt: null };
   }
 })();
 
@@ -158,7 +205,7 @@ function nearestTime(times: string[], now: number): string {
   return best;
 }
 
-/** Modelled wind arrows and 48 h haze paths for the map; null when the wind field is unavailable. */
+/** Modelled wind arrows and 48 h haze paths; null when the wind field is unavailable. */
 function buildTransport(result: WindLoadResult | null): HazeTransportView | null {
   const grid = result?.grid;
   if (!result || result.status === 'unavailable' || !grid || grid.times.length === 0) return null;
@@ -200,14 +247,7 @@ function reviewFor(incident: Incident, replayIndex: number): ReviewResult | null
   }
 }
 
-/** Individual hotspots behind a grouped thermal record, when the snapshot publishes them. */
-function membersFor(observationId: string): HotspotMember[] {
-  const members = (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members;
-  const list = members?.[observationId];
-  return Array.isArray(list) ? list : [];
-}
-
-/** Records per replay day for one watch area (for the timeline cells). */
+/** Records per replay day for one watch area (for the day cells). */
 function countsByStep(incidentId: string): Record<number, number> {
   const out: Record<number, number> = {};
   for (const o of FIXTURES.observations) {
@@ -217,64 +257,111 @@ function countsByStep(incidentId: string): Record<number, number> {
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Optional URL hash preselection: #incident=<id>
-
-function readHashIncident(): string | null {
-  const raw = window.location.hash.replace(/^#/, '');
-  if (!raw) return null;
-  const id = new URLSearchParams(raw).get('incident');
-  return id && id.trim() ? id.trim() : null;
+/** "Thu 16 Oct 00:00 UTC". */
+function hourLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })} ${iso.slice(11, 16)} UTC`;
 }
 
-function writeHashIncident(id: string | null): void {
-  const url = id ? `#incident=${encodeURIComponent(id)}` : `${window.location.pathname}${window.location.search}`;
+/** "14 Oct 07:19 UTC". */
+function runLabel(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })} ${d.toISOString().slice(11, 16)} UTC`;
+}
+
+const cleanPlace = (name: string) => name.replace(/\s*\(.*\)\s*$/, '');
+
+// ---------------------------------------------------------------------------
+// URL hash: #ws=<section>&sel=<selection>
+
+function readHash() {
+  const h = parseHash(window.location.hash);
+  return { ws: h.ws, selection: selectionFromSel(h.sel) };
+}
+
+function writeHash(ws: SectionId | null, selection: MapSelection | null): void {
+  const hash = buildHash({ ws, sel: selToHash(selection) });
+  const url = hash || `${window.location.pathname}${window.location.search}`;
+  if (hash === window.location.hash || (!hash && !window.location.hash)) return;
   try {
     window.history.replaceState(window.history.state, '', url);
   } catch {
-    /* history can be unavailable in sandboxed previews; selection still works */
+    /* history can be unavailable in sandboxed previews; state still works */
   }
 }
 
 // ---------------------------------------------------------------------------
 
 export default function App() {
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(readHashIncident);
-  const [replayIndex, setReplayIndex] = useState<number>(FIRST_STEP);
+  const initial = useRef(readHash()).current;
+  const [selection, setSelectionState] = useState<MapSelection | null>(initial.selection);
+  const [ws, setWs] = useState<SectionId | null>(initial.ws);
+  /** The last section open, so the Workspace button reopens it. */
+  const lastWs = useRef<SectionId>(initial.ws ?? 'situation');
+  const [layers, setLayers] = useState<MapLayerState>(DEFAULT_LAYERS);
+  const [replayIndex, setReplayIndex] = useState<number>(LAST_STEP);
   const [brief, setBrief] = useState<GeneratedBrief | null>(null);
   const [playing, setPlaying] = useState(false);
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [inspectedWarningId, setInspectedWarningId] = useState<string | null>(null);
+  /** Volcano watch id whose "If it erupted now" ash scenario plays on the map; null when none. */
+  const [scenarioId, setScenarioId] = useState<string | null>(null);
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
   /** The snapshot until the live load settles. */
   const [warningsResult, setWarningsResult] = useState<OfficialWarningsResult>(WARNINGS_SNAPSHOT);
   const [warningsLoading, setWarningsLoading] = useState(true);
-  /** Modelled wind field (Open-Meteo, live or snapshot); null until loaded. */
+  /** Modelled 10 m wind field (Open-Meteo, live or snapshot) for the haze paths; null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
-  /** Modelled haze layer inputs (CAMS PM2.5 and 925 hPa wind via Open-Meteo, live or snapshot); null until loaded. */
+  /** Modelled haze inputs (CAMS PM2.5 and 925 hPa wind via Open-Meteo, live or snapshot); null until loaded. */
   const [airQuality, setAirQuality] = useState<AirQualityData | null>(null);
   const [wind925, setWind925] = useState<WindGrid | null>(null);
-  /** Modelled pressure-level winds at the volcano summits for the ash-drift lines (live or snapshot); null until loaded. */
+  /** Modelled pressure-level winds at the volcano summits (live or snapshot); null until loaded. */
   const [ashWind, setAshWind] = useState<AshWindData | null>(null);
-  /** Connector layers: bundled snapshot first (HISTORICAL), replaced by the live load when it settles. */
+  /** Connector layers: bundled snapshot first, replaced by the live load when it settles. */
   const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
   const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
   const [ptwc, setPtwc] = useState<PtwcResult>(() => loadPtwcSnapshot());
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
-  /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
-  /** Each side renders one toggle at a time (header button or slim tab); after a toggle, focus follows it. */
-  const leftToggleRef = useRef<HTMLButtonElement>(null);
-  const rightToggleRef = useRef<HTMLButtonElement>(null);
-  const pendingFocus = useRef<'left' | 'right' | null>(null);
-  /** Narrow layout only: a pick from the list panel scrolls the review (stacked under the list) into view. */
-  const pendingReveal = useRef(false);
+
+  // --- Selection and workspace (both mirrored in the hash) -----------------------------------
+
+  const setSelection = useCallback((next: MapSelection | null) => {
+    setSelectionState((prev) => (sameSelection(prev, next) ? prev : next));
+  }, []);
+
+  useEffect(() => {
+    writeHash(ws, selection);
+  }, [ws, selection]);
+
+  const openSection = useCallback((section: SectionId) => {
+    lastWs.current = section;
+    setWs(section);
+  }, []);
+  const closeWorkspace = useCallback(() => setWs(null), []);
+
+  // Typed or pasted links select the same way the map and the lists do.
+  useEffect(() => {
+    const onHashChange = () => {
+      const h = readHash();
+      setSelectionState(h.selection);
+      setWs(h.ws);
+      if (h.ws) lastWs.current = h.ws;
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const patchLayers = useCallback((patch: Partial<MapLayerState>) => setLayers((prev) => ({ ...prev, ...patch })), []);
 
   // --- Derived state -------------------------------------------------------
+
+  const selectedIncidentId = selection?.kind === 'area' ? selection.id : null;
+  const selectedCityId = selection?.kind === 'city' ? selection.id : null;
 
   const reviews = useMemo(() => {
     const out: Record<string, ReviewResult> = {};
@@ -296,17 +383,6 @@ export default function App() {
     [selectedIncidentId],
   );
   const missingId = selectedIncidentId !== null && incident === null ? selectedIncidentId : null;
-  /** FIRMS detections behind the selected watch's thermal records, up to the replay day (map dots). */
-  const hotspots = useMemo(
-    () =>
-      hotspotsUpToDay(
-        FIXTURES.observations,
-        (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members,
-        incident?.id ?? null,
-        replayIndex,
-      ),
-    [incident, replayIndex],
-  );
   const review = incident ? (reviews[incident.id] ?? null) : null;
   const volcano = useMemo(() => (incident ? findVolcano(FIXTURES.volcanoes, incident.volcanoId) : null), [incident]);
   const replayEnabled = incident !== null && STEPS.length > 0;
@@ -334,8 +410,11 @@ export default function App() {
   // PTWC messages are official and relayed verbatim alongside the other feeds (its feed status carries the
   // "for national authorities" note).
   const allWarnings = useMemo(() => [...warningsResult.warnings, ...ptwc.warnings], [warningsResult.warnings, ptwc.warnings]);
-  const allFeeds = useMemo(() => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }], [warningsResult.feeds, ptwc]);
-  /** Warnings near the selected area, or every warning (APAC-wide) when nothing is selected. */
+  const allFeeds = useMemo(
+    () => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }],
+    [warningsResult.feeds, ptwc],
+  );
+  /** Warnings near the selected area, or every warning when nothing is selected. */
   const nearWarnings = useMemo<OfficialWarning[]>(() => {
     if (!incident) return allWarnings;
     try {
@@ -360,15 +439,51 @@ export default function App() {
     () => (inspectedWarning ? gaugeForWarning(inspectedWarning, warningsResult.gauges) : null),
     [inspectedWarning, warningsResult.gauges],
   );
-  const inspectedFeed = useMemo(
-    () => (inspectedWarning ? feedForWarning(inspectedWarning, allFeeds) : null),
-    [inspectedWarning, allFeeds],
-  );
+  const inspectedFeed = useMemo(() => (inspectedWarning ? feedForWarning(inspectedWarning, allFeeds) : null), [inspectedWarning, allFeeds]);
+
+  /** Official activity level per volcano watch (verbatim, from the official feeds near the summit). */
+  const levels = useMemo<Record<string, OfficialVolcanoLevel | null>>(() => {
+    const out: Record<string, OfficialVolcanoLevel | null> = {};
+    for (const i of INCIDENTS) {
+      if (i.hazard !== 'volcano') continue;
+      try {
+        const v = findVolcano(FIXTURES.volcanoes, i.volcanoId);
+        out[i.id] = officialVolcanoLevel(v ? { lat: v.lat, lon: v.lon } : i, allWarnings);
+      } catch {
+        out[i.id] = null;
+      }
+    }
+    return out;
+  }, [allWarnings]);
+
+  const alerts = useMemo(() => alertsPill(allWarnings), [allWarnings]);
+
+  /** The worst modelled city at the scrubber's hour, and the 925 hPa wind there (for the headline). */
+  const worst = useMemo(() => {
+    if (!airQuality || !hazeHour.timeISO) return null;
+    let best: { name: string; pm25: number; lat: number; lon: number } | null = null;
+    for (const p of airQuality.places) {
+      const v = placePm25At(airQuality, p, hazeHour.timeISO);
+      if (Number.isFinite(v) && (!best || v > best.pm25)) best = { name: cleanPlace(p.name), pm25: v, lat: p.lat, lon: p.lon };
+    }
+    return best;
+  }, [airQuality, hazeHour.timeISO]);
+  const headline = useMemo(() => {
+    const w = worst && wind925 ? sampleWind(wind925, worst.lat, worst.lon, hazeHour.timeISO) : null;
+    const speed = w ? Math.hypot(w.u, w.v) : null;
+    const toward = w && speed ? ((Math.atan2(w.u, w.v) * 180) / Math.PI + 360) % 360 : null;
+    return headlineSentence({
+      worst,
+      offsetH: hazeHour.steps.offsetsH[hazeHour.index] ?? 0,
+      snapshot: airQuality?.dataMode === 'historical',
+      windTowardDeg: toward,
+      windSpeedMs: speed,
+    });
+  }, [worst, wind925, hazeHour, airQuality]);
 
   /**
-   * The context a brief is built from: the NEA reading (when it applies), the nearby official warnings
-   * and every feed's status. A brief generated under a different key is stale (a Riau brief generated
-   * before NEA arrived would lack that section); the brief bar then asks for a fresh one.
+   * The context a brief is built from: the NEA reading (when it applies), the nearby official warnings and
+   * every feed's status. A brief generated under a different key is stale; the brief bar asks for a fresh one.
    */
   const contextKey = useMemo(
     () =>
@@ -382,17 +497,15 @@ export default function App() {
 
   // --- Actions -------------------------------------------------------------
 
-  const selectIncident = useCallback(
+  /** Select a watch area (map triangle, list row, card link); clears the brief and stops the replay. */
+  const selectArea = useCallback(
     (id: string | null) => {
-      if (id === selectedIncidentId) return;
-      setSelectedIncidentId(id);
+      setSelection(id === null ? null : { kind: 'area', id });
       setBrief(null);
       setPlaying(false);
       setInspectedId(null);
-      if (id !== null) setRightCollapsed(false);
-      writeHashIncident(id);
     },
-    [selectedIncidentId],
+    [setSelection],
   );
 
   const goToStep = (index: number) => {
@@ -412,10 +525,12 @@ export default function App() {
       setPlaying(false);
       return;
     }
-    const next = STEPS[stepPos + 1];
+    // From the last day, Play starts again at day 1.
+    const startPos = stepPos >= STEPS.length - 1 ? -1 : stepPos;
+    const next = STEPS[startPos + 1];
     if (!next) return;
-    goToStep(next.index); // advance at once, then every PLAY_INTERVAL_MS
-    setPlaying(stepPos + 2 < STEPS.length);
+    goToStep(next.index);
+    setPlaying(startPos + 2 < STEPS.length);
   };
 
   const reset = () => {
@@ -424,15 +539,20 @@ export default function App() {
     setBrief(null);
   };
 
+  const jumpToStep = (index: number) => {
+    setPlaying(false);
+    goToStep(index);
+  };
+
   const openInspector = (id: string) => {
     setPlaying(false);
     setInspectedId(id);
   };
 
-  const openWarning = (id: string) => {
+  const openWarning = useCallback((id: string) => {
     setPlaying(false);
     setInspectedWarningId(id);
-  };
+  }, []);
 
   const generateBrief = () => {
     if (!incident || !review) return;
@@ -455,7 +575,7 @@ export default function App() {
     try {
       text = buildBriefing(input);
     } catch (err) {
-      text = `ASEAN WATCH - INCIDENT BRIEF\n\nThe brief could not be generated: ${err instanceof Error ? err.message : String(err)}\n`;
+      text = `ASEAN Watch summary\n\nThe summary could not be generated: ${err instanceof Error ? err.message : String(err)}\n`;
     }
     setBrief({ text, seq: briefSeq.current, contextKey });
   };
@@ -465,9 +585,37 @@ export default function App() {
     downloadText(brief.text, briefingFilename(incident, currentStep));
   };
 
+  /** "Open in workspace →" from a card: the section for that kind of thing, keeping the selection. */
+  const openFromCard = useCallback(
+    (section: SectionId) => {
+      openSection(section);
+    },
+    [openSection],
+  );
+
+  /** "Play ash scenario": the plume follows the one timeline, so the scrubber goes back to now and plays. */
+  const playScenario = useCallback(
+    (watchId: string) => {
+      if (scenarioId === watchId) {
+        setScenarioId(null);
+        hazeHour.setPlaying(false);
+        return;
+      }
+      setScenarioId(watchId);
+      setLayers((prev) => (prev.watch ? prev : { ...prev, watch: true }));
+      hazeHour.setPlaying(true, hazeHour.steps.nowIndex);
+    },
+    [scenarioId, hazeHour],
+  );
+
+  // A scenario belongs to the volcano it was started on.
+  useEffect(() => {
+    if (scenarioId && selectedIncidentId !== scenarioId) setScenarioId(null);
+  }, [scenarioId, selectedIncidentId]);
+
   // --- Effects -------------------------------------------------------------
 
-  // Play: advance one step every PLAY_INTERVAL_MS and stop at the last step.
+  // Replay Play: advance one day every PLAY_INTERVAL_MS and stop at the last day.
   useEffect(() => {
     if (!playing) return;
     const timer = window.setTimeout(() => {
@@ -484,34 +632,28 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [playing, replayIndex]);
 
-  // Hash changes (typed or pasted links) select the same way the map and rail do.
+  // Esc outside the drawer and with no dialog open: close the card first, then the workspace.
   useEffect(() => {
-    const onHashChange = () => {
-      setSelectedIncidentId(readHashIncident());
-      setRightCollapsed(false);
-      setBrief(null);
-      setPlaying(false);
-      setInspectedId(null);
-    };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
-
-  // Esc with no dialog open clears the selection (back to the APAC-wide view). Dialogs handle their own Esc.
-  useEffect(() => {
-    if (selectedIncidentId === null) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (document.querySelector('dialog[open]')) return;
       const target = e.target instanceof Element ? e.target : null;
-      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      // Esc closes the review panel; focus moves to the list panel instead of falling to the page.
-      if (document.activeElement?.closest('.float-right')) pendingFocus.current = 'left';
-      selectIncident(null);
+      if (target?.closest('input, textarea, select, [contenteditable="true"], .ws-drawer')) return;
+      if (selection) {
+        e.preventDefault();
+        setSelection(null);
+        return;
+      }
+      if (ws) {
+        e.preventDefault();
+        const back = document.getElementById(taskbarButtonId(ws));
+        setWs(null);
+        back?.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedIncidentId, selectIncident]);
+  }, [selection, ws, setSelection]);
 
   // NEA Singapore context: loaded once; loadNeaContext never throws and falls back to a snapshot.
   useEffect(() => {
@@ -528,52 +670,18 @@ export default function App() {
     };
   }, []);
 
-  // Modelled wind field: loaded once after first render; never throws, never blocks the UI.
+  // Model and connector feeds: loaded once after first render; every loader falls back to its snapshot.
   useEffect(() => {
     let alive = true;
-    loadWindField()
-      .then((result) => {
-        if (alive) setWindResult(result);
-      })
-      .catch((err: unknown) => console.error('Wind field could not be loaded:', err));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Modelled haze inputs for the map's haze layer: loaded once; both loaders never throw and fall back to snapshots.
-  useEffect(() => {
-    let alive = true;
-    loadAirQuality()
-      .then((result) => {
-        if (alive) setAirQuality(result.data);
-      })
-      .catch((err: unknown) => console.error('Air quality could not be loaded:', err));
-    loadWindField({ level: PARTICLE_WIND_LEVEL })
-      .then((result) => {
-        if (alive) setWind925(result.grid);
-      })
-      .catch((err: unknown) => console.error('925 hPa wind could not be loaded:', err));
-    loadAshWind()
-      .then((result) => {
-        if (alive) setAshWind(result.data);
-      })
-      .catch((err: unknown) => console.error('Ash-drift winds could not be loaded:', err));
-    loadQuakes()
-      .then((result) => {
-        if (alive) setQuakes(result);
-      })
-      .catch((err: unknown) => console.error('Earthquakes could not be loaded:', err));
-    loadFloodModel()
-      .then((result) => {
-        if (alive) setRiverFlow(result);
-      })
-      .catch((err: unknown) => console.error('River flow could not be loaded:', err));
-    loadPtwc()
-      .then((result) => {
-        if (alive) setPtwc(result);
-      })
-      .catch((err: unknown) => console.error('PTWC could not be loaded:', err));
+    const settle = <T,>(p: Promise<T>, apply: (v: T) => void, what: string) =>
+      p.then((v) => alive && apply(v)).catch((err: unknown) => console.error(`${what} could not be loaded:`, err));
+    settle(loadWindField(), setWindResult, 'Wind field');
+    settle(loadAirQuality(), (r) => setAirQuality(r.data), 'Air quality');
+    settle(loadWindField({ level: PARTICLE_WIND_LEVEL }), (r) => setWind925(r.grid), '925 hPa wind');
+    settle(loadAshWind(), (r) => setAshWind(r.data), 'Ash-drift winds');
+    settle(loadQuakes(), setQuakes, 'Earthquakes');
+    settle(loadFloodModel(), setRiverFlow, 'River flow');
+    settle(loadPtwc(), setPtwc, 'PTWC');
     return () => {
       alive = false;
     };
@@ -597,69 +705,17 @@ export default function App() {
     };
   }, []);
 
-  // The state badge and the newest records sit at the top of the review column: show them after a change.
-  const reviewScrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    reviewScrollRef.current?.scrollTo({ top: 0 });
-  }, [replayIndex, selectedIncidentId]);
-
-  // After a collapse, expand or close, focus the control that replaced the one just used.
-  useEffect(() => {
-    const side = pendingFocus.current;
-    pendingFocus.current = null;
-    if (side === 'left') leftToggleRef.current?.focus();
-    if (side === 'right') rightToggleRef.current?.focus();
-  }, [leftCollapsed, rightCollapsed, selectedIncidentId]);
-
-  useEffect(() => {
-    if (!pendingReveal.current) return;
-    pendingReveal.current = false;
-    if (!window.matchMedia?.('(max-width: 899px)').matches) return;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    // After the map's own selection effects (which can move focus and cancel a smooth scroll).
-    const timer = window.setTimeout(() => {
-      document.querySelector('.float-right')?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
-    }, 60);
-    return () => window.clearTimeout(timer);
-  }, [selectedIncidentId]);
-
-  const selectFromList = (id: string) => {
-    pendingReveal.current = true;
-    selectIncident(id);
-  };
-
-  const toggleLeft = () => {
-    pendingFocus.current = 'left';
-    setLeftCollapsed((c) => !c);
-  };
-  const toggleRight = () => {
-    pendingFocus.current = 'right';
-    setRightCollapsed((c) => !c);
-  };
-  const closeReview = () => {
-    pendingFocus.current = 'left';
-    selectIncident(null);
-  };
-
   // --- Render --------------------------------------------------------------
 
   const firstName = FIRST_INCIDENT ? (PLACE_NAMES[FIRST_INCIDENT.id] ?? FIRST_INCIDENT.title) : null;
   const disabledNote =
-    STEPS.length === 0
-      ? 'No replay days are loaded.'
-      : incident
-        ? null
-        : `Select a watch area to replay the last ${STEPS.length} days.`;
-
-  const contextLabel =
-    incident && currentStep ? `${currentStep.label}, step ${stepPos + 1} of ${STEPS.length}` : incident ? 'all records' : null;
-
+    STEPS.length === 0 ? 'No replay days are loaded.' : incident ? null : `Pick an area to step through the last ${STEPS.length} days.`;
+  const contextLabel = incident && currentStep ? `${currentStep.label}, day ${stepPos + 1} of ${STEPS.length}` : incident ? 'all records' : null;
   const neaLoading = neaResult === null && incident !== null && isNearSingapore(incident.lat, incident.lon);
   const selectedName = incident ? (PLACE_NAMES[incident.id] ?? incident.title) : null;
-  /** The review panel floats in when a watch area is selected (or a #incident link names an unknown one). */
-  const showReview = incident !== null || missingId !== null;
+  const cityName = selectedCityId ? (airQuality?.places.find((p) => p.id === selectedCityId)?.name ?? null) : null;
 
-  /** Snapshot data acknowledgements: in the review panel, or the list panel while no review is open. */
+  /** Snapshot data acknowledgements (FIRMS, USGS, "Sumber data: BMKG"): in the Volcanoes and Sources sections. */
   const attribution =
     ATTRIBUTIONS.length > 0 ? (
       <div className="data-attribution">
@@ -677,280 +733,274 @@ export default function App() {
       </div>
     ) : null;
 
+  const briefProps =
+    incident !== null
+      ? {
+          incident,
+          contextLabel,
+          brief,
+          contextKey,
+          filename: briefingFilename(incident, currentStep),
+          onGenerate: generateBrief,
+          onDownload: downloadBrief,
+          dayIndex: currentStep?.index ?? null,
+        }
+      : null;
+
+  const layerUnavailable: Partial<Record<LayerKey, string>> = {
+    ...(airQuality ? {} : { haze: 'Waiting for the air-quality model.' }),
+    ...(wind925 ? {} : { particles: 'Waiting for the wind model.' }),
+    ...(transport ? {} : { transport: 'Waiting for the surface wind model.' }),
+    ...(incident?.hazard === 'volcano' ? {} : { rings: 'Shown when a volcano is selected.', ash: 'Shown when a volcano is selected.' }),
+  };
+
+  const connectors = [
+    { label: 'CAMS PM2.5 via Open-Meteo', kind: 'modelled', url: 'https://open-meteo.com/en/docs/air-quality-api', status: { status: airQuality ? (airQuality.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: airQuality?.retrievedAt ?? null, message: null } },
+    { label: `Wind ${wind925?.level ?? '925 hPa'} via Open-Meteo`, kind: 'modelled', url: 'https://open-meteo.com/', status: { status: wind925 ? (wind925.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: wind925?.retrievedAt ?? null, message: null } },
+    { label: 'Ash-drift winds (pressure levels) via Open-Meteo', kind: 'modelled', url: 'https://open-meteo.com/', status: { status: ashWind ? (ashWind.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: ashWind?.retrievedAt ?? null, message: null } },
+    ...quakes.statuses.map((s) => ({ label: s.sourceName, kind: 'measured', status: s })),
+    { label: riverFlow.status.sourceName, kind: 'modelled', url: 'https://open-meteo.com/en/docs/flood-api', status: riverFlow.status },
+    { label: 'NEA Singapore (wind, PSI)', kind: 'measured', url: 'https://data.gov.sg/', status: { status: nea ? (nea.dataMode === 'live' ? 'live' : 'snapshot') : 'loading', retrievedAt: nea?.retrievedAt ?? null, message: null } },
+  ];
+
+  let section: ReactNode = null;
+  switch (ws) {
+    case 'situation':
+      section = (
+        <SituationInterim
+          headline={headline}
+          airQuality={airQuality}
+          hazeHour={hazeHour}
+          warnings={allWarnings}
+          incidents={INCIDENTS}
+          placeNames={PLACE_NAMES}
+          levels={levels}
+          fires={FIRE_COUNTS}
+          onInspectWarning={openWarning}
+          onOpenVolcano={(id) => {
+            selectArea(id);
+            openSection('volcanoes');
+          }}
+        />
+      );
+      break;
+    case 'haze':
+      section = (
+        <HazeInterim
+          airQuality={airQuality}
+          hazeHour={hazeHour}
+          neaHaze={nea?.haze ?? null}
+          transportSummary={transport?.summary ?? null}
+          selectedCityId={selectedCityId}
+          onSelectCity={(id) => setSelection({ kind: 'city', id })}
+        />
+      );
+      break;
+    case 'fires':
+      section = <FiresInterim fires={FIRE_COUNTS} snapshotAt={DATA_AS_OF} onFlyTo={(id) => selectArea(id)} />;
+      break;
+    case 'volcanoes':
+      section = (
+        <VolcanoesSection
+          incidents={INCIDENTS}
+          reviews={reviews}
+          placeNames={PLACE_NAMES}
+          selectedId={incident?.id ?? null}
+          onSelect={selectArea}
+          onClearSelection={() => selectArea(null)}
+          incident={incident}
+          missingId={missingId}
+          review={review}
+          volcano={volcano}
+          firstIncident={FIRST_INCIDENT}
+          firstName={firstName}
+          onInspect={openInspector}
+          nearWarnings={nearWarnings}
+          onInspectWarning={openWarning}
+          references={incident ? REFERENCES[incident.id] : undefined}
+          watchRules={incident ? RULES_BY_WATCH[incident.id] : undefined}
+          nea={{ loading: neaLoading, context: nea, drift, fellBack: neaResult?.fellBack ?? false, error: neaResult?.error ?? null }}
+          replay={{
+            steps: STEPS,
+            index: replayIndex,
+            enabled: replayEnabled,
+            playing,
+            disabledNote,
+            counts: dayCounts,
+            visibleCount: review?.observationCount ?? null,
+            onNext: nextStep,
+            onTogglePlay: togglePlay,
+            onReset: reset,
+            onJump: jumpToStep,
+          }}
+          brief={{
+            contextLabel,
+            brief,
+            contextKey,
+            filename: incident ? briefingFilename(incident, currentStep) : null,
+            onGenerate: generateBrief,
+            onDownload: downloadBrief,
+            dayIndex: currentStep?.index ?? null,
+          }}
+          attribution={attribution}
+          dataAsOf={DATA_AS_OF}
+        />
+      );
+      break;
+    case 'warnings':
+      section = (
+        <WarningsSection
+          warnings={nearWarnings}
+          allWarnings={allWarnings}
+          gauges={warningsResult.gauges}
+          feeds={allFeeds}
+          nearName={selectedName}
+          elsewhere={elsewhereWarnings}
+          onShowAll={() => selectArea(null)}
+          loading={warningsLoading}
+          selectedWarningId={selection?.kind === 'warning' ? selection.id : inspectedWarningId}
+          onInspect={openWarning}
+        />
+      );
+      break;
+    case 'water':
+      section = (
+        <WaterSection
+          ptwc={ptwc}
+          warnings={allWarnings}
+          gauges={warningsResult.gauges}
+          tideStations={TIDE.stations}
+          tideListRetrievedAt={TIDE.listRetrievedAt}
+          riverFlow={riverFlow}
+          layers={layers}
+          onLayersChange={patchLayers}
+          onInspectWarning={openWarning}
+        />
+      );
+      break;
+    case 'report':
+      section = <ReportInterim brief={briefProps} headline={headline} onOpenVolcanoes={() => openSection('volcanoes')} />;
+      break;
+    case 'sources':
+      section = <SourcesInterim snapshotSources={FIXTURES.snapshot?.sources ?? []} snapshotAt={DATA_AS_OF} feeds={allFeeds} connectors={connectors} />;
+      break;
+    case 'layers':
+      section = <LayersSection layers={layers} onLayersChange={patchLayers} unavailable={layerUnavailable} />;
+      break;
+    default:
+      section = null;
+  }
+
+  const card = (
+    <MapCards
+      selection={selection}
+      onClose={() => setSelection(null)}
+      onOpenWorkspace={openFromCard}
+      airQuality={airQuality}
+      hazeHour={hazeHour}
+      wind925={wind925}
+      neaHaze={nea?.haze ?? null}
+      incidents={INCIDENTS}
+      volcanoes={FIXTURES.volcanoes}
+      placeNames={PLACE_NAMES}
+      levels={levels}
+      ashWind={ashWind}
+      scenarioId={scenarioId}
+      onPlayScenario={playScenario}
+      fires={FIRE_COUNTS}
+      warnings={allWarnings}
+      onInspectWarning={openWarning}
+    />
+  );
+
   const mapProps: MapViewProps = {
-    onClearSelection: () => selectIncident(null),
-    transport,
-    hotspots,
-    windGrid: wind925,
-    airQuality,
-    hazeHour,
-    hazeTimeISO: transport?.time ?? null,
     incidents: INCIDENTS,
-    selectedId: incident?.id ?? null,
     states,
-    onSelect: selectIncident,
     placeNames: PLACE_NAMES,
+    selection,
+    onSelect: setSelection,
+    layers,
+    onLayersChange: patchLayers,
+    onOpenLayers: () => openSection('layers'),
+    card: selection ? card : null,
+    levels,
     nea,
     drift,
     warnings: allWarnings,
     gauges: warningsResult.gauges,
-    selectedWarningId: inspectedWarningId,
-    onSelectWarning: openWarning,
+    transport,
+    hotspots: ALL_HOTSPOTS,
+    windGrid: wind925,
+    airQuality,
+    hazeHour,
     ashWind,
+    scenarioId,
     quakes,
     riverFlow: riverFlow.series,
   };
 
+  const freshness = airQuality
+    ? { mode: airQuality.dataMode === 'historical' ? ('SNAPSHOT' as const) : ('LIVE' as const), run: runLabel(airQuality.retrievedAt) }
+    : null;
+  const subtitle = selectedName ? `Selected: ${selectedName}` : cityName ? `Selected: ${cleanPlace(cityName)}` : undefined;
+
   return (
-    <div className="app">
-      <AppHeader dataAsOf={DATA_AS_OF} allReal={ALL_REAL} />
-
-      <main
-        className="workspace"
-        data-left={leftCollapsed ? 'collapsed' : 'open'}
-        data-right={showReview ? (rightCollapsed ? 'collapsed' : 'open') : 'none'}
-      >
-        {/* The map is the base layer and fills the workspace; the panels float over it. Map controls can
-            read --overlay-left / --overlay-right (set on .map-panel) to stay clear of the open panels. */}
-        <section className="map-panel" aria-label="Regional map">
-          <div className="map-frame">
-            <ErrorBoundary
-              resetKey={selectedIncidentId}
-              fallback={(message) => (
-                <div className="map-fallback" role="alert">
-                  <p>
-                    <strong>The map could not be drawn.</strong> Use the watch-area list instead.
-                  </p>
-                  <p className="muted small">{message}</p>
-                </div>
-              )}
-            >
-              <Suspense
-                fallback={
-                  <div className="map-fallback" role="status">
-                    <p>Loading the map…</p>
-                  </div>
-                }
-              >
-                <MapView {...mapProps} />
-              </Suspense>
-            </ErrorBoundary>
-          </div>
-        </section>
-
-        <aside
-          className="float-panel float-left"
-          data-collapsed={leftCollapsed || undefined}
-          aria-label="Watch areas and official warnings"
-        >
-          {leftCollapsed ? (
-            <button
-              ref={leftToggleRef}
-              type="button"
-              className="float-tab"
-              aria-expanded="false"
-              aria-controls="list-panel-body"
-              title="Show watch areas and official warnings"
-              onClick={toggleLeft}
-            >
-              <span className="float-tab-label">Watches · Warnings</span>
-            </button>
-          ) : (
-            <div className="float-head">
-              <span className="float-eyebrow" aria-hidden="true">
-                Watches · Warnings
-              </span>
-              <button
-                ref={leftToggleRef}
-                type="button"
-                className="float-btn"
-                aria-expanded="true"
-                aria-controls="list-panel-body"
-                title="Collapse panel"
-                onClick={toggleLeft}
-              >
-                <span aria-hidden="true">‹</span>
-                <span className="visually-hidden">Collapse watch areas and official warnings</span>
-              </button>
-            </div>
-          )}
-          <div id="list-panel-body" className="float-body rail" hidden={leftCollapsed}>
-            <IncidentQueue
-              incidents={INCIDENTS}
-              reviews={reviews}
-              selectedId={incident?.id ?? null}
-              scenarioIncidentId={null}
-              onSelect={selectFromList}
-              placeNames={PLACE_NAMES}
-              onClearSelection={() => selectIncident(null)}
-            />
-            <ErrorBoundary resetKey={selectedIncidentId} fallback={(message) => <PanelError message={message} />}>
-              <OfficialWarningsPanel
-                warnings={nearWarnings}
-                gauges={warningsResult.gauges}
-                feeds={allFeeds}
-                nearName={selectedName}
-                elsewhere={elsewhereWarnings}
-                onShowAll={() => selectIncident(null)}
-                loading={warningsLoading}
-                selectedWarningId={inspectedWarningId}
-                onInspect={openWarning}
-              />
-            </ErrorBoundary>
-            <DataCheckNotice issues={FIXTURES.issues} duplicatesIgnored={FIXTURES.duplicatesIgnored} loadError={LOAD_ERROR} />
-            {!showReview && attribution}
-          </div>
-        </aside>
-
-        {showReview ? (
-          <aside
-            className="float-panel float-right"
-            data-collapsed={rightCollapsed || undefined}
-            aria-label={selectedName ? `Review: ${selectedName}` : 'Review'}
-          >
-            {rightCollapsed ? (
-              <button
-                ref={rightToggleRef}
-                type="button"
-                className="float-tab"
-                aria-expanded="false"
-                aria-controls="review-panel-body"
-                title="Show the review"
-                onClick={toggleRight}
-              >
-                <span className="float-tab-label">Review{selectedName ? ` · ${selectedName}` : ''}</span>
-              </button>
-            ) : (
-              <div className="float-head">
-                <span className="float-eyebrow" aria-hidden="true">
-                  Review{selectedName ? ` · ${selectedName}` : ''}
-                </span>
-                <button
-                  ref={rightToggleRef}
-                  type="button"
-                  className="float-btn"
-                  aria-expanded="true"
-                  aria-controls="review-panel-body"
-                  title="Collapse panel"
-                  onClick={toggleRight}
-                >
-                  <span aria-hidden="true">›</span>
-                  <span className="visually-hidden">Collapse the review</span>
-                </button>
-                <button type="button" className="float-btn" title="Close (Esc)" onClick={closeReview}>
-                  <span aria-hidden="true">×</span>
-                  <span className="visually-hidden">Close the review</span>
-                </button>
+    <div className="app" data-drawer={ws ? 'open' : 'closed'} data-card={selection ? 'open' : 'closed'}>
+      <main className="map-panel" aria-label="Regional map">
+        <div className="map-frame">
+          <ErrorBoundary
+            resetKey={selectedIncidentId}
+            fallback={(message) => (
+              <div className="map-fallback" role="alert">
+                <p>
+                  <strong>The map could not be drawn.</strong> The workspace sections still work: use the taskbar on the left.
+                </p>
+                <p className="muted small">{message}</p>
               </div>
             )}
-            <div id="review-panel-body" className="float-body col-review" hidden={rightCollapsed}>
-              <div className="right-scroll" ref={reviewScrollRef}>
-                <ErrorBoundary
-                  resetKey={`${selectedIncidentId}|${replayIndex}`}
-                  fallback={(message) => <PanelError message={message} />}
-                >
-                  <IncidentDetail
-                    incident={incident}
-                    missingId={missingId}
-                    review={review}
-                    volcano={volcano}
-                    isScenario={replayEnabled}
-                    scenarioIncident={FIRST_INCIDENT}
-                    placeName={firstName ?? undefined}
-                    onSelect={selectIncident}
-                    onClearSelection={() => selectIncident(null)}
-                    onInspect={openInspector}
-                    officialNear={nearWarnings}
-                    onInspectWarning={openWarning}
-                    references={incident ? REFERENCES[incident.id] : undefined}
-                    watchRules={incident ? RULES_BY_WATCH[incident.id] : undefined}
-                    context={
-                      incident && (neaLoading || drift) ? (
-                        <NeaContextCard
-                          loading={neaLoading}
-                          nea={nea}
-                          drift={drift}
-                          fellBack={neaResult?.fellBack ?? false}
-                          error={neaResult?.error ?? null}
-                        />
-                      ) : null
-                    }
-                  />
-                </ErrorBoundary>
-                <ErrorBoundary
-                  resetKey={`${selectedIncidentId}|${replayIndex}`}
-                  fallback={(message) => <PanelError message={message} />}
-                >
-                  <EvidenceTimeline
-                    incident={incident}
-                    missingId={missingId}
-                    review={review}
-                    isScenario={replayEnabled}
-                    replayIndex={replayIndex}
-                    onInspect={openInspector}
-                  />
-                  <IncidentExtras incident={incident} review={review} />
-                </ErrorBoundary>
-                {attribution}
-              </div>
-              <BriefPanel
-                incident={incident}
-                contextLabel={contextLabel}
-                brief={brief}
-                contextKey={contextKey}
-                filename={incident ? briefingFilename(incident, currentStep) : null}
-                onGenerate={generateBrief}
-                onDownload={downloadBrief}
-                dayIndex={currentStep?.index ?? null}
-              />
-            </div>
-          </aside>
-        ) : (
-          <div className="float-hint">
-            <p>
-              Select a watch area on the map or in the list.
-              {FIRST_INCIDENT && (
-                <>
-                  {' '}
-                  <button type="button" className="link-button" onClick={() => selectFromList(FIRST_INCIDENT.id)}>
-                    Open {firstName ?? FIRST_INCIDENT.title}
-                  </button>
-                </>
-              )}
-            </p>
-            <p className="float-hint-note">
-              Official agency levels are relayed verbatim; our workflow state is not an alert level.
-            </p>
-          </div>
-        )}
+          >
+            <Suspense
+              fallback={
+                <div className="map-fallback" role="status">
+                  <p>Loading the map…</p>
+                </div>
+              }
+            >
+              <MapView {...mapProps} />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
       </main>
 
-      <ReplayBar
-        steps={STEPS}
-        replayIndex={replayIndex}
-        enabled={replayEnabled}
-        playing={playing}
-        disabledNote={disabledNote}
-        counts={dayCounts}
-        visibleCount={review?.observationCount ?? null}
-        onNext={nextStep}
-        onTogglePlay={togglePlay}
-        onReset={reset}
-      />
+      <AppHeader
+        headline={headline}
+        timeLabel={hazeHour.timeISO ? hourLabel(hazeHour.timeISO) : null}
+        timeISO={hazeHour.timeISO || null}
+        freshness={freshness}
+        alerts={alerts}
+        onAlerts={() => openSection('warnings')}
+        workspaceOpen={ws !== null}
+        onWorkspace={() => (ws ? closeWorkspace() : openSection(lastWs.current))}
+      >
+        <DataCheckNotice issues={FIXTURES.issues} duplicatesIgnored={FIXTURES.duplicatesIgnored} loadError={LOAD_ERROR} />
+      </AppHeader>
+
+      <Taskbar active={ws} onOpen={(s) => (ws === s ? closeWorkspace() : openSection(s))} onMap={closeWorkspace} alerts={alerts} />
+
+      <WorkspaceDrawer section={ws} onSelectSection={openSection} onClose={closeWorkspace} subtitle={subtitle}>
+        <ErrorBoundary resetKey={`${ws}|${selectedIncidentId}`} fallback={(message) => <PanelError message={message} />}>
+          {section}
+        </ErrorBoundary>
+      </WorkspaceDrawer>
 
       <RecordInspector
         item={inspected}
         incidentTitle={incident?.title ?? null}
         steps={STEPS}
-        members={inspected ? membersFor(inspected.observation.id) : []}
+        members={inspected ? (MEMBERS[inspected.observation.id] ?? []) : []}
         onClose={() => setInspectedId(null)}
       />
-      <WarningInspector
-        warning={inspectedWarning}
-        gauge={inspectedGauge}
-        feed={inspectedFeed}
-        onClose={() => setInspectedWarningId(null)}
-      />
+      <WarningInspector warning={inspectedWarning} gauge={inspectedGauge} feed={inspectedFeed} onClose={() => setInspectedWarningId(null)} />
     </div>
   );
 }
@@ -958,7 +1008,7 @@ export default function App() {
 function PanelError({ message }: { message: string }): ReactNode {
   return (
     <p className="empty panel-error" role="alert">
-      This part could not be shown ({message}). Try another watch area or Reset.
+      This part could not be shown ({message}). Try another section or reload the page.
     </p>
   );
 }

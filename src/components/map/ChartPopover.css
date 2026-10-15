@@ -1,0 +1,122 @@
+/* Tide-gauge and river-flow popovers (analyst layers). Tokens only; both themes follow index.css. */
+.city-popover {
+  position: absolute;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 300px;
+  max-width: calc(100% - 16px);
+  padding: 10px 12px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel-glass);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 18px;
+  box-shadow: var(--shadow-dialog);
+  cursor: default;
+}
+
+.city-popover p,
+.city-popover h3,
+.city-popover figure {
+  margin: 0;
+}
+
+.city-popover__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.city-popover__head h3 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.city-popover__close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px 0 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.city-popover__close:hover {
+  border-color: var(--border);
+}
+
+.city-popover button:focus-visible,
+.city-popover a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.city-popover__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 6px;
+}
+
+.city-popover__badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--mode-modelled-border);
+  border-radius: 999px;
+  background: var(--mode-modelled-bg);
+  color: var(--mode-modelled-fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.city-popover__note,
+.city-popover__time,
+.city-popover__prov {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.city-popover__spark {
+  margin: 6px 0 2px;
+}
+
+.city-popover__spark svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.city-popover__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.city-popover__axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.city-popover__tick {
+  fill: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}

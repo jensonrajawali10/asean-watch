@@ -1,21 +1,22 @@
-// Regional map on MapLibre GL JS + deck.gl. Drop-in replacement for RegionMap (same props, plus the
-// optional inputs the haze layer needs).
+// Map mode (docs/UX_V3.md section 2) on MapLibre GL JS + deck.gl. Calm on purpose: the map, six layer chips
+// and one forecast scrubber at the bottom, and one card slot for whatever is selected. Every other layer is
+// toggled from the workspace Layers section; App owns the toggles (layerCatalog.ts is the one list).
 //
-// - Basemap: CARTO Dark Matter by default (dark theme), OpenFreeMap positron as the "Light map" option
-//   for projectors, with 3D building extrusions from the vector tiles' building layer at zoom 15 and above. If the style does not load within 5 s (or its tiles all fail),
-//   a local style built from the bundled Natural Earth countries (data/region.geojson) takes over, so
-//   the map still draws with no network.
-// - Heavy geographic layers (distance rings, PSI haze shading, NEA wind arrow and drift cone, modelled
-//   wind arrows and haze paths, FIRMS hotspots) are deck.gl layers on one MapboxOverlay.
-// - Interactive markers and labels (watch areas, official warnings, gauges, ring and PSI labels) are
-//   ordinary React buttons and spans in an HTML overlay above the map. A map "move" listener writes
-//   each element's CSS transform directly, so panning and zooming never re-render React.
-// - The floating panels publish --overlay-left / --overlay-right on .map-panel; they become the map
-//   padding, so flyTo and fitBounds centre in the visible area, and the map's own controls shift clear.
-// - The modelled haze, wind particles and city markers belong to HazeLayerController (its own overlay);
-//   this component only constructs it after load, updates it and destroys it.
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
+// - Basemap per theme from basemap.ts (CARTO Dark Matter / Positron with light tweaks); a bundled Natural
+//   Earth style takes over when the network style fails, so the map still draws offline.
+// - Map overlay colours come from mapPalette.ts (getMapPalette(theme)); UI chrome uses the CSS tokens.
+// - Geographic layers (rings, ash drift, haze paths, hotspots, quakes, tide gauges, NEA context) are deck.gl
+//   layers on one MapboxOverlay. Teammates' layers plug in through `extraLayers` (fire heat grid) and
+//   `scenarioLayers` (the "If it erupted now" ash plume); until those land, interim layers draw the
+//   snapshot hotspots and a growing ash-drift plume.
+// - Interactive markers (volcano triangles ringed in the official level colour, official warning pins,
+//   gauges, river points) are React buttons in an HTML overlay; a "move" listener writes their transforms
+//   directly, so panning never re-renders React.
+// - The modelled haze, wind particles and city circles belong to HazeLayerController (its own overlay).
+// - The shell publishes --overlay-left / --overlay-right / --overlay-top on .map-panel (drawer, card, top
+//   bar); with the dock height they become the camera padding, so fly-to centres in the visible map.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 import { AttributionControl, Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl';
 import type { IControl, LngLatBoundsLike, MapSourceDataEvent } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
@@ -24,18 +25,10 @@ import { MapboxOverlay } from '@deck.gl/mapbox';
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { LayersList, PickingInfo } from '@deck.gl/core';
 import regionRaw from '../../../data/region.geojson?raw';
-import type {
-  DriftAssessment,
-  HazardType,
-  Incident,
-  NeaContext,
-  OfficialWarning,
-  ReviewLabel,
-  ReviewState,
-} from '../../types';
+import type { DriftAssessment, Incident, NeaContext, OfficialWarning, QuakeEvent, ReviewState, RiverDischargeSeries, SeaLevelStation } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
 import { bmkgLevelInstruction } from '../../lib/warnings';
-import { ashDriftTracks, compass16 } from '../../lib/ashDrift';
+import { ashDriftTracks } from '../../lib/ashDrift';
 import type { AshLevel, AshWindData, DriftTrack } from '../../lib/ashDrift';
 import { GEOBOUNDARIES_ATTRIBUTION, idnDistrictIndex, placeTsunamiAreas, selectTsunamiAreaWarnings } from '../../lib/tsunamiAreas';
 import type { WindGrid } from '../../lib/windField';
@@ -43,15 +36,23 @@ import { USGS_TSUNAMI_FLAG_NOTE } from '../../lib/quakesLive';
 import type { QuakesResult } from '../../lib/quakesLive';
 import { loadSeaLevelStations } from '../../lib/seaLevel';
 import { himawariIrLayer, trueColourLayer } from '../../lib/gibs';
-import type { QuakeEvent, RiverDischargeSeries, SeaLevelStation } from '../../types';
-import { QUAKE_DEPTH_RGB, isRecentQuake, quakeDepthBand, quakeRadiusPx, quakeTooltip, stackNotes } from './connectorRender';
-import { RiverFlowPopover, TideGaugePopover } from './ChartPopover';
 import { psiBand } from '../../lib/nea';
+import { PTWC_NATIONAL_AUTHORITIES_NOTE } from '../../lib/ptwc';
+import { isRecentQuake, quakeDepthBand, quakeRadiusPx, quakeTooltip } from './connectorRender';
+import { RiverFlowPopover, TideGaugePopover } from './ChartPopover';
 import { HAZE_ATTRIBUTION, HazeLayerController } from './HazeLayerController';
 import type { AirQualityData, HazeCity, HazeLayerInput } from './HazeLayerController';
 import HazeScrubber from './HazeScrubber';
-import CityPopover from './CityPopover';
 import type { HazeHour } from './useHazeHour';
+import { getMapPalette, rgbCss, volcanoLevelColour } from './mapPalette';
+import type { Rgb, Rgba } from './mapPalette';
+import { BASEMAP_BUILDING_SOURCES, basemapStyleFor, basemapStyleOptions, buildingPaint } from './basemap';
+import { LAYER_CATALOG, MAP_CHIPS } from './layerCatalog';
+import type { LayerKey, MapLayerState } from './layerCatalog';
+import type { OfficialVolcanoLevel } from './volcanoLevels';
+import type { MapSelection } from '../shell/workspace';
+import ErrorBoundary from '../ErrorBoundary';
+import { FireIcon, HazeIcon, LayersIcon, VolcanoIcon, WarningIcon } from '../shell/icons';
 import {
   arrowAngleDeg,
   buildOfflineStyle,
@@ -68,7 +69,6 @@ import {
   windArrowStride,
 } from './mapGeometry';
 import type { Bounds, LonLat, MapHotspot, RegionCollection } from './mapGeometry';
-import { PTWC_NATIONAL_AUTHORITIES_NOTE } from '../../lib/ptwc';
 import './MapView.css';
 
 export type { MapHotspot } from './mapGeometry';
@@ -88,68 +88,66 @@ export interface HazeTransportView {
   summary: string | null;
 }
 
+/** What a teammate's layer builder gets: the theme, the scrubber hour and a coarse zoom. */
+export interface MapLayerContext {
+  theme: 'dark' | 'light';
+  /** The scrubber's hour (ISO 8601 UTC), or '' before the forecast loads. */
+  timeISO: string;
+  /** Map zoom rounded to 0.5 (clustering thresholds). */
+  zoom: number;
+  selection: MapSelection | null;
+}
+
 export interface MapViewProps {
   incidents: Incident[];
-  selectedId: string | null;
-  /** Review state per incident id, for marker styling. */
-  states: Record<string, ReviewState>;
-  onSelect: (incidentId: string) => void;
-  /** NEA Singapore context (live or bundled snapshot): PSI haze shading and the wind arrow. */
-  nea?: NeaContext | null;
-  /** Drift assessment; when `drift.incidentId === selectedId` the map shows the illustrative drift cone. */
-  drift?: DriftAssessment | null;
-  /** Short place name per incident id for labels (e.g. "Merapi"); else derived from the title. */
+  /** Our workflow state per watch id (workspace material; only used for marker titles). */
+  states?: Record<string, ReviewState>;
+  /** Short place name per watch id (e.g. "Merapi"). */
   placeNames?: Record<string, string>;
+  selection: MapSelection | null;
+  onSelect: (selection: MapSelection | null) => void;
+  layers: MapLayerState;
+  onLayersChange: (patch: Partial<MapLayerState>) => void;
+  /** Opens the workspace Layers section (the "More layers" button). */
+  onOpenLayers?: () => void;
+  /** The card for the selection (from MapCards), shown in the card slot. */
+  card?: ReactNode;
+  /** Official activity level per volcano watch id (verbatim; the ring colour follows the issuer's scale). */
+  levels?: Record<string, OfficialVolcanoLevel | null>;
+  /** NEA Singapore context (live or bundled snapshot): PSI shading and the station wind arrow. */
+  nea?: NeaContext | null;
+  /** Drift assessment for the selected haze watch: the illustrative drift cone (NEA layer only). */
+  drift?: DriftAssessment | null;
   className?: string;
-  /** Official warnings relayed verbatim: diamonds (dashed when ended); aggregator estimates as hollow dashed circles. */
+  /** Official warnings relayed verbatim. Map mode draws the ones in force; ended ones stay in the workspace. */
   warnings?: OfficialWarning[] | null;
-  selectedWarningId?: string | null;
-  onSelectWarning?: (id: string) => void;
-  /** Water-level gauges, drawn only at or above the issuer's lowest threshold (or cited by a drawn warning). */
+  /** Water-level gauges at or above the issuer's lowest threshold (the Flood gauges layer). */
   gauges?: GaugeReading[] | null;
-  /** Clears the selection; the All APAC control calls it and returns to the regional view. */
-  onClearSelection?: () => void;
-  /** Modelled wind arrows and illustrative haze paths (Open-Meteo); null hides the layer. */
   transport?: HazeTransportView | null;
-  /** NASA FIRMS detections behind the selected watch's thermal records, up to the replay day. */
+  /** Snapshot FIRMS detections (interim Fires layer until the fires module lands). */
   hotspots?: MapHotspot[] | null;
-  /** Wind grid for the haze layer's particles (modelled). */
+  /** 925 hPa wind grid for the particles (modelled). */
   windGrid?: WindGrid | null;
-  /** Modelled air quality (CAMS via Open-Meteo) for the haze layer. */
   airQuality?: AirQualityData | null;
-  /** ISO 8601 UTC hour the haze layer shows when there is no forecast scrubber; defaults to the transport time. */
-  hazeTimeISO?: string | null;
-  /** Forecast hour state (useHazeHour, held by App). With `airQuality` it shows the haze scrubber. */
+  /** The one forecast hour (App). Drives haze, particles, city circles and the ash scenario. */
   hazeHour?: HazeHour | null;
-  /** Called when a haze-layer city marker is clicked, with its pixel position in the map container. */
-  onCityClick?: (city: HazeCity, at: { x: number; y: number }) => void;
-  /** Haze-layer city to highlight (e.g. while its popover is open). */
-  selectedCityId?: string | null;
-  /**
-   * Basemap and map chrome theme. Without it the map follows document.documentElement.dataset.theme
-   * (dark unless "light"); the "Light map" toggle can still switch the basemap.
-   */
+  /** Basemap and overlay theme; without it the map follows <html data-theme>. */
   theme?: 'dark' | 'light';
-  /**
-   * Modelled pressure-level winds at the volcano summits (Open-Meteo, live or snapshot). With a volcano
-   * selected, the map draws illustrative ash-drift lines at ~3, ~5.5 and ~9 km. Not an ash advisory.
-   */
+  /** Modelled pressure-level winds at the volcano summits (ash drift and the interim scenario). */
   ashWind?: AshWindData | null;
-  /** Earthquakes (USGS and BMKG, one record per agency report, never merged). */
+  /** Volcano watch id whose "If it erupted now" scenario plays; null when none. */
+  scenarioId?: string | null;
+  /** The eruption module's plume layers for a time (ms); replaces the interim plume when given. */
+  scenarioLayers?: ((timeMs: number, ctx: MapLayerContext) => LayersList) | null;
+  /** Extra deck.gl layers from teammates' modules (e.g. the fire heat grid), rebuilt when ctx changes. */
+  extraLayers?: ((ctx: MapLayerContext) => LayersList) | null;
   quakes?: QuakesResult | null;
-  /** MODELLED GloFAS river discharge per river point (Open-Meteo). Not a flood warning. */
   riverFlow?: RiverDischargeSeries[] | null;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Constants
 
-const STYLE_URLS = {
-  dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-  light: 'https://tiles.openfreemap.org/styles/positron',
-} as const;
-/** Vector sources that carry an OpenMapTiles-style building layer (render_height), per basemap. */
-const BUILDING_SOURCES = ['carto', 'openmaptiles'];
 const STYLE_TIMEOUT_MS = 5000;
 const BUILDINGS_LAYER = 'mv-buildings-3d';
 const BUILDINGS_MIN_ZOOM = 15;
@@ -161,11 +159,10 @@ const CREDITS = [
   'Tsunami areas: <a href="https://inatews.bmkg.go.id/" target="_blank" rel="noopener noreferrer">BMKG InaTEWS</a>',
   GEOBOUNDARIES_ATTRIBUTION.replace('geoBoundaries', '<a href="https://www.geoboundaries.org/" target="_blank" rel="noopener noreferrer">geoBoundaries</a>'),
 ];
-const MAP_LABEL =
-  'Regional map of watch areas and official warnings. Drag or use the arrow keys to pan; scroll, pinch, or plus and minus to zoom.';
+const MAP_LABEL = 'Regional map of haze, fires, volcanoes and official warnings. Drag or use the arrow keys to pan; scroll, pinch, or plus and minus to zoom.';
 
-/** Reference distances from a volcano's GVP summit point (km). Not a hazard zone. */
-const RING_KM = [3, 5, 10, 15];
+/** Reference distances from a volcano's summit (km). Distance only, not a hazard zone. */
+const RING_KM = [5, 10, 15];
 /** NEA PSI regions at NEA's own label points (data.gov.sg PSI API regionMetadata): [region, lat, lon]. */
 const NEA_PSI_REGIONS: ReadonlyArray<[string, number, number]> = [
   ['north', 1.41803, 103.82],
@@ -177,13 +174,6 @@ const NEA_PSI_REGIONS: ReadonlyArray<[string, number, number]> = [
 const PSI_RADIUS_M = 7800;
 /** PSI and NEA wind labels appear once the map is zoomed in near Singapore. */
 const NEAR_ZOOM = 8.5;
-const MAGMA_URL = 'https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas';
-const VAAC_DARWIN_URL = 'http://www.bom.gov.au/aviation/volcanic-ash/';
-/** Ash-drift line colours: neutral cream and tan (red is reserved for official warnings). */
-const ASH_INK: Record<'dark' | 'light', Record<AshLevel, RGB>> = {
-  dark: { '700': [247, 239, 222], '500': [226, 196, 148], '300': [190, 152, 102] },
-  light: { '700': [150, 120, 78], '500': [118, 86, 48], '300': [82, 58, 32] },
-};
 const ASH_WIDTH: Record<AshLevel, number> = { '700': 3.25, '500': 2.5, '300': 2 };
 const MAX_TSUNAMI_MARKERS = 80;
 const SINGAPORE: LonLat = [103.8198, 1.3521];
@@ -191,29 +181,39 @@ const DRIFT_LENGTH_KM = 111.2;
 const DRIFT_HALF_ANGLE_DEG = 15;
 const MAX_WARNING_MARKERS = 120;
 const MAX_GAUGE_MARKERS = 40;
-/** Container width at or below which the compact arrangement applies. */
-const NARROW_MAX = 520;
-/** Visible map width (between the panels) below which the legend starts closed and the caption is trimmed. */
-const TIGHT_MAX = 760;
-/** Extra room around a fitted selection, on top of the panel padding. */
-const FIT_MARGIN = { top: 72, bottom: 72, left: 56, right: 56 };
-const REGION_MARGIN = { top: 24, bottom: 36, left: 16, right: 16 };
+/** Container width at or below which the phone arrangement applies. */
+const NARROW_MAX = 640;
+const FIT_MARGIN = { top: 40, bottom: 40, left: 48, right: 48 };
+const REGION_MARGIN = { top: 12, bottom: 12, left: 12, right: 12 };
 const FALLBACK_APAC: Bounds = [
   [92.2, -11],
   [141, 28.6],
 ];
-
-type RGB = [number, number, number];
-const MODELLED: RGB = [74, 47, 141];
-const HAZE_TINT: RGB = [122, 92, 58];
-const HOTSPOT: RGB = [196, 78, 18];
-
-const NO_HOTSPOTS: MapHotspot[] = [];
+/** Zoom a city or warning is shown at when selected (kept when the map is already closer). */
+const POINT_ZOOM = { min: 5.6, max: 8 };
+/** Zoom a volcano is shown at when selected: its region, not its crater. */
+const VOLCANO_ZOOM = { min: 6.8, max: 8.5 };
+/** The interim scenario plume length (hours after the assumed start). */
+const SCENARIO_HOURS = 24;
 
 const ARROW_ICON = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path d="M4 26.5h34V14l24 18-24 18V37.5H4z" fill="#fff"/></svg>',
 )}`;
 const ARROW_MAPPING = { arrow: { x: 0, y: 0, width: 64, height: 64, anchorX: 32, anchorY: 32, mask: true } };
+
+/** Additive colour blending for glows on the dark map (overlaps brighten). */
+const ADDITIVE = {
+  blend: true,
+  blendColorOperation: 'add',
+  blendColorSrcFactor: 'src-alpha',
+  blendColorDstFactor: 'one',
+  blendAlphaOperation: 'add',
+  blendAlphaSrcFactor: 'one',
+  blendAlphaDstFactor: 'one-minus-src-alpha',
+} as const;
+
+const NO_HOTSPOTS: MapHotspot[] = [];
+const NO_LAYERS: LayersList = [];
 
 setWorkerUrl(maplibreWorkerUrl);
 
@@ -244,66 +244,17 @@ function prefersReducedMotion(): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Labels and formatting (same wording as the previous map)
+// Formatting
 
-const STATE_LABEL: Record<ReviewState, ReviewLabel> = {
-  monitoring: 'Monitoring',
-  check: 'Check observation',
-  review: 'Review needed',
-};
-const LEGEND_STATES: ReviewState[] = ['monitoring', 'check', 'review'];
-const NO_STATE_LABEL = 'Review state unavailable';
-
-const HAZARD_WORD =
-  '(?:volcanic|volcano|eruption|wildfires?|fires?|haze|smoke|hotspots?|peatlands?|floods?|flooding|flash|river|observations?)';
-const TRAILING_HAZARD = new RegExp(`\\s+${HAZARD_WORD}\\b.*$`, 'i');
-const LEADING_HAZARD = new RegExp(`^${HAZARD_WORD}\\b`, 'i');
-const TRAILING_CONNECTOR = /\b(?:and|of|in|near|at|the|&)$/i;
-
-/** "Merapi volcanic observations" → "Merapi". Falls back to the full title. */
-function placeName(incident: Incident, placeNames?: Record<string, string>): string {
-  const given = placeNames?.[incident.id]?.trim();
-  if (given) return given;
-  const stripped = incident.title.replace(TRAILING_HAZARD, '').trim();
-  const usable =
-    stripped !== '' &&
-    stripped !== incident.title &&
-    stripped.split(/\s+/).length <= 3 &&
-    !LEADING_HAZARD.test(stripped) &&
-    !TRAILING_CONNECTOR.test(stripped);
-  return usable ? stripped : incident.title;
-}
-
-/** Avoid "Riau · Riau, Indonesia": drop the name from the front of the location. */
-function locationRest(name: string, locationName: string): string {
-  const loc = locationName.trim();
-  if (loc.toLowerCase().startsWith(name.toLowerCase())) return loc.slice(name.length).replace(/^[\s,·–-]+/, '');
-  return loc;
-}
-
-function formatCoordinate(value: number, positive: string, negative: string): string {
-  return `${Number(Math.abs(value).toFixed(4))}° ${value < 0 ? negative : positive}`;
-}
-
-/** "2026-10-13T06:40:00Z" → "2026-10-13 06:40 UTC" (deterministic, no locale). */
+/** "2026-10-13T06:40:00Z" → "13 Oct 06:40 UTC" (deterministic). */
 function formatUtc(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })} ${d.toISOString().slice(11, 16)} UTC`;
 }
 
 function formatValue(value: number): string {
   return Number.isFinite(value) ? String(Number(value.toFixed(2))) : String(value);
-}
-
-function psiChipText(nea: NeaContext): string | null {
-  if (!nea.haze) return null;
-  const values = Object.values(nea.haze.psi24h).filter((v) => Number.isFinite(v));
-  if (values.length === 0) return null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  return `Singapore 24-hr PSI ${min === max ? `${min}` : `${min}–${max}`} · ${nea.haze.psiBand} (NEA)`;
 }
 
 function windLine(nea: NeaContext): string {
@@ -338,88 +289,84 @@ function gaugeExcess(g: GaugeReading): number | null {
   return values.length === 0 ? null : g.value - Math.min(...values);
 }
 
-const stateClass = (state: ReviewState | undefined) => `is-${state ?? 'unknown'}`;
+const withAlpha = (c: Rgb | Rgba, a: number): Rgba => [c[0], c[1], c[2], a];
 
 // ---------------------------------------------------------------------------------------------
-// Symbols (shared by markers and the legend)
+// Symbols
 
-const GLYPHS: Record<HazardType, () => ReactElement> = {
-  volcano: () => (
-    <g className="mv-glyph-fill">
-      <path d="M2 21 9 9.5l1.6 1.1L12 9.4l1.4 1.2L15 9.5 22 21Z" />
-      <circle cx="10.4" cy="6" r="1.5" />
-      <circle cx="13.7" cy="4.4" r="1.9" />
-    </g>
-  ),
-  wildfire: () => (
-    <path
-      className="mv-glyph-fill"
-      d="M12.5 2.5c.7 3.5 5 5.5 5 11.1a5.5 5.5 0 0 1-11 0c0-3 1.7-4.8 2.9-6.2.2 2.2 1.2 3.5 2.3 3.9-.7-3-.3-6.1.8-8.8Z"
-    />
-  ),
-  flood: () => (
-    <g className="mv-glyph-stroke">
-      <path d="M2.5 7.5q2.4-2.6 4.75 0t4.75 0 4.75 0 4.75 0" />
-      <path d="M2.5 12.5q2.4-2.6 4.75 0t4.75 0 4.75 0 4.75 0" />
-      <path d="M2.5 17.5q2.4-2.6 4.75 0t4.75 0 4.75 0 4.75 0" />
-    </g>
-  ),
-};
-
-/** Round watch-area symbol in a 32×32 box: ring in the state colour, hazard glyph, optional "!" disc. */
-function MarkerSymbol({ hazard, state, selected = false }: { hazard: HazardType | null; state: ReviewState | undefined; selected?: boolean }) {
-  const Glyph = hazard ? GLYPHS[hazard] : null;
+/** A volcano: a triangle ringed in the official level's colour (the issuer's scale; grey when unknown). */
+function VolcanoSymbol({ selected }: { selected: boolean }) {
   return (
     <>
-      {selected && <circle className="mv-select-ring" cx="16" cy="16" r="15" />}
-      <circle className="mv-ring" cx="16" cy="16" r="12.5" />
-      {Glyph && (
-        <g transform="translate(8.5 8.5) scale(0.625)">
-          <Glyph />
-        </g>
-      )}
-      {state === 'review' && (
-        <g className="mv-badge">
-          <circle cx="26.5" cy="5.5" r="5" />
-          <path d="M26.5 3v3.3" />
-          <circle className="mv-badge-dot" cx="26.5" cy="8.4" r="0.95" />
-        </g>
-      )}
+      {selected && <circle className="mv-select-ring" cx="18" cy="18" r="17" />}
+      <circle className="mv-level-halo" cx="18" cy="18" r="13.5" />
+      <circle className="mv-level-ring" cx="18" cy="18" r="13.5" />
+      <path className="mv-volcano" d="M18 9.5 26 24.5H10Z" />
+    </>
+  );
+}
+
+/** A haze watch area (fire-prone peatland box): a flame in a ring. */
+function FireAreaSymbol({ selected }: { selected: boolean }) {
+  return (
+    <>
+      {selected && <circle className="mv-select-ring" cx="18" cy="18" r="17" />}
+      <circle className="mv-area-ring" cx="18" cy="18" r="13" />
+      <path
+        className="mv-area-flame"
+        d="M18.6 9.5c.5 2.6 3.6 4 3.6 8a4.2 4.2 0 0 1-8.4 0c0-2.2 1.2-3.5 2.1-4.6.2 1.6.9 2.6 1.7 2.9-.5-2.2-.2-4.4 1-6.3z"
+      />
     </>
   );
 }
 
 type OfficialKind = 'official' | 'ended' | 'estimate' | 'gauge';
 
-/** Reserved official-style symbols: diamond = official warning (dashed when ended), hollow dashed circle = impact estimate, square = gauge. */
+/** Reserved official-style symbols: pin = official warning (dashed when ended), hollow dashed circle = impact estimate, square = gauge. */
 function OfficialSymbol({ kind, selected = false }: { kind: OfficialKind; selected?: boolean }) {
   return (
     <>
-      {selected && <circle className="mv-select-ring" cx="10" cy="10" r="9" />}
+      {selected && <circle className="mv-select-ring" cx="12" cy="12" r="11" />}
       {kind === 'estimate' ? (
-        <circle className="mv-wcircle" cx="10" cy="10" r="4.5" />
+        <circle className="mv-wcircle" cx="12" cy="12" r="5.5" />
       ) : kind === 'gauge' ? (
-        <rect className="mv-gsquare" x="5" y="5" width="10" height="10" />
+        <rect className="mv-gsquare" x="7.5" y="7.5" width="9" height="9" />
       ) : (
-        <rect className={`mv-wdiamond${kind === 'ended' ? ' is-ended' : ''}`} x="4" y="4" width="12" height="12" transform="rotate(45 10 10)" />
+        <>
+          <path className={`mv-wpin${kind === 'ended' ? ' is-ended' : ''}`} d="M12 21.5s-6-6.1-6-11a6 6 0 0 1 12 0c0 4.9-6 11-6 11z" />
+          <circle className="mv-wpin-dot" cx="12" cy="10.5" r="2.1" />
+        </>
       )}
     </>
   );
 }
 
-function NeaSwatch({ kind, variable = false }: { kind: 'wind' | 'drift' | 'both'; variable?: boolean }) {
+const CHIP_ICONS: Partial<Record<LayerKey, (p: { size?: number }) => ReactNode>> = {
+  haze: HazeIcon,
+  fires: FireIcon,
+  watch: VolcanoIcon,
+  warnings: WarningIcon,
+};
+
+function WindChipIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg className="mv-nea-swatch" viewBox="0 0 22 16" aria-hidden="true" focusable="false">
-      {kind !== 'wind' && <path className="mv-drift" d="M2 13 L18 3.5 A12 12 0 0 1 20 9.5 Z" />}
-      {kind !== 'drift' && (
-        <g className={`mv-wind${variable ? ' is-variable' : ''}`}>
-          <line x1="3" y1="12" x2="14" y2="5" />
-          <path className="mv-wind-tip" d="M19 2 L12.4 3.1 L15.6 8.1 Z" />
-        </g>
-      )}
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden="true" focusable="false">
+      <path d="M2.5 7.5h9a2.5 2.5 0 1 0-2.5-2.5M2.5 12.5h12a2.5 2.5 0 1 1-2.5 2.5M2.5 10h6" />
     </svg>
   );
 }
+
+function SatelliteChipIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <rect x="7.5" y="7.5" width="5" height="5" transform="rotate(45 10 10)" />
+      <path d="m4 4 3 3M13 13l3 3M2.5 9.5l2-2 3 3-2 2zM12.5 15.5l2-2 3 3-2 2z" />
+    </svg>
+  );
+}
+
+/** Non-chip layers that count as "extra" when on (rings and tsunami areas follow the selection and the feed). */
+const EXTRA_KEYS = LAYER_CATALOG.filter((l) => !l.chip && l.key !== 'rings' && l.key !== 'tsunami').map((l) => l.key);
 
 // ---------------------------------------------------------------------------------------------
 // Imperative overlay layout helpers (stage pixels)
@@ -439,8 +386,7 @@ function overlap(a: Rect, b: Rect): number {
 }
 
 function outside(r: Rect, f: Rect): number {
-  const inside = overlap(r, f);
-  return r.w * r.h - inside;
+  return r.w * r.h - overlap(r, f);
 }
 
 function tagRect(px: number, py: number, pos: TagPos, w: number, h: number, gap: number): Rect {
@@ -468,8 +414,6 @@ const TAG_POSITIONS: TagPos[] = ['right', 'left', 'below', 'above', 'below-right
 
 const num = (v: string | undefined) => Number(v);
 
-// ---------------------------------------------------------------------------------------------
-
 /** The theme from the prop, else the document's data-theme (dark unless "light"). */
 function resolveTheme(theme: 'dark' | 'light' | undefined): 'dark' | 'light' {
   if (theme) return theme;
@@ -480,88 +424,69 @@ function resolveTheme(theme: 'dark' | 'light' | undefined): 'dark' | 'light' {
   }
 }
 
-interface LayerToggles {
-  watch: boolean;
-  warnings: boolean;
-  nea: boolean;
-  transport: boolean;
-  haze: boolean;
-  particles: boolean;
-  rings: boolean;
-  buildings: boolean;
-  ash: boolean;
-  tsunami: boolean;
-  quakes: boolean;
-  tide: boolean;
-  river: boolean;
-  satIr: boolean;
-  satTrue: boolean;
+/** Part of a drift track up to `ms`, with the interpolated head; null before the start. */
+function trackUpTo(track: DriftTrack, ms: number): { path: LonLat[]; head: LonLat } | null {
+  const pts = track.points;
+  if (pts.length < 2) return null;
+  const t0 = Date.parse(pts[0].time);
+  if (!(ms > t0)) return null;
+  const path: LonLat[] = [];
+  for (let k = 0; k < pts.length; k += 1) {
+    const t = Date.parse(pts[k].time);
+    if (t <= ms) {
+      path.push([pts[k].lon, pts[k].lat]);
+      continue;
+    }
+    const prev = pts[k - 1];
+    const tp = Date.parse(prev.time);
+    const f = (ms - tp) / Math.max(1, t - tp);
+    path.push([prev.lon + (pts[k].lon - prev.lon) * f, prev.lat + (pts[k].lat - prev.lat) * f]);
+    break;
+  }
+  return path.length >= 2 ? { path, head: path[path.length - 1] } : null;
 }
+
+// ---------------------------------------------------------------------------------------------
 
 export default function MapView({
   incidents,
-  selectedId,
-  states,
+  placeNames,
+  selection,
   onSelect,
+  layers,
+  onLayersChange,
+  onOpenLayers,
+  card = null,
+  levels = {},
   nea = null,
   drift = null,
-  placeNames,
   className,
   warnings = null,
-  selectedWarningId = null,
-  onSelectWarning,
   gauges = null,
-  onClearSelection,
   transport = null,
   hotspots = null,
   windGrid = null,
   airQuality = null,
-  hazeTimeISO = null,
-  onCityClick,
-  selectedCityId = null,
   hazeHour = null,
   theme,
   ashWind = null,
+  scenarioId = null,
+  scenarioLayers = null,
+  extraLayers = null,
   quakes = null,
   riverFlow = null,
 }: MapViewProps) {
-  const calloutId = useId();
-  const layersTitleId = useId();
-  const [layers, setLayers] = useState<LayerToggles>({
-    watch: true,
-    warnings: true,
-    nea: true,
-    transport: true,
-    haze: true,
-    particles: true,
-    rings: true,
-    buildings: true,
-    ash: true,
-    tsunami: true,
-    quakes: true,
-    tide: false,
-    river: false,
-    satIr: false,
-    satTrue: false,
-  });
-  /** Satellite imagery opacity (0..1), shared by both GIBS layers. */
-  const [satOpacity, setSatOpacity] = useState(0.75);
-  /** Open chart popover: a tide gauge (code) or a river point (id), at a point in the map container. */
+  /** Open chart popover (analyst layers): a tide gauge (code) or a river point (id), at a point in the map container. */
   const [chart, setChart] = useState<{ kind: 'tide' | 'river'; id: string; at: { x: number; y: number } } | null>(null);
-  /** "History: last BMKG tsunami warning" (only offered when no BMKG tsunami warning is in force). Off by default. */
-  const [tsunamiHistory, setTsunamiHistory] = useState(false);
-  /** Wall clock once per mount: the ash drift starts at the forecast hour at or before it. */
+  /** Wall clock once per mount: ash drift starts at the forecast hour at or before it. */
   const [nowMs] = useState(() => Date.now());
   const [dark, setDark] = useState(() => resolveTheme(theme) === 'dark');
   const [narrow, setNarrow] = useState(false);
-  /** The map visible between the panels is narrow (under TIGHT_MAX px): legend closed, caption trimmed. */
-  const [tight, setTight] = useState(false);
   const [offline, setOffline] = useState(false);
   const [ready, setReady] = useState(false);
   const [engineError, setEngineError] = useState<string | null>(null);
   const [stride, setStride] = useState(4);
-  /** Haze-layer city whose popover is open, with the click point in the map container. */
-  const [city, setCity] = useState<{ id: string; at: { x: number; y: number } } | null>(null);
+  const [zoomBucket, setZoomBucket] = useState(4);
   /** Roving tabindex for the official/gauge markers: index of the one tab stop. */
   const [officialActive, setOfficialActive] = useState(0);
 
@@ -569,61 +494,75 @@ export default function MapView({
   const mapElRef = useRef<HTMLDivElement>(null);
   const probeLRef = useRef<HTMLSpanElement>(null);
   const probeRRef = useRef<HTMLSpanElement>(null);
+  const probeTRef = useRef<HTMLSpanElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const deckRef = useRef<MapboxOverlay | null>(null);
   const hazeRef = useRef<HazeLayerController | null>(null);
-  const padRef = useRef({ left: 0, right: 0 });
+  const padRef = useRef({ left: 0, right: 0, top: 0, bottom: 0 });
   const sizeRef = useRef({ w: 0, h: 0 });
   const darkRef = useRef(dark);
   const narrowRef = useRef(false);
-  const buildingsRef = useRef(true);
+  const buildingsRef = useRef(layers.buildings);
   const anchorsRef = useRef<HTMLElement[]>([]);
   const officialRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const applyStyleRef = useRef<((dark: boolean) => void) | null>(null);
   /** Retries the live basemap after the offline fallback (the online event or the Retry button). */
   const retryStyleRef = useRef<(() => void) | null>(null);
   const deckLayersRef = useRef<LayersList>([]);
+  const scenarioDeckRef = useRef<LayersList>([]);
   const hazeInputRef = useRef<HazeLayerInput | null>(null);
   const officialTabRef = useRef(-1);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  const pal = getMapPalette(dark ? 'dark' : 'light');
+  const themeName: 'dark' | 'light' = dark ? 'dark' : 'light';
+  const timeISO = hazeHour?.timeISO ?? '';
 
   // --- Derived data (memoised; none of it depends on the camera) ------------------------------
+
+  const selectedAreaId = selection?.kind === 'area' ? selection.id : null;
+  const selectedWarningId = selection?.kind === 'warning' ? selection.id : null;
+  const selectedCityId = selection?.kind === 'city' ? selection.id : null;
 
   const placed = useMemo(
     () =>
       incidents
         .filter((i) => Number.isFinite(i.lat) && Number.isFinite(i.lon))
-        .map((incident) => {
-          const state = states[incident.id] as ReviewState | undefined;
-          return { incident, state, stateLabel: state ? STATE_LABEL[state] : NO_STATE_LABEL, name: placeName(incident, placeNames) };
-        }),
-    [incidents, states, placeNames],
+        .map((incident) => ({ incident, name: placeNames?.[incident.id]?.trim() || incident.title })),
+    [incidents, placeNames],
   );
-  const selected = placed.find((p) => p.incident.id === selectedId) ?? null;
-  const selectedIncident = selected?.incident ?? null;
-  const neaActive = Boolean(selected && nea && drift && drift.incidentId === selected.incident.id);
-  const neaShown = neaActive && layers.nea;
+  const selectedIncident = placed.find((p) => p.incident.id === selectedAreaId)?.incident ?? null;
+  const neaShown = Boolean(layers.nea && selectedIncident && nea && drift && drift.incidentId === selectedIncident.id);
   const downwindDeg = neaShown && drift && drift.downwindDeg !== null && Number.isFinite(drift.downwindDeg) ? drift.downwindDeg : null;
+
+  /** Warnings that are a volcano's official level: drawn as the triangle's ring, not as a second pin. */
+  const levelWarningIds = useMemo(() => new Set(Object.values(levels).flatMap((l) => (l ? [l.warningId] : []))), [levels]);
 
   const warningMarkers = useMemo(
     () =>
       (warnings ?? [])
         .filter((w) => w.location && Number.isFinite(w.location.lat) && Number.isFinite(w.location.lon))
+        .filter((w) => !w.ended || w.id === selectedWarningId)
+        .filter((w) => !levelWarningIds.has(w.id) || w.id === selectedWarningId)
         .sort(compareWarningMarkers)
         .slice(0, MAX_WARNING_MARKERS),
-    [warnings],
+    [warnings, selectedWarningId, levelWarningIds],
   );
 
   const gaugeMarkers = useMemo(() => {
-    const drawnIds = warningMarkers.map((w) => w.id);
+    if (!layers.gauges) return [];
     return (gauges ?? [])
       .filter((g) => Number.isFinite(g.lat) && Number.isFinite(g.lon) && Number.isFinite(g.value))
       .map((gauge) => ({ gauge, excess: gaugeExcess(gauge) }))
-      .filter((m) => (m.excess !== null ? m.excess >= 0 : m.gauge.situation !== null && drawnIds.some((id) => id.includes(m.gauge.id))))
+      .filter((m) => (m.excess !== null ? m.excess >= 0 : m.gauge.situation !== null))
       .sort((a, b) => (b.excess ?? Number.NEGATIVE_INFINITY) - (a.excess ?? Number.NEGATIVE_INFINITY) || 0)
       .slice(0, MAX_GAUGE_MARKERS)
       .map((m) => m.gauge);
-  }, [gauges, warningMarkers]);
+  }, [gauges, layers.gauges]);
 
   const ringsShown = Boolean(selectedIncident && selectedIncident.hazard === 'volcano' && layers.rings && layers.watch);
   const rings = useMemo(
@@ -632,7 +571,7 @@ export default function MapView({
         ? RING_KM.map((km) => ({
             km,
             polygon: ringPolygon(selectedIncident.lon, selectedIncident.lat, km),
-            label: destination(selectedIncident.lon, selectedIncident.lat, 0, km),
+            label: destination(selectedIncident.lon, selectedIncident.lat, 45, km),
           }))
         : null,
     [ringsShown, selectedIncident],
@@ -646,12 +585,11 @@ export default function MapView({
       const psi = haze.psi24h[region];
       if (typeof psi === 'number' && Number.isFinite(psi)) out.push({ region, psi, band: psiBand(psi), lon, lat });
     }
-    return out.length ? { regions: out, mode: haze.dataMode === 'historical' ? 'SNAPSHOT' : 'LIVE', time: haze.observedAt.slice(11, 16) } : null;
+    return out.length ? { regions: out, mode: haze.dataMode === 'historical' ? 'saved' : 'live', time: haze.observedAt.slice(11, 16) } : null;
   }, [nea, layers.nea]);
 
   /** NEA wind at Singapore (toward), drawn whenever the NEA layer is on and a direction is known. */
-  const seaWindToward =
-    nea && layers.nea && nea.wind.fromDeg !== null && Number.isFinite(nea.wind.fromDeg) ? (nea.wind.fromDeg + 180) % 360 : null;
+  const seaWindToward = nea && layers.nea && nea.wind.fromDeg !== null && Number.isFinite(nea.wind.fromDeg) ? (nea.wind.fromDeg + 180) % 360 : null;
   const windVariable = Boolean(nea && nea.wind.consistency < 0.5);
 
   const driftCone = useMemo(
@@ -666,32 +604,34 @@ export default function MapView({
   );
 
   const transportShown = Boolean(transport && layers.transport);
-  const hotspotsShown = layers.watch && hotspots ? hotspots : NO_HOTSPOTS;
-  const hotspotsToday = hotspotsShown.filter((h) => h.current).length;
+  const hotspotsShown = layers.fires && hotspots ? hotspots : NO_HOTSPOTS;
 
-  // Illustrative ash drift (modelled) for the selected volcano: three heights from the GVP summit.
+  // Ash drift for the selected volcano (modelled): the analyst layer draws all three 24 h tracks; the
+  // scenario draws them growing with the scrubber from the scrubber's anchor hour.
   const ashSeries = useMemo(() => {
     if (!ashWind || !selectedIncident || selectedIncident.hazard !== 'volcano' || !selectedIncident.volcanoId) return null;
     return ashWind.volcanoes.find((v) => v.volcanoId === selectedIncident.volcanoId) ?? null;
   }, [ashWind, selectedIncident]);
   const ashDrift = useMemo(() => (ashSeries ? ashDriftTracks(ashSeries, nowMs) : null), [ashSeries, nowMs]);
   const ashShown = Boolean(ashDrift && layers.ash);
+  const anchorISO = hazeHour ? (hazeHour.steps.times[hazeHour.steps.nowIndex] ?? '') : '';
+  const scenarioActive = Boolean(scenarioId && selectedIncident && scenarioId === selectedIncident.id);
+  const scenarioDrift = useMemo(() => {
+    if (!scenarioActive || !ashSeries) return null;
+    const anchor = Date.parse(anchorISO);
+    return ashDriftTracks(ashSeries, Number.isFinite(anchor) ? anchor : nowMs);
+  }, [scenarioActive, ashSeries, anchorISO, nowMs]);
 
   // Official BMKG InaTEWS tsunami warning areas (verbatim levels) at district centres (approximate).
   const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings), [warnings]);
   const tsunamiInForce = tsunamiPick.inForce !== null;
-  const tsunamiWarning = tsunamiPick.inForce ?? (tsunamiHistory ? tsunamiPick.latest : null);
+  const tsunamiWarning = tsunamiPick.inForce ?? (layers.tsunamiHistory ? tsunamiPick.latest : null);
   const tsunamiPlacement = useMemo(() => (tsunamiWarning ? placeTsunamiAreas(tsunamiWarning.areas, idnDistrictIndex()) : null), [tsunamiWarning]);
   const tsunamiShown = Boolean(tsunamiWarning && tsunamiPlacement && layers.tsunami);
   const tsunamiAreaMarkers = tsunamiShown && tsunamiPlacement ? tsunamiPlacement.placed.slice(0, MAX_TSUNAMI_MARKERS) : [];
   const tsunamiObsMarkers = tsunamiShown && tsunamiWarning ? (tsunamiWarning.observations ?? []).slice(0, MAX_TSUNAMI_MARKERS) : [];
 
-  // Tide gauges come on by themselves whenever official tsunami areas (in force or History) are shown.
-  useEffect(() => {
-    if (tsunamiShown) setLayers((prev) => (prev.tide ? prev : { ...prev, tide: true }));
-  }, [tsunamiShown]);
-
-  // Connector layers: earthquakes (USGS, BMKG), IOC tide gauges, modelled river flow, GIBS imagery.
+  // Analyst layers: earthquakes (USGS, BMKG), IOC tide gauges, modelled river flow, GIBS imagery.
   const quakesShown = useMemo<QuakeEvent[]>(
     () =>
       layers.quakes && quakes
@@ -702,7 +642,6 @@ export default function MapView({
         : [],
     [layers.quakes, quakes],
   );
-  const quakesRecent = quakesShown.filter((q) => isRecentQuake(q.timeISO, nowMs)).length;
   const tideStations = useMemo<SeaLevelStation[]>(() => {
     try {
       return loadSeaLevelStations().stations;
@@ -714,20 +653,27 @@ export default function MapView({
   const riverShown = useMemo(() => (layers.river && riverFlow ? riverFlow : []), [layers.river, riverFlow]);
   const gibsIr = useMemo(() => himawariIrLayer(nowMs), [nowMs]);
   const gibsTrue = useMemo(() => trueColourLayer(nowMs), [nowMs]);
-  const gibsShown = [...(layers.satTrue ? [gibsTrue] : []), ...(layers.satIr ? [gibsIr] : [])];
   const gibsRef = useRef({ ir: false, tc: false, opacity: 0.75 });
-  gibsRef.current = { ir: layers.satIr, tc: layers.satTrue, opacity: satOpacity };
+  gibsRef.current = { ir: layers.satIr, tc: layers.satTrue, opacity: layers.satOpacity };
+
+  const layerCtx = useMemo<MapLayerContext>(() => ({ theme: themeName, timeISO, zoom: zoomBucket, selection }), [themeName, timeISO, zoomBucket, selection]);
 
   // --- deck.gl layers (rebuilt only when inputs change, never per frame) -----------------------
 
+  const extra = useMemo<LayersList>(() => {
+    if (!extraLayers) return NO_LAYERS;
+    try {
+      return extraLayers(layerCtx);
+    } catch (err) {
+      console.error('Extra map layers could not be built:', err);
+      return NO_LAYERS;
+    }
+  }, [extraLayers, layerCtx]);
+
   const deckLayers = useMemo<LayersList>(() => {
     const out: LayersList = [];
-    // Dark (default): cream rings, tan smoke, light amber paths, dark halos. Light: slate, brown haze, violet paths.
-    const ringInk: RGB = dark ? [236, 228, 214] : [51, 71, 91];
-    const ink: RGB = dark ? [236, 228, 214] : [20, 26, 34];
-    const halo: RGB = dark ? [10, 18, 24] : [255, 255, 255];
-    const smoke: RGB = dark ? [210, 180, 140] : HAZE_TINT;
-    const pathColor: RGB = dark ? [255, 200, 120] : MODELLED;
+    const p = getMapPalette(dark ? 'dark' : 'light');
+    const halo = p.halo;
 
     if (hazeRegions) {
       out.push(
@@ -737,21 +683,54 @@ export default function MapView({
           getPosition: (d) => [d.lon, d.lat],
           radiusUnits: 'meters',
           getRadius: PSI_RADIUS_M,
-          getFillColor: (d) => [...smoke, Math.round(Math.min(1, psiHazeAlpha(d.band) * (dark ? 1.2 : 1)) * 255)],
+          getFillColor: (d) => [...p.nea.psiSmoke, Math.round(Math.min(1, psiHazeAlpha(d.band) * p.nea.psiAlphaScale) * 255)],
           stroked: false,
           updateTriggers: { getFillColor: [dark] },
         }),
       );
     }
+    if (hotspotsShown.length > 0) {
+      // Interim fire layer (snapshot FIRMS): a soft heat glow sized by fire power, and a small core.
+      const glowRgb = p.fire.stops[2]?.c ?? p.fire.hotspot;
+      out.push(
+        new ScatterplotLayer<MapHotspot>({
+          id: 'mv-firms-glow',
+          data: hotspotsShown,
+          getPosition: (d) => [d.lon, d.lat],
+          radiusUnits: 'pixels',
+          getRadius: (d) => 7 + Math.min(14, Math.sqrt(Math.max(0, d.frp)) * 2.2),
+          filled: true,
+          getFillColor: [...glowRgb, dark ? 70 : 60],
+          stroked: false,
+          parameters: p.fire.blend === 'additive' ? ADDITIVE : undefined,
+          updateTriggers: { getFillColor: [dark] },
+        }),
+        new ScatterplotLayer<MapHotspot>({
+          id: 'mv-firms',
+          data: hotspotsShown,
+          getPosition: (d) => [d.lon, d.lat],
+          radiusUnits: 'pixels',
+          getRadius: (d) => (d.current ? 3.6 : 2.8),
+          filled: true,
+          getFillColor: (d) => [...p.fire.hotspot, d.current ? 245 : 170],
+          stroked: true,
+          getLineColor: withAlpha(p.fire.halo, 220),
+          lineWidthUnits: 'pixels',
+          getLineWidth: 1,
+          pickable: true,
+          updateTriggers: { getFillColor: [dark], getLineColor: [dark] },
+        }),
+      );
+    }
+    out.push(...extra);
     if (rings) {
       out.push(
-        // Reference distances: a faint fill that darkens toward the summit, and thin dashed outlines with a halo.
         new PolygonLayer<(typeof rings)[number]>({
           id: 'mv-rings',
           data: [...rings].reverse(),
           getPolygon: (d) => d.polygon,
           filled: true,
-          getFillColor: [...ringInk, dark ? 14 : 20],
+          getFillColor: p.rings.fill,
           stroked: false,
           updateTriggers: { getFillColor: [dark] },
         }),
@@ -759,7 +738,7 @@ export default function MapView({
           id: 'mv-rings-halo',
           data: rings.flatMap((r) => dashedPaths(r.polygon, 2, 1)),
           getPath: (d) => d,
-          getColor: [...halo, dark ? 150 : 120],
+          getColor: p.rings.halo,
           getWidth: 3.5,
           widthUnits: 'pixels',
           updateTriggers: { getColor: [dark] },
@@ -768,8 +747,8 @@ export default function MapView({
           id: 'mv-rings-dash',
           data: rings.flatMap((r) => dashedPaths(r.polygon, 2, 1)),
           getPath: (d) => d,
-          getColor: [...ringInk, 230],
-          getWidth: 1.5,
+          getColor: p.rings.line,
+          getWidth: 1.4,
           widthUnits: 'pixels',
           updateTriggers: { getColor: [dark] },
         }),
@@ -782,18 +761,18 @@ export default function MapView({
           data: [{ polygon: driftCone.polygon }],
           getPolygon: (d) => d.polygon,
           filled: true,
-          getFillColor: dark ? [236, 228, 214, 34] : [78, 89, 103, 42],
+          getFillColor: p.nea.driftFill,
           stroked: true,
-          getLineColor: dark ? [236, 228, 214, 140] : [78, 89, 103, 150],
+          getLineColor: p.nea.driftLine,
           lineWidthUnits: 'pixels',
           getLineWidth: 1,
+          updateTriggers: { getFillColor: [dark], getLineColor: [dark] },
         }),
       );
     }
     if (seaWindToward !== null) {
       // NEA station wind at Singapore: a fixed-size arrow (pixels), so it reads the same at every zoom.
       const angle = 90 - seaWindToward;
-      const alpha = windVariable ? 150 : 255;
       const at = [{ position: SINGAPORE }];
       out.push(
         new IconLayer<{ position: LonLat }>({
@@ -819,13 +798,13 @@ export default function MapView({
           getAngle: () => angle,
           getSize: 56,
           sizeUnits: 'pixels',
-          getColor: [...ink, alpha],
-          updateTriggers: { getAngle: [angle], getColor: [dark, alpha] },
+          getColor: [...p.nea.windInk, windVariable ? 150 : 255],
+          updateTriggers: { getAngle: [angle], getColor: [dark, windVariable] },
         }),
       );
     }
     if (transport && transportShown) {
-      // The haze layer's 925 hPa particles replace the 10 m arrows when its wind grid is loaded; the paths stay.
+      // The 925 hPa particles replace the 10 m arrows when that wind grid is loaded; the paths stay.
       const arrows = windGrid ? [] : transport.arrows.filter((a) => keepAtStride(a.lat, a.lon, stride) && Math.hypot(a.u, a.v) > 0.05);
       out.push(
         new IconLayer<(typeof arrows)[number]>({
@@ -838,7 +817,7 @@ export default function MapView({
           getAngle: (d) => arrowAngleDeg(d.u, d.v),
           getSize: (d) => 10 + Math.min(Math.hypot(d.u, d.v), 15) * 1.4,
           sizeUnits: 'pixels',
-          getColor: dark ? [255, 200, 120, 165] : [...MODELLED, 165],
+          getColor: p.modelled.arrow,
           updateTriggers: { getColor: [dark] },
         }),
       );
@@ -847,8 +826,8 @@ export default function MapView({
         new PathLayer<(typeof paths)[number]>({
           id: 'mv-haze-paths',
           data: paths,
-          getPath: (d) => d.points.map((p) => [p.lon, p.lat] as LonLat),
-          getColor: (d) => [...pathColor, d.reaches ? 235 : 170],
+          getPath: (d) => d.points.map((pt) => [pt.lon, pt.lat] as LonLat),
+          getColor: (d) => [...p.modelled.path, d.reaches ? 235 : 170],
           getWidth: (d) => (d.reaches ? 2.75 : 2),
           widthUnits: 'pixels',
           jointRounded: true,
@@ -864,46 +843,25 @@ export default function MapView({
           filled: true,
           getFillColor: [...halo, 255],
           stroked: true,
-          getLineColor: [...pathColor, 220],
+          getLineColor: [...p.modelled.path, 220],
           lineWidthUnits: 'pixels',
           getLineWidth: 1.4,
+          updateTriggers: { getFillColor: [dark], getLineColor: [dark] },
         }),
       );
     }
-    if (hotspotsShown.length > 0) {
-      out.push(
-        new ScatterplotLayer<MapHotspot>({
-          id: 'mv-firms',
-          data: hotspotsShown,
-          getPosition: (d) => [d.lon, d.lat],
-          radiusUnits: 'pixels',
-          getRadius: (d) => (d.current ? 5 : 3.5),
-          filled: true,
-          getFillColor: (d) => [...HOTSPOT, d.current ? 235 : 95],
-          stroked: true,
-          getLineColor: (d) => [...halo, d.current ? 255 : 150],
-          lineWidthUnits: 'pixels',
-          getLineWidth: 1.2,
-          pickable: true,
-          updateTriggers: { getLineColor: [dark] },
-        }),
-      );
-    }
-    if (ashShown && ashDrift) {
-      const inks = ASH_INK[dark ? 'dark' : 'light'];
+    if (ashShown && ashDrift && !scenarioActive) {
       const tracks = ashDrift.tracks.filter((t) => t.points.length > 1);
       const ticks = tracks.flatMap((t) => t.ticks.map((k) => ({ ...k, level: t.level })));
-      // The 24 h tick carries the height label instead of an hour label; heights stack so ends never collide.
       const tickLabels = ticks.filter((k) => k.hour < 24);
       const labelDy: Record<AshLevel, number> = { '700': -10, '500': 0, '300': 10 };
       const ends = tracks.map((t) => ({ track: t, at: t.points[t.points.length - 1] }));
-      const outline: [number, number, number, number] = [...halo, 235];
       out.push(
         new PathLayer<DriftTrack>({
           id: 'mv-ash-halo',
           data: tracks,
-          getPath: (d) => d.points.map((p) => [p.lon, p.lat] as LonLat),
-          getColor: [...halo, dark ? 190 : 210],
+          getPath: (d) => d.points.map((pt) => [pt.lon, pt.lat] as LonLat),
+          getColor: p.ash.halo,
           getWidth: (d) => ASH_WIDTH[d.level] + 3,
           widthUnits: 'pixels',
           jointRounded: true,
@@ -913,8 +871,8 @@ export default function MapView({
         new PathLayer<DriftTrack>({
           id: 'mv-ash-paths',
           data: tracks,
-          getPath: (d) => d.points.map((p) => [p.lon, p.lat] as LonLat),
-          getColor: (d) => [...inks[d.level], 245],
+          getPath: (d) => d.points.map((pt) => [pt.lon, pt.lat] as LonLat),
+          getColor: (d) => [...p.ash.lines[d.level], 245],
           getWidth: (d) => ASH_WIDTH[d.level],
           widthUnits: 'pixels',
           jointRounded: true,
@@ -930,7 +888,7 @@ export default function MapView({
           filled: true,
           getFillColor: [...halo, 255],
           stroked: true,
-          getLineColor: (d) => [...inks[d.level], 255],
+          getLineColor: (d) => [...p.ash.lines[d.level], 255],
           lineWidthUnits: 'pixels',
           getLineWidth: 1.6,
           updateTriggers: { getFillColor: [dark], getLineColor: [dark] },
@@ -942,7 +900,7 @@ export default function MapView({
           getText: (d) => `${d.hour} h`,
           getSize: 11,
           sizeUnits: 'pixels',
-          getColor: (d) => [...inks[d.level], 255],
+          getColor: (d) => [...p.ash.lines[d.level], 255],
           getPixelOffset: [7, -9],
           getTextAnchor: 'start',
           getAlignmentBaseline: 'center',
@@ -950,17 +908,17 @@ export default function MapView({
           fontWeight: 600,
           fontSettings: { sdf: true, fontSize: 48, buffer: 6 },
           outlineWidth: 3,
-          outlineColor: outline,
+          outlineColor: p.label.halo,
           updateTriggers: { getColor: [dark] },
         }),
         new TextLayer<(typeof ends)[number]>({
           id: 'mv-ash-level-labels',
           data: ends,
           getPosition: (d) => [d.at.lon, d.at.lat],
-          getText: (d) => `${d.track.label}${d.track.ticks.some((k) => k.hour === 24) ? ' (24 h)' : ''}`,
-          getSize: 13,
+          getText: (d) => `ash at ${d.track.label.replace(/^~/, '')} up${d.track.ticks.some((k) => k.hour === 24) ? ' · 24 h' : ''}`,
+          getSize: 12.5,
           sizeUnits: 'pixels',
-          getColor: (d) => [...inks[d.track.level], 255],
+          getColor: (d) => [...p.ash.lines[d.track.level], 255],
           getPixelOffset: (d) => [9, labelDy[d.track.level]],
           getTextAnchor: 'start',
           getAlignmentBaseline: 'center',
@@ -968,24 +926,23 @@ export default function MapView({
           fontWeight: 700,
           fontSettings: { sdf: true, fontSize: 48, buffer: 6 },
           outlineWidth: 3,
-          outlineColor: outline,
+          outlineColor: p.label.halo,
           updateTriggers: { getColor: [dark] },
         }),
       );
     }
     if (tideShown.length > 0) {
-      const tideInk: RGB = dark ? [150, 200, 235] : [30, 96, 150];
       out.push(
         new ScatterplotLayer<SeaLevelStation>({
           id: 'mv-tide',
           data: tideShown,
           getPosition: (d) => [d.lon, d.lat],
           radiusUnits: 'pixels',
-          getRadius: 3.5,
+          getRadius: 4,
           filled: true,
-          getFillColor: [...tideInk, 230],
+          getFillColor: p.tide.fill,
           stroked: true,
-          getLineColor: [...halo, 230],
+          getLineColor: p.tide.stroke,
           lineWidthUnits: 'pixels',
           getLineWidth: 1,
           pickable: true,
@@ -1000,7 +957,7 @@ export default function MapView({
     }
     if (quakesShown.length > 0) {
       const alpha = (q: QuakeEvent) => (isRecentQuake(q.timeISO, nowMs) ? 240 : 105);
-      const colour = (q: QuakeEvent): [number, number, number, number] => [...QUAKE_DEPTH_RGB[quakeDepthBand(q.depthKm)], alpha(q)];
+      const colour = (q: QuakeEvent): Rgba => [...p.quake[quakeDepthBand(q.depthKm)], alpha(q)];
       const usgs = quakesShown.filter((q) => q.source === 'USGS');
       const bmkg = quakesShown.filter((q) => q.source === 'BMKG');
       out.push(
@@ -1018,7 +975,7 @@ export default function MapView({
           lineWidthUnits: 'pixels',
           getLineWidth: (d) => (isRecentQuake(d.timeISO, nowMs) ? 1.6 : 0.8),
           pickable: true,
-          updateTriggers: { getLineColor: [dark, nowMs], getFillColor: [nowMs], getLineWidth: [nowMs] },
+          updateTriggers: { getLineColor: [dark, nowMs], getFillColor: [dark, nowMs], getLineWidth: [nowMs] },
         }),
         new ScatterplotLayer<QuakeEvent>({
           id: 'mv-quakes-bmkg',
@@ -1032,45 +989,142 @@ export default function MapView({
           lineWidthUnits: 'pixels',
           getLineWidth: (d) => (isRecentQuake(d.timeISO, nowMs) ? 2.2 : 1.2),
           pickable: true,
-          updateTriggers: { getLineColor: [nowMs], getLineWidth: [nowMs] },
+          updateTriggers: { getLineColor: [dark, nowMs], getLineWidth: [nowMs] },
         }),
       );
     }
     return out;
-  }, [
-    hazeRegions,
-    rings,
-    driftCone,
-    seaWindToward,
-    windVariable,
-    transport,
-    transportShown,
-    stride,
-    hotspotsShown,
-    dark,
-    windGrid,
-    ashShown,
-    ashDrift,
-    quakesShown,
-    tideShown,
-    nowMs,
-  ]);
+  }, [hazeRegions, rings, driftCone, seaWindToward, windVariable, transport, transportShown, stride, hotspotsShown, dark, windGrid, ashShown, ashDrift, scenarioActive, quakesShown, tideShown, nowMs, extra]);
+
+  const pushDeck = useCallback(() => {
+    deckRef.current?.setProps({ layers: [...deckLayersRef.current, ...scenarioDeckRef.current] });
+  }, []);
 
   useEffect(() => {
     deckLayersRef.current = deckLayers;
-    deckRef.current?.setProps({ layers: deckLayers });
-  }, [deckLayers]);
+    pushDeck();
+  }, [deckLayers, pushDeck]);
 
-  // --- Haze layer controller (owned by the haze agent) ----------------------------------------
+  // --- The ash scenario: drawn for a time that glides between scrubber steps (no React per frame) -----
 
-  const handleCityClick = useCallback(
-    (c: HazeCity, at: { x: number; y: number }) => {
-      setCity({ id: c.id, at });
-      onCityClick?.(c, at);
+  const buildScenario = useCallback(
+    (ms: number): LayersList => {
+      if (!scenarioActive) return NO_LAYERS;
+      if (scenarioLayers) {
+        try {
+          return scenarioLayers(ms, layerCtx);
+        } catch (err) {
+          console.error('Scenario layers could not be built:', err);
+          return NO_LAYERS;
+        }
+      }
+      if (!scenarioDrift || !selectedIncident) return NO_LAYERS;
+      const p = getMapPalette(dark ? 'dark' : 'light');
+      const start = Date.parse(scenarioDrift.startISO);
+      const end = start + SCENARIO_HOURS * 3_600_000;
+      const t = Math.min(ms, end);
+      const parts = scenarioDrift.tracks.flatMap((track) => {
+        const part = trackUpTo(track, t);
+        return part ? [{ level: track.level, ...part }] : [];
+      });
+      const hours = Math.max(0, (t - start) / 3_600_000);
+      const label = [
+        {
+          at: [selectedIncident.lon, selectedIncident.lat] as LonLat,
+          text: ms < start ? 'MODELLED SCENARIO · before the assumed start' : `MODELLED SCENARIO · +${Math.round(hours)} h after an assumed eruption`,
+        },
+      ];
+      const glow = p.ash.plumeEdge;
+      const core = p.ash.plumeCore;
+      return [
+        new PathLayer<(typeof parts)[number]>({
+          id: 'mv-scenario-body',
+          data: parts,
+          getPath: (d) => d.path,
+          getColor: glow,
+          getWidth: (d) => (d.level === '300' ? 26 : d.level === '500' ? 20 : 14),
+          widthUnits: 'pixels',
+          jointRounded: true,
+          capRounded: true,
+          parameters: dark ? ADDITIVE : undefined,
+        }),
+        new PathLayer<(typeof parts)[number]>({
+          id: 'mv-scenario-core',
+          data: parts,
+          getPath: (d) => d.path,
+          getColor: (d) => [...p.ash.lines[d.level], 235],
+          getWidth: (d) => ASH_WIDTH[d.level],
+          widthUnits: 'pixels',
+          jointRounded: true,
+          capRounded: true,
+        }),
+        new ScatterplotLayer<(typeof parts)[number]>({
+          id: 'mv-scenario-heads',
+          data: parts,
+          getPosition: (d) => d.head,
+          radiusUnits: 'pixels',
+          getRadius: (d) => (d.level === '300' ? 13 : d.level === '500' ? 11 : 9),
+          filled: true,
+          getFillColor: core,
+          stroked: true,
+          getLineColor: (d) => [...p.ash.lines[d.level], 255],
+          lineWidthUnits: 'pixels',
+          getLineWidth: 1.5,
+        }),
+        new TextLayer<(typeof label)[number]>({
+          id: 'mv-scenario-label',
+          data: label,
+          getPosition: (d) => d.at,
+          getText: (d) => d.text,
+          getSize: 12,
+          sizeUnits: 'pixels',
+          getColor: p.label.text,
+          getPixelOffset: [0, 26],
+          getTextAnchor: 'middle',
+          getAlignmentBaseline: 'top',
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+          fontWeight: 700,
+          fontSettings: { sdf: true, fontSize: 48, buffer: 6 },
+          outlineWidth: 3,
+          outlineColor: p.label.halo,
+        }),
+      ];
     },
-    [onCityClick],
+    [scenarioActive, scenarioLayers, scenarioDrift, selectedIncident, dark, layerCtx],
   );
-  const hazeTimeShown = hazeHour?.timeISO ?? hazeTimeISO ?? transport?.time ?? windGrid?.times[0] ?? '';
+
+  const scenarioMsRef = useRef<number>(Number.NaN);
+  useEffect(() => {
+    if (!scenarioActive) {
+      scenarioDeckRef.current = NO_LAYERS;
+      scenarioMsRef.current = Number.NaN;
+      pushDeck();
+      return;
+    }
+    const target = Date.parse(timeISO);
+    if (!Number.isFinite(target)) return;
+    const from = Number.isFinite(scenarioMsRef.current) ? scenarioMsRef.current : target;
+    const duration = prefersReducedMotion() ? 0 : Math.min(900, hazeHour?.stepMs ?? 900);
+    let raf = 0;
+    const t0 = performance.now();
+    const frame = (now: number) => {
+      const f = duration <= 0 ? 1 : Math.min(1, (now - t0) / duration);
+      const ms = from + (target - from) * f;
+      scenarioMsRef.current = ms;
+      scenarioDeckRef.current = buildScenario(ms);
+      pushDeck();
+      if (f < 1) raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [scenarioActive, timeISO, buildScenario, pushDeck, hazeHour?.stepMs]);
+
+  // --- Haze layer controller ------------------------------------------------------------------
+
+  const handleCityClick = useCallback((c: HazeCity) => {
+    onSelectRef.current({ kind: 'city', id: c.id });
+  }, []);
+  const hazeTimeShown = timeISO || transport?.time || windGrid?.times[0] || '';
   const hazeInput = useMemo<HazeLayerInput>(
     () => ({
       windGrid,
@@ -1080,9 +1134,9 @@ export default function MapView({
       visible: { particles: layers.particles, haze: layers.haze, cities: layers.haze },
       onCityClick: handleCityClick,
       neaHaze: layers.nea ? (nea?.haze ?? null) : null,
-      selectedCityId: selectedCityId ?? city?.id ?? null,
+      selectedCityId,
     }),
-    [windGrid, airQuality, hazeTimeShown, dark, layers.particles, layers.haze, layers.nea, handleCityClick, nea, selectedCityId, city],
+    [windGrid, airQuality, hazeTimeShown, dark, layers.particles, layers.haze, layers.nea, handleCityClick, nea, selectedCityId],
   );
   useEffect(() => {
     hazeInputRef.current = hazeInput;
@@ -1101,48 +1155,43 @@ export default function MapView({
     if (!map || !root) return;
     const { w, h } = sizeRef.current;
     for (const el of anchorsRef.current) {
-      const p = map.project([num(el.dataset.lon), num(el.dataset.lat)]);
-      const off = !(p.x > -80 && p.y > -80 && p.x < w + 80 && p.y < h + 80);
+      const pt = map.project([num(el.dataset.lon), num(el.dataset.lat)]);
+      const off = !(pt.x > -80 && pt.y > -80 && pt.x < w + 80 && pt.y < h + 80);
       if (off) {
         if (el.dataset.off !== '1') el.dataset.off = '1';
         continue;
       }
       if (el.dataset.off === '1') el.dataset.off = '0';
-      el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+      el.style.transform = `translate(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px)`;
     }
     const near = map.getZoom() >= NEAR_ZOOM ? 'true' : 'false';
     if (root.dataset.near !== near) root.dataset.near = near;
   }, []);
 
-  /** Tag sides (greedy, avoiding markers, other tags and the panels) and warning hover sides; on moveend only. */
+  /** Tag sides (greedy, avoiding markers, other tags and the chrome) and warning hover sides; on moveend only. */
   const layoutTags = useCallback(() => {
     const map = mapRef.current;
     const root = overlayRef.current;
     if (!map || !root) return;
     const { w, h } = sizeRef.current;
-    const frame: Rect = { x: padRef.current.left, y: 0, w: Math.max(0, w - padRef.current.left - padRef.current.right), h };
+    const pad = padRef.current;
+    const frame: Rect = { x: pad.left, y: pad.top, w: Math.max(0, w - pad.left - pad.right), h: Math.max(0, h - pad.top - pad.bottom) };
     const markers = Array.from(root.querySelectorAll<HTMLElement>('.mv-marker')).filter((el) => el.dataset.off !== '1');
     markers.sort((a, b) => Number(b.classList.contains('is-selected')) - Number(a.classList.contains('is-selected')));
     const pts = markers.map((el) => map.project([num(el.dataset.lon), num(el.dataset.lat)]));
-    const occupied: (Rect & { weight?: number })[] = pts.map((p) => ({ x: p.x - 17, y: p.y - 17, w: 34, h: 34 }));
-    // The map's own cards (legend, NEA, caption, All APAC) count as obstacles for the tags.
-    const base = root.getBoundingClientRect();
-    rootRef.current?.querySelectorAll<HTMLElement>('.mv-legend, .mv-compact, .mv-nea, .mv-caption, .mv-scrubber, .mv-home').forEach((card) => {
-      const b = card.getBoundingClientRect();
-      if (b.width > 0 && b.height > 0) occupied.push({ x: b.left - base.left, y: b.top - base.top, w: b.width, h: b.height, weight: 3 });
-    });
+    const occupied: (Rect & { weight?: number })[] = pts.map((pt) => ({ x: pt.x - 18, y: pt.y - 18, w: 36, h: 36 }));
     const wmarkers = Array.from(root.querySelectorAll<HTMLElement>('.mv-wmarker')).filter((el) => el.dataset.off !== '1');
     for (const el of wmarkers) {
-      const p = map.project([num(el.dataset.lon), num(el.dataset.lat)]);
-      occupied.push({ x: p.x - 8, y: p.y - 8, w: 16, h: 16 });
-      el.dataset.side = `${p.x - frame.x > frame.w * 0.62 ? 'l' : 'r'}${p.y > h * 0.72 ? 'u' : 'd'}`;
+      const pt = map.project([num(el.dataset.lon), num(el.dataset.lat)]);
+      occupied.push({ x: pt.x - 10, y: pt.y - 10, w: 20, h: 20 });
+      el.dataset.side = `${pt.x - frame.x > frame.w * 0.62 ? 'l' : 'r'}${pt.y > h * 0.62 ? 'u' : 'd'}`;
     }
     markers.forEach((el, i) => {
       const tag = el.querySelector<HTMLElement>('.mv-tag');
       if (!tag) return;
       const tw = tag.offsetWidth;
       const th = tag.offsetHeight;
-      const gap = el.classList.contains('is-selected') ? 23 : 20;
+      const gap = 20;
       let best: { pos: TagPos; rect: Rect; score: number } | null = null;
       for (const pos of TAG_POSITIONS) {
         const rect = tagRect(pts[i].x, pts[i].y, pos, tw, th, gap);
@@ -1155,7 +1204,6 @@ export default function MapView({
       }
       if (best) {
         if (el.dataset.tag !== best.pos) el.dataset.tag = best.pos;
-        // A tag that cannot fit inside the visible map is hidden (the marker and its aria-label stay).
         const clip = outside(best.rect, frame) > 0 ? '1' : '0';
         if (el.dataset.clip !== clip) el.dataset.clip = clip;
         occupied.push(best.rect);
@@ -1170,59 +1218,115 @@ export default function MapView({
     }
   }, []);
 
-  /** Floating panels → map padding. The map content stays still; only later camera moves use the new centre. */
+  /** Shell chrome (drawer, card, top bar) and the dock → camera padding. The map content stays still. */
   const syncPadding = useCallback(() => {
     const map = mapRef.current;
     const root = rootRef.current;
     if (!map || !root) return;
-    // The custom properties hold calc() expressions; two hidden probes resolve them to pixels.
     const width = root.clientWidth;
-    const next = overlayPadding(probeLRef.current?.offsetWidth ?? 0, probeRRef.current?.offsetWidth ?? 0, width);
+    const height = root.clientHeight;
+    const horiz = overlayPadding(probeLRef.current?.offsetWidth ?? 0, probeRRef.current?.offsetWidth ?? 0, width);
+    const dockH = dockRef.current?.offsetHeight ?? 0;
+    const cardH = narrowRef.current ? (cardRef.current?.offsetHeight ?? 0) : 0;
+    root.style.setProperty('--mv-dock-h', `${dockH}px`);
+    let top = probeTRef.current?.offsetWidth ?? 0;
+    let bottom = Math.max(dockH, cardH) + 8;
+    const room = height - 140;
+    if (top + bottom > room) {
+      const f = Math.max(0, room) / (top + bottom);
+      top = Math.round(top * f);
+      bottom = Math.round(bottom * f);
+    }
+    const next = { ...horiz, top, bottom };
     padRef.current = next;
-    const isTight = width - next.left - next.right < TIGHT_MAX;
-    setTight((prev) => (prev === isTight ? prev : isTight));
     const prev = map.getPadding();
-    if (prev.left === next.left && prev.right === next.right) return;
-    const padding = { top: 0, bottom: 0, left: next.left, right: next.right };
+    if (prev.left === next.left && prev.right === next.right && prev.top === next.top && prev.bottom === next.bottom) return;
     if (map.isMoving()) {
-      map.setPadding(padding);
+      map.setPadding(next);
       return;
     }
-    const cx = next.left + (width - next.left - next.right) / 2;
-    map.jumpTo({ center: map.unproject([cx, root.clientHeight / 2]), padding });
+    // Keep what was centred in the old visible area centred in the new one.
+    const pl = prev.left ?? 0;
+    const pr = prev.right ?? 0;
+    const pt = prev.top ?? 0;
+    const pb = prev.bottom ?? 0;
+    const prevCx = pl + (width - pl - pr) / 2;
+    const prevCy = pt + (height - pt - pb) / 2;
+    map.jumpTo({ center: map.unproject([prevCx, prevCy]), padding: next });
   }, []);
 
-  /** Fly to a selection (±0.3° around a summit, or the watch box with a margin), or back to the region. */
+  /** Fly to a watch area (±0.3° around a summit, or the box with a margin), or fit the region. */
   const fitTo = useCallback(
     (incident: Incident | null, animate: boolean) => {
       const map = mapRef.current;
       if (!map) return;
       syncPadding();
       const { w, h } = sizeRef.current;
-      const visW = Math.max(0, w - padRef.current.left - padRef.current.right);
+      const pad = padRef.current;
+      const visW = Math.max(0, w - pad.left - pad.right);
+      const visH = Math.max(0, h - pad.top - pad.bottom);
       const want = incident ? FIT_MARGIN : REGION_MARGIN;
-      // The bottom dock (forecast scrubber, caption) covers the lower map: keep the fit above it.
-      const dock = rootRef.current?.querySelector<HTMLElement>('.mv-dock');
-      const dockH = dock ? dock.offsetHeight + 40 : 0;
+      // MapLibre adds the map's own padding (the chrome, set by syncPadding) to these margins.
       const m = {
-        top: Math.min(want.top, h / 5),
-        bottom: Math.min(Math.max(want.bottom, dockH), h * 0.4),
+        top: Math.min(want.top, visH / 6),
+        bottom: Math.min(want.bottom, visH / 6),
         left: Math.min(want.left, visW / 6),
         right: Math.min(want.right, visW / 6),
       };
+      const duration = animate && !prefersReducedMotion() ? (incident ? 1600 : 1200) : 0;
+      if (incident?.hazard === 'volcano') {
+        // A world-eye view of a volcano: the summit in its region (towns, coast, where ash would go), not
+        // the crater. Closer zooms are the reader's choice, kept when already closer.
+        const zoom = Math.max(VOLCANO_ZOOM.min, Math.min(VOLCANO_ZOOM.max, map.getZoom()));
+        map.flyTo({ center: [incident.lon, incident.lat], zoom, padding: padRef.current, duration, essential: false, curve: 1.3, bearing: 0, pitch: 0 });
+        return;
+      }
       const bounds: LngLatBoundsLike = incident ? selectionBounds(incident) : apacBounds();
-      const duration = animate && !prefersReducedMotion() ? (incident ? 1800 : 1400) : 0;
-      map.fitBounds(bounds, {
-        padding: m,
-        duration,
-        maxZoom: 14,
-        essential: false,
-        bearing: 0,
-        pitch: 0,
-      });
+      map.fitBounds(bounds, { padding: m, duration, maxZoom: 7.5, essential: false, bearing: 0, pitch: 0 });
     },
     [syncPadding],
   );
+
+  /** Fly to a point (a city, a warning) at a regional zoom, keeping a closer zoom if the map already has one. */
+  const flyToPoint = useCallback(
+    (lon: number, lat: number) => {
+      const map = mapRef.current;
+      if (!map || !Number.isFinite(lon) || !Number.isFinite(lat)) return;
+      syncPadding();
+      const zoom = Math.max(POINT_ZOOM.min, Math.min(POINT_ZOOM.max, map.getZoom()));
+      const reduce = prefersReducedMotion();
+      map.flyTo({ center: [lon, lat], zoom, padding: padRef.current, duration: reduce ? 0 : 1300, essential: false, curve: 1.3 });
+    },
+    [syncPadding],
+  );
+
+  /** Fit a set of points (the scenario's drift) in the visible map. */
+  const fitPoints = useCallback(
+    (points: readonly LonLat[]) => {
+      const map = mapRef.current;
+      if (!map || points.length === 0) return;
+      syncPadding();
+      const lons = points.map((pt) => pt[0]);
+      const lats = points.map((pt) => pt[1]);
+      map.fitBounds(
+        [
+          [Math.min(...lons), Math.min(...lats)],
+          [Math.max(...lons), Math.max(...lats)],
+        ],
+        { padding: 48, duration: prefersReducedMotion() ? 0 : 1200, maxZoom: 7.5, essential: false, bearing: 0, pitch: 0 },
+      );
+    },
+    [syncPadding],
+  );
+
+  // Starting a scenario frames the whole 24 h drift, so the plume grows in view.
+  useEffect(() => {
+    if (!ready || !scenarioActive || !scenarioDrift || !selectedIncident) return;
+    const pts: LonLat[] = [[selectedIncident.lon, selectedIncident.lat], ...scenarioDrift.tracks.flatMap((t) => t.points.map((pt) => [pt.lon, pt.lat] as LonLat))];
+    fitPoints(pts);
+    // Only when a scenario starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, scenarioActive, scenarioDrift !== null]);
 
   /** NASA GIBS rasters under the deck overlays and the basemap labels; idempotent, safe before style load. */
   const syncGibsRef = useRef<() => void>(() => {});
@@ -1242,7 +1346,6 @@ export default function MapView({
           }
           if (!map.getLayer(layerId)) {
             const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
-            // Overzoom past maxzoom: MapLibre scales the last level up; the raster keeps showing when zoomed in.
             map.addLayer({ id: layerId, type: 'raster', source: spec.id, paint: { 'raster-opacity': want.opacity, 'raster-fade-duration': 0 } }, firstSymbol);
           } else {
             map.setPaintProperty(layerId, 'raster-opacity', want.opacity);
@@ -1255,49 +1358,24 @@ export default function MapView({
         console.error('Satellite layer could not be updated:', err);
       }
     }
-    // Infrared above true colour when both are on.
     if (want.ir && want.tc && map.getLayer(`${gibsIr.id}-layer`) && map.getLayer(`${gibsTrue.id}-layer`)) {
       map.moveLayer(`${gibsTrue.id}-layer`, `${gibsIr.id}-layer`);
     }
   };
   useEffect(() => {
     if (ready) syncGibsRef.current();
-  }, [ready, layers.satIr, layers.satTrue, satOpacity]);
+  }, [ready, layers.satIr, layers.satTrue, layers.satOpacity]);
 
-  /** Fit a box (the 24 h ash drift, the tsunami warning areas) in the visible map, above the bottom dock. */
-  const fitBox = useCallback(
-    (points: readonly { lat: number; lon: number }[]) => {
-      const map = mapRef.current;
-      if (!map || points.length === 0) return;
-      syncPadding();
-      const lats = points.map((p) => p.lat);
-      const lons = points.map((p) => p.lon);
-      const { w, h } = sizeRef.current;
-      const visW = Math.max(0, w - padRef.current.left - padRef.current.right);
-      const dock = rootRef.current?.querySelector<HTMLElement>('.mv-dock');
-      const dockH = dock ? dock.offsetHeight + 24 : 0;
-      map.fitBounds(
-        [
-          [Math.min(...lons), Math.min(...lats)],
-          [Math.max(...lons), Math.max(...lats)],
-        ],
-        {
-          padding: {
-            top: Math.min(64, h / 6),
-            bottom: Math.min(Math.max(48, dockH), h * 0.5),
-            left: Math.min(48, visW / 6),
-            right: Math.min(96, visW / 5),
-          },
-          duration: prefersReducedMotion() ? 0 : 1200,
-          maxZoom: 9,
-          essential: false,
-          bearing: 0,
-          pitch: 0,
-        },
-      );
-    },
-    [syncPadding],
-  );
+  // 3D buildings follow their layer toggle.
+  useEffect(() => {
+    buildingsRef.current = layers.buildings;
+    const map = mapRef.current;
+    if (!ready || !map?.getLayer(BUILDINGS_LAYER)) return;
+    map.setLayoutProperty(BUILDINGS_LAYER, 'visibility', layers.buildings ? 'visible' : 'none');
+    if (layers.buildings && map.getZoom() >= BUILDINGS_MIN_ZOOM && map.getPitch() < 10) {
+      map.easeTo({ pitch: 50, duration: prefersReducedMotion() ? 0 : 600 });
+    }
+  }, [ready, layers.buildings]);
 
   // --- Map lifecycle ---------------------------------------------------------------------------
 
@@ -1308,7 +1386,6 @@ export default function MapView({
     try {
       map = new MapLibreMap({
         container: el,
-        style: darkRef.current ? STYLE_URLS.dark : STYLE_URLS.light,
         bounds: apacBounds(),
         fitBoundsOptions: { padding: 24 },
         attributionControl: false,
@@ -1324,7 +1401,7 @@ export default function MapView({
     mapRef.current = map;
     if (import.meta.env.DEV) (window as unknown as { __aseanMap?: MapLibreMap }).__aseanMap = map;
     map.scrollZoom.setWheelZoomRate(1 / 300);
-    map.addControl(new NavigationControl({ visualizePitch: true }), 'bottom-left');
+    map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
     map.addControl(new AttributionControl({ compact: true, customAttribution: CREDITS }), 'bottom-right');
 
     let timer: number | undefined;
@@ -1332,6 +1409,7 @@ export default function MapView({
     let offlineMode = false;
     let tilesOk = false;
     let tileErrors = 0;
+    const themeOf = (isDark: boolean) => (isDark ? 'dark' : 'light') as 'dark' | 'light';
     const clearTimer = () => {
       if (timer !== undefined) window.clearTimeout(timer);
       timer = undefined;
@@ -1350,42 +1428,41 @@ export default function MapView({
         if (!styleLoaded) goOffline();
       }, STYLE_TIMEOUT_MS);
     };
+    const loadLive = (isDark: boolean) => {
+      styleLoaded = false;
+      tilesOk = false;
+      tileErrors = 0;
+      map.setStyle(basemapStyleFor(themeOf(isDark)), basemapStyleOptions(themeOf(isDark)));
+      arm();
+    };
     retryStyleRef.current = () => {
       if (!offlineMode) return;
       offlineMode = false;
       setOffline(false);
-      styleLoaded = false;
-      tilesOk = false;
-      tileErrors = 0;
-      map.setStyle(darkRef.current ? STYLE_URLS.dark : STYLE_URLS.light, { diff: false });
-      arm();
+      loadLive(darkRef.current);
     };
     const onOnline = () => retryStyleRef.current?.();
     window.addEventListener('online', onOnline);
     applyStyleRef.current = (isDark: boolean) => {
-      styleLoaded = false;
-      tilesOk = false;
-      tileErrors = 0;
       if (offlineMode) {
+        styleLoaded = false;
         map.setStyle(buildOfflineStyle(getRegion(), isDark), { diff: false });
         return;
       }
-      map.setStyle(isDark ? STYLE_URLS.dark : STYLE_URLS.light, { diff: false });
-      arm();
+      loadLive(isDark);
     };
-    arm();
+    loadLive(darkRef.current);
 
     map.on('style.load', () => {
       styleLoaded = true;
       clearTimer();
       syncGibsRef.current();
-      // Compact attribution starts collapsed on phones (the "i" button opens it).
-      if (el.clientWidth <= NARROW_MAX) {
-        el.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show');
-      }
-      const buildingSource = BUILDING_SOURCES.find((id) => map.getSource(id));
+      // The compact attribution starts collapsed at every width (the "i" button opens it).
+      el.querySelector('.maplibregl-ctrl-attrib.maplibregl-compact-show')?.classList.remove('maplibregl-compact-show');
+      const buildingSource = BASEMAP_BUILDING_SOURCES.find((id) => map.getSource(id));
       if (offlineMode || !buildingSource || map.getLayer(BUILDINGS_LAYER)) return;
       const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
+      const paint = buildingPaint(themeOf(darkRef.current));
       map.addLayer(
         {
           id: BUILDINGS_LAYER,
@@ -1396,25 +1473,17 @@ export default function MapView({
           filter: ['!=', ['get', 'hide_3d'], true],
           layout: { visibility: buildingsRef.current ? 'visible' : 'none' },
           paint: {
-            'fill-extrusion-color': darkRef.current ? '#2b2f35' : '#d8d4cb',
-            'fill-extrusion-height': [
-              'interpolate',
-              ['linear'],
-              ['zoom'],
-              BUILDINGS_MIN_ZOOM,
-              0,
-              BUILDINGS_MIN_ZOOM + 0.6,
-              ['coalesce', ['get', 'render_height'], 6],
-            ],
+            'fill-extrusion-color': paint.color,
+            'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], BUILDINGS_MIN_ZOOM, 0, BUILDINGS_MIN_ZOOM + 0.6, ['coalesce', ['get', 'render_height'], 6]],
             'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
-            'fill-extrusion-opacity': darkRef.current ? 0.85 : 0.72,
+            'fill-extrusion-opacity': paint.opacity,
           },
         },
         firstSymbol,
       );
     });
     map.on('sourcedata', (e: MapSourceDataEvent) => {
-      if (BUILDING_SOURCES.includes(e.sourceId) && e.tile) tilesOk = true;
+      if (BASEMAP_BUILDING_SOURCES.includes(e.sourceId) && e.tile) tilesOk = true;
     });
     map.on('error', (e) => {
       // Handled here, so MapLibre does not log it: a failed style goes offline at once; tiles after 3 failures with none loaded.
@@ -1424,7 +1493,7 @@ export default function MapView({
         return;
       }
       const sourceId = (e as unknown as { sourceId?: string }).sourceId;
-      if (!tilesOk && sourceId !== undefined && BUILDING_SOURCES.includes(sourceId)) {
+      if (!tilesOk && sourceId !== undefined && BASEMAP_BUILDING_SOURCES.includes(sourceId)) {
         tileErrors += 1;
         if (tileErrors >= 3) goOffline();
       }
@@ -1433,7 +1502,7 @@ export default function MapView({
     map.on('load', () => {
       const overlay = new MapboxOverlay({
         interleaved: false,
-        layers: deckLayersRef.current,
+        layers: [...deckLayersRef.current, ...scenarioDeckRef.current],
         getTooltip: (info: PickingInfo) => {
           const id = info.layer?.id ?? '';
           if (info.object && (id === 'mv-quakes-usgs' || id === 'mv-quakes-bmkg')) {
@@ -1441,12 +1510,12 @@ export default function MapView({
           }
           if (info.object && id === 'mv-tide') {
             const st = info.object as SeaLevelStation;
-            return { text: `Tide gauge ${st.name} (IOC ${st.code})\nRaw tide gauge data, not a tsunami warning (IOC/VLIZ)\nClick for the last 24 h`, className: 'mv-tooltip' };
+            return { text: `Sea-level gauge ${st.name} (IOC ${st.code})\nRaw data, includes the tide; not a tsunami warning\nClick for the last 24 h`, className: 'mv-tooltip' };
           }
           const h = info.object as MapHotspot | undefined;
           if (!h || id !== 'mv-firms') return null;
           return {
-            text: `NASA FIRMS hotspot (satellite)\n${h.confidenceLabel} · FRP ${formatValue(h.frp)} MW\n${formatUtc(h.observedAt)}`,
+            text: `Satellite heat spot (NASA FIRMS)\n${h.confidenceLabel} confidence · ${formatValue(h.frp)} MW\n${formatUtc(h.observedAt)}\nNot a confirmed fire`,
             className: 'mv-tooltip',
           };
         },
@@ -1464,14 +1533,14 @@ export default function MapView({
     });
 
     map.on('move', positionOverlays);
-    map.on('movestart', (e) => {
-      if ((e as { originalEvent?: unknown }).originalEvent) setCity(null);
-    });
     map.on('moveend', () => {
       positionOverlays();
       layoutTags();
-      const s = windArrowStride(map.getZoom());
+      const z = map.getZoom();
+      const s = windArrowStride(z);
       setStride((prev) => (prev === s ? prev : s));
+      const b = Math.round(z * 2) / 2;
+      setZoomBucket((prev) => (prev === b ? prev : b));
     });
 
     return () => {
@@ -1492,7 +1561,7 @@ export default function MapView({
     };
   }, [positionOverlays, layoutTags]);
 
-  // Container size: narrow arrangement, padding, overlay bounds.
+  // Container size: phone arrangement, padding, overlay bounds.
   useEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === 'undefined') return;
@@ -1520,10 +1589,9 @@ export default function MapView({
   }, [
     ready,
     placed,
-    selectedId,
+    selection,
     layers,
     narrow,
-    tight,
     warningMarkers,
     gaugeMarkers,
     rings,
@@ -1534,58 +1602,58 @@ export default function MapView({
     tsunamiObsMarkers.length,
     tsunamiWarning,
     riverShown,
+    levels,
     syncPadding,
     positionOverlays,
     layoutTags,
   ]);
 
-  // The floating panels publish their widths through CSS custom properties that size the two probes:
-  // follow them (open, close, resize) without re-running on every render.
+  // The shell chrome (drawer, card, top bar) publishes its footprint through custom properties that size
+  // the probes; the dock and the card slot are measured directly. Follow all of them.
   useEffect(() => {
     if (typeof ResizeObserver === 'undefined') return;
-    const probes = [probeLRef.current, probeRRef.current].filter((p): p is HTMLSpanElement => p !== null);
-    if (probes.length === 0) return;
+    const els = [probeLRef.current, probeRRef.current, probeTRef.current, dockRef.current, cardRef.current].filter((p): p is HTMLElement => p !== null);
+    if (els.length === 0) return;
     const observer = new ResizeObserver(() => {
       syncPadding();
       positionOverlays();
       layoutTags();
     });
-    probes.forEach((p) => observer.observe(p));
+    els.forEach((p) => observer.observe(p));
     return () => observer.disconnect();
-  }, [syncPadding, positionOverlays, layoutTags]);
+  }, [syncPadding, positionOverlays, layoutTags, ready]);
 
-  // Selecting a watch area (map, list, hash) flies to it; clearing the selection returns to APAC.
-  const fitKey = selectedIncident?.id ?? '';
+  // Selecting something flies to it. Closing a card leaves the camera where it is. The first view fits the region.
+  const target = useMemo(() => {
+    if (!selection) return null;
+    if (selection.kind === 'area') return selectedIncident ? { kind: 'area' as const, incident: selectedIncident } : null;
+    if (selection.kind === 'city') {
+      const pl = airQuality?.places.find((c) => c.id === selection.id);
+      return pl ? { kind: 'point' as const, lon: pl.lon, lat: pl.lat } : null;
+    }
+    if (selection.kind === 'warning') {
+      const w = (warnings ?? []).find((x) => x.id === selection.id);
+      return w?.location ? { kind: 'point' as const, lon: w.location.lon, lat: w.location.lat } : null;
+    }
+    return null;
+  }, [selection, selectedIncident, airQuality, warnings]);
+  const targetKey = selection && target ? `${selection.kind}:${selection.id}` : '';
   const firstFit = useRef(true);
   useEffect(() => {
     if (!ready) return;
-    const animate = !firstFit.current || selectedIncident !== null;
-    setCity(null);
-    firstFit.current = false;
-    fitTo(selectedIncident, animate);
-    // Only a change of selection refits; free zoom and pan are left alone otherwise.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fitKey, ready]);
-
-  const goHome = () => {
-    setCity(null);
-    if (selectedId !== null && onClearSelection) onClearSelection();
-    else fitTo(null, true);
-  };
-
-  const toggleLayer = (key: keyof LayerToggles, on: boolean) => {
-    setLayers((prev) => ({ ...prev, [key]: on }));
-    if (key === 'buildings') {
-      buildingsRef.current = on;
-      const map = mapRef.current;
-      if (map?.getLayer(BUILDINGS_LAYER)) {
-        map.setLayoutProperty(BUILDINGS_LAYER, 'visibility', on ? 'visible' : 'none');
-        if (on && map.getZoom() >= BUILDINGS_MIN_ZOOM && map.getPitch() < 10) {
-          map.easeTo({ pitch: 50, duration: prefersReducedMotion() ? 0 : 600 });
-        }
+    if (firstFit.current) {
+      firstFit.current = false;
+      if (!target) {
+        fitTo(null, false);
+        return;
       }
     }
-  };
+    if (!target) return;
+    if (target.kind === 'area') fitTo(target.incident, true);
+    else flyToPoint(target.lon, target.lat);
+    // Only a change of selection refits; free zoom and pan are left alone otherwise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetKey, ready]);
 
   const setBasemapDark = useCallback((on: boolean) => {
     if (darkRef.current === on) return;
@@ -1609,7 +1677,7 @@ export default function MapView({
   // --- Official markers: one tab stop, arrow keys move between the visible ones ----------------
 
   const warningsDrawn = layers.warnings ? warningMarkers : [];
-  const gaugesDrawn = layers.warnings ? gaugeMarkers : [];
+  const gaugesDrawn = gaugeMarkers;
   const tsunamiBase = warningsDrawn.length + gaugesDrawn.length;
   const officialCount = tsunamiBase + tsunamiAreaMarkers.length + tsunamiObsMarkers.length;
   const officialTabStop = officialCount === 0 ? -1 : Math.min(officialActive, officialCount - 1);
@@ -1639,7 +1707,6 @@ export default function MapView({
         focusOfficial(current, -1);
         break;
       case 'Home':
-      case 'Escape':
         focusOfficial(-1, 1);
         break;
       case 'End':
@@ -1665,525 +1732,66 @@ export default function MapView({
     return (
       <div className={className ? `map-view is-error ${className}` : 'map-view is-error'} role="alert">
         <p>
-          <strong>The map engine could not start</strong> (WebGL may be unavailable). Use the watch-area list instead.
+          <strong>The map engine could not start</strong> (WebGL may be unavailable). The workspace sections still work.
         </p>
         <p className="mv-muted">{engineError}</p>
       </div>
     );
   }
 
-  const hasOfficial = layers.warnings && warningMarkers.some((w) => w.authority === 'official');
-  const hasEstimate = layers.warnings && warningMarkers.some((w) => w.authority === 'aggregator');
-  const hasGauge = layers.warnings && gaugeMarkers.length > 0;
-  const selectedRest = selected ? locationRest(selected.name, selected.incident.locationName) : '';
-  const chipText = neaShown && nea ? psiChipText(nea) : null;
-  const modeLabel = nea?.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT';
   const tsunamiIssued = tsunamiWarning?.issuedAt ? formatUtc(tsunamiWarning.issuedAt) : 'issue time not given';
-  /** In force: LIVE or SNAPSHOT plus the issue time. History: HISTORICAL with the real ended state. */
   const tsunamiStatus = !tsunamiWarning
     ? ''
     : tsunamiInForce
-      ? `${tsunamiWarning.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · issued ${tsunamiIssued}`
-      : `HISTORICAL · ${tsunamiIssued} · ${tsunamiWarning.ended ? 'ended' : 'not ended'}`;
-  const ashModeLabel = ashWind?.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT';
-  const ashDirections = ashDrift
-    ? ashDrift.tracks
-        .map((t) => `${t.label} toward ${t.bearingDeg === null ? 'nowhere (calm)' : compass16(t.bearingDeg)}, ${Math.round(t.distanceKm)} km`)
-        .join(' · ')
-    : '';
-  const showTsunamiHistory = (checked: boolean) => {
-    setTsunamiHistory(checked);
-    const latest = tsunamiPick.latest;
-    if (!checked || !latest) return;
-    if (!layers.tsunami) setLayers((prev) => ({ ...prev, tsunami: true }));
-    const pts = [...placeTsunamiAreas(latest.areas, idnDistrictIndex()).placed, ...(latest.observations ?? [])];
-    // After the panel renders, so the fit keeps clear of it.
-    window.setTimeout(() => fitBox(pts), 60);
+      ? `${tsunamiWarning.dataMode === 'live' ? 'Live' : 'Saved'} · issued ${tsunamiIssued}`
+      : `Past message · ${tsunamiIssued} · ${tsunamiWarning.ended ? 'ended' : 'not ended'}`;
+  const extrasOn = EXTRA_KEYS.filter((k) => layers[k]).length;
+  const chipOn = (key: LayerKey) => (key === 'satIr' ? layers.satIr || layers.satTrue : layers[key]);
+  const toggleChip = (key: LayerKey) => {
+    if (key === 'satIr') {
+      const on = layers.satIr || layers.satTrue;
+      onLayersChange({ satIr: !on, satTrue: false });
+      return;
+    }
+    onLayersChange({ [key]: !layers[key] } as Partial<MapLayerState>);
   };
 
-  const legendBody = (
-    <>
-      <div className="mv-legend-grid">
-        <ul className="mv-legend-list">
-          {LEGEND_STATES.map((state) => (
-            <li key={state} className={`mv-legend-item ${stateClass(state)}`}>
-              <svg className="mv-swatch" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-                <MarkerSymbol hazard={null} state={state} />
-              </svg>
-              <span>{STATE_LABEL[state]}</span>
-            </li>
-          ))}
-        </ul>
-        {(hasOfficial ||
-          hasEstimate ||
-          hasGauge ||
-          hotspotsShown.length > 0 ||
-          transportShown ||
-          ashShown ||
-          tsunamiAreaMarkers.length > 0 ||
-          tsunamiObsMarkers.length > 0 ||
-          quakesShown.length > 0 ||
-          tideShown.length > 0) && (
-          <ul className="mv-legend-list is-official">
-            {hasOfficial && (
-              <li className="mv-legend-item">
-                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <OfficialSymbol kind="official" />
-                </svg>
-                <span>
-                  Official warning <span className="mv-legend-sub">(issuer)</span>
-                </span>
-              </li>
-            )}
-            {hasEstimate && (
-              <li className="mv-legend-item">
-                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <OfficialSymbol kind="estimate" />
-                </svg>
-                <span>
-                  Impact estimate <span className="mv-legend-sub">(GDACS)</span>
-                </span>
-              </li>
-            )}
-            {hasGauge && (
-              <li className="mv-legend-item">
-                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <OfficialSymbol kind="gauge" />
-                </svg>
-                <span>
-                  Water-level gauge <span className="mv-legend-sub">(issuer)</span>
-                </span>
-              </li>
-            )}
-            {hotspotsShown.length > 0 && (
-              <li className="mv-legend-item">
-                <span className="mv-dot-swatch" aria-hidden="true" />
-                <span>
-                  Hotspot <span className="mv-legend-sub">(NASA FIRMS)</span>
-                </span>
-              </li>
-            )}
-            {tsunamiAreaMarkers.length > 0 && (
-              <li className="mv-legend-item">
-                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <OfficialSymbol kind={tsunamiWarning?.ended ? 'ended' : 'official'} />
-                </svg>
-                <span>
-                  Tsunami warning area <span className="mv-legend-sub">(BMKG, district centre)</span>
-                </span>
-              </li>
-            )}
-            {tsunamiObsMarkers.length > 0 && (
-              <li className="mv-legend-item">
-                <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <OfficialSymbol kind="gauge" />
-                </svg>
-                <span>
-                  Observed tsunami height <span className="mv-legend-sub">(BMKG gauge)</span>
-                </span>
-              </li>
-            )}
-            {quakesShown.length > 0 && (
-              <li className="mv-legend-item">
-                <span className="mv-quake-swatch" aria-hidden="true" />
-                <span>
-                  Earthquake <span className="mv-legend-sub">(USGS disc, BMKG ring; depth: amber shallow, teal mid, violet deep)</span>
-                </span>
-              </li>
-            )}
-            {tideShown.length > 0 && (
-              <li className="mv-legend-item">
-                <span className="mv-tide-swatch" aria-hidden="true" />
-                <span>
-                  Tide gauge <span className="mv-legend-sub">(IOC, raw)</span>
-                </span>
-              </li>
-            )}
-            {ashShown && (
-              <li className="mv-legend-item">
-                <span className="mv-ash-swatch" aria-hidden="true" />
-                <span>
-                  Ash drift <span className="mv-legend-sub">(modelled, ~3 / 5.5 / 9 km)</span>
-                </span>
-              </li>
-            )}
-            {transportShown && (
-              <li className="mv-legend-item">
-                <span className="mv-path-swatch" aria-hidden="true" />
-                <span>
-                  Haze path <span className="mv-legend-sub">(modelled)</span>
-                </span>
-              </li>
-            )}
-          </ul>
-        )}
-      </div>
-      <p className="mv-legend-note">Workflow states, not official alert levels</p>
-      {nea && layers.nea && (
-        <p className="mv-legend-nea">
-          <NeaSwatch kind={neaShown ? 'both' : 'wind'} variable={windVariable} />
-          <span>Wind &amp; haze: NEA Singapore</span>
-        </p>
-      )}
-      <div className="mv-layers" role="group" aria-labelledby={layersTitleId}>
-        <span id={layersTitleId} className="mv-layers-title">
-          Layers
-        </span>
-        <fieldset className="mv-layer-group">
-          <legend>Watch</legend>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.watch} onChange={(e) => toggleLayer('watch', e.currentTarget.checked)} />
-            <span>Watch areas</span>
-          </label>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.rings} onChange={(e) => toggleLayer('rings', e.currentTarget.checked)} />
-            <span>Distance rings</span>
-          </label>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.quakes} onChange={(e) => toggleLayer('quakes', e.currentTarget.checked)} />
-            <span>Earthquakes (USGS, BMKG)</span>
-          </label>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.nea} onChange={(e) => toggleLayer('nea', e.currentTarget.checked)} />
-            <span>NEA wind and haze</span>
-          </label>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.tide} onChange={(e) => toggleLayer('tide', e.currentTarget.checked)} />
-            <span>Tide gauges (IOC)</span>
-          </label>
-        </fieldset>
-        <fieldset className="mv-layer-group">
-          <legend>Official</legend>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.warnings} onChange={(e) => toggleLayer('warnings', e.currentTarget.checked)} />
-            <span>Official warnings</span>
-          </label>
-          {tsunamiPick.latest && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.tsunami} onChange={(e) => toggleLayer('tsunami', e.currentTarget.checked)} />
-              <span>Official tsunami areas (BMKG)</span>
-            </label>
-          )}
-          {tsunamiPick.latest && !tsunamiInForce && (
-            <label className="mv-layer mv-layer-sub">
-              <input type="checkbox" role="switch" checked={tsunamiHistory} onChange={(e) => showTsunamiHistory(e.currentTarget.checked)} />
-              <span>History: last BMKG tsunami warning</span>
-            </label>
-          )}
-        </fieldset>
-        <fieldset className="mv-layer-group">
-          <legend>Modelled</legend>
-          {ashDrift && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.ash} onChange={(e) => toggleLayer('ash', e.currentTarget.checked)} />
-              <span>Ash drift (modelled)</span>
-            </label>
-          )}
-          {transport && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.transport} onChange={(e) => toggleLayer('transport', e.currentTarget.checked)} />
-              <span>Haze transport (modelled)</span>
-            </label>
-          )}
-          {windGrid && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.particles} onChange={(e) => toggleLayer('particles', e.currentTarget.checked)} />
-              <span>Wind particles (modelled, 925 hPa)</span>
-            </label>
-          )}
-          {airQuality != null && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.haze} onChange={(e) => toggleLayer('haze', e.currentTarget.checked)} />
-              <span>Haze (modelled PM2.5, CAMS)</span>
-            </label>
-          )}
-          {riverFlow && riverFlow.length > 0 && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.river} onChange={(e) => toggleLayer('river', e.currentTarget.checked)} />
-              <span>River flow (modelled)</span>
-            </label>
-          )}
-        </fieldset>
-        <fieldset className="mv-layer-group">
-          <legend>Imagery</legend>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.satIr} onChange={(e) => toggleLayer('satIr', e.currentTarget.checked)} />
-            <span>Satellite: Himawari-9 infrared (~10 min, ~45 min delay)</span>
-          </label>
-          <label className="mv-layer">
-            <input type="checkbox" checked={layers.satTrue} onChange={(e) => toggleLayer('satTrue', e.currentTarget.checked)} />
-            <span>Satellite: true colour (yesterday)</span>
-          </label>
-          {(layers.satIr || layers.satTrue) && (
-            <label className="mv-layer mv-layer-range">
-              <span>Imagery opacity</span>
-              <input
-                type="range"
-                min={0.2}
-                max={1}
-                step={0.05}
-                value={satOpacity}
-                onChange={(e) => setSatOpacity(Number(e.currentTarget.value))}
-                aria-valuetext={`${Math.round(satOpacity * 100)} %`}
-              />
-            </label>
-          )}
-          {!offline && (
-            <label className="mv-layer">
-              <input type="checkbox" checked={layers.buildings} onChange={(e) => toggleLayer('buildings', e.currentTarget.checked)} />
-              <span>3D buildings</span>
-            </label>
-          )}
-          <label className="mv-layer">
-            <input type="checkbox" checked={!dark} onChange={(e) => setBasemapDark(!e.currentTarget.checked)} />
-            <span>Light map</span>
-          </label>
-        </fieldset>
-      </div>
-      {offline && (
-        <p className="mv-legend-note">
-          Offline map: street tiles unavailable, showing bundled country outlines.{' '}
-          <button type="button" className="mv-linkbtn" onClick={() => retryStyleRef.current?.()}>
-            Retry map
-          </button>
-        </p>
-      )}
-    </>
-  );
-
-
-  // Captions: official first, then the safety caption of the selection, then the rest. At most two show
-  // (one on phones); the others fold into a "Notes (n)" chip so the map stays visible at 1366x680.
-  const notes: { key: string; card?: boolean; node: ReactNode }[] = [];
-  if (tsunamiShown && tsunamiWarning && tsunamiPlacement) {
-    notes.push({
-      key: 'tsunami',
-      card: true,
-      node: (
-          <div className="mv-caption mv-tsunami" role="group" aria-label="Official BMKG InaTEWS tsunami warning areas">
-            <p className="mv-tsunami-head">
-              <span className={`mv-mode ${tsunamiInForce && tsunamiWarning.dataMode === 'live' ? 'is-live' : 'is-historical'}`}>{tsunamiStatus}</span>{' '}
-              <span lang="id">{tsunamiWarning.product}</span>
-            </p>
-            <p>
-              <span className="mv-caption-key">
-                Official BMKG InaTEWS warning areas, relayed verbatim. Positions are district centres (approximate). Follow BMKG&apos;s
-                instructions.
-              </span>{' '}
-              <a href={tsunamiWarning.issuerUrl} target="_blank" rel="noopener noreferrer">
-                BMKG InaTEWS <span aria-hidden="true">↗</span>
-                <span className="visually-hidden"> (opens in a new tab)</span>
-              </a>
-            </p>
-            <p className="mv-tsunami-meta">
-              {tsunamiPlacement.placed.length} of {tsunamiWarning.areas.length} areas placed
-              {tsunamiObsMarkers.length > 0 ? ` · ${tsunamiObsMarkers.length} observed heights (BMKG tide gauges)` : ''}
-              {onSelectWarning && (
-                <>
-                  {' · '}
-                  <button type="button" className="mv-linkbtn" onClick={() => onSelectWarning(tsunamiWarning.id)}>
-                    Open the BMKG message
-                  </button>
-                </>
-              )}
-            </p>
-            {tsunamiPlacement.unplaced.length > 0 && (
-              <details className="mv-tsunami-unplaced">
-                <summary>Not placed on map ({tsunamiPlacement.unplaced.length})</summary>
-                <ul>
-                  {tsunamiPlacement.unplaced.map((u, i) => (
-                    <li key={`${u.area.name}-${i}`}>
-                      <span lang="id">
-                        {u.area.name}
-                        {u.area.province ? `, ${u.area.province}` : ''} · <strong>{u.area.level ?? 'No level given'}</strong>
-                      </span>
-                      <span className="mv-tsunami-why"> · {u.reason}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-          </div>
-      ),
-    });
-  }
-  if (ashShown && ashDrift) {
-    notes.push({
-      key: 'ash',
-      node: (
-              <p className="mv-caption-ash">
-                <span className="mv-caption-key">
-                  Where ash would drift with current forecast winds at three heights (Open-Meteo, MODELLED). Illustrative, not an ash
-                  advisory or hazard zone. Official:{' '}
-                  <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
-                    PVMBG (MAGMA)
-                    <span className="visually-hidden"> (opens in a new tab)</span>
-                  </a>{' '}
-                  and{' '}
-                  <a href={VAAC_DARWIN_URL} target="_blank" rel="noopener noreferrer">
-                    VAAC Darwin
-                    <span className="visually-hidden"> (opens in a new tab)</span>
-                  </a>
-                  .
-                </span>{' '}
-                <span>Simplified: uses the forecast wind at the summit for the whole path.</span>{' '}
-                <span className="mv-caption-meta">
-                  {ashModeLabel} · 24 h from <time dateTime={ashDrift.startISO}>{formatUtc(ashDrift.startISO)}</time>, dots at 3, 6,
-                  12 and 24 h. {ashDirections}.
-                </span>{' '}
-                <button type="button" className="mv-linkbtn" onClick={() => fitBox(ashDrift.tracks.flatMap((t) => t.points))}>
-                  Show the 24 h drift
-                </button>
-              </p>
-      ),
-    });
-  }
-  if (rings) {
-    notes.push({
-      key: 'rings',
-      node: (
-              <p>
-                <span className="mv-caption-key">Distance from summit (reference), not an official hazard zone.</span>{' '}
-                <a href={MAGMA_URL} target="_blank" rel="noopener noreferrer">
-                  Official danger zone and recommendations: PVMBG / MAGMA <span aria-hidden="true">↗</span>
-                  <span className="visually-hidden"> (opens in a new tab)</span>
-                </a>
-              </p>
-      ),
-    });
-  }
-  for (const g of gibsShown) {
-    notes.push({
-      key: g.id,
-      node: (
-        <p>
-          <span className="mv-caption-key">Satellite imagery: {g.title}</span>{' '}
-          <span className="mv-caption-meta">
-            {g.timeISO.length > 10 ? `${formatUtc(g.timeISO)}` : `${g.timeISO} (UTC day)`}. {g.latencyNote} NASA GIBS.
-          </span>
-        </p>
-      ),
-    });
-  }
-  if (quakesShown.length > 0) {
-    notes.push({
-      key: 'quakes',
-      node: (
-        <p>
-          <span className="mv-caption-key">Earthquakes M4.5+ (USGS filled, BMKG rings), sized by magnitude, coloured by depth.</span>{' '}
-          <span className="mv-caption-meta">
-            {quakesRecent} in the last 24 h (bright), {quakesShown.length - quakesRecent} earlier, last 7 days. Each agency&apos;s report
-            is shown separately. Not a tsunami warning.
-          </span>
-        </p>
-      ),
-    });
-  }
-  if (tideShown.length > 0) {
-    notes.push({
-      key: 'tide',
-      node: (
-        <p>
-          <span className="mv-caption-key">Raw tide gauge data, not a tsunami warning (IOC/VLIZ).</span>{' '}
-          <span className="mv-caption-meta">{tideShown.length} stations; click one for its last 24 h.</span>
-        </p>
-      ),
-    });
-  }
-  if (riverShown.length > 0) {
-    notes.push({
-      key: 'river',
-      node: (
-        <p>
-          <span className="mv-caption-key">River flow: MODELLED (GloFAS via Open-Meteo), not a flood warning.</span>{' '}
-          <span className="mv-caption-meta">Click a river point for its 15-day modelled discharge.</span>
-        </p>
-      ),
-    });
-  }
-  if (hotspotsShown.length > 0) {
-    notes.push({
-      key: 'firms',
-      node: (
-              <p className="mv-caption-firms">
-                <span className="mv-caption-key">NASA FIRMS hotspots:</span>{' '}
-                <span className="mv-caption-meta">
-                  {hotspotsToday} on this replay day (filled), {hotspotsShown.length - hotspotsToday} earlier (faded); satellite
-                  detections, not confirmed fires
-                </span>
-              </p>
-      ),
-    });
-  }
-  if (transportShown && transport) {
-    notes.push({
-      key: 'transport',
-      node: (
-              <>
-                <p>
-                  <span className="mv-caption-key">
-                    MODELLED wind (Open-Meteo, {transport.level}) · illustrative haze paths, not a dispersion model
-                  </span>{' '}
-                  <span className="mv-caption-meta">
-                    {transport.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · from{' '}
-                    <time dateTime={transport.time}>{formatUtc(transport.time)}</time>, dots every 12 h
-                  </span>
-                </p>
-                {transport.summary && !rings && <p className="mv-caption-summary">{transport.summary}</p>}
-              </>
-      ),
-    });
-  }
-  const stackedNotes = stackNotes(notes, narrow ? 1 : 2);
-
   return (
-    <div ref={rootRef} className={`map-view${dark ? ' is-dark' : ' is-light'}${narrow ? ' is-narrow' : ''}${tight ? ' is-tight' : ''}${className ? ` ${className}` : ''}`}>
+    <div ref={rootRef} className={`map-view${dark ? ' is-dark' : ' is-light'}${narrow ? ' is-narrow' : ''}${card ? ' has-card' : ''}${className ? ` ${className}` : ''}`}>
       <div ref={mapElRef} className="mv-map" />
       <span ref={probeLRef} className="mv-probe is-left" aria-hidden="true" />
       <span ref={probeRRef} className="mv-probe is-right" aria-hidden="true" />
+      <span ref={probeTRef} className="mv-probe is-top" aria-hidden="true" />
 
       <div ref={overlayRef} className="mv-overlay" data-ready={ready ? 'true' : 'false'} data-near="false">
         {rings?.map((r) => (
-          <span key={r.km} className="mv-ring-label" data-lon={r.label[0]} data-lat={r.label[1]} aria-hidden="true">
+          <span key={r.km} className="mv-ring-label mv-near-only" data-lon={r.label[0]} data-lat={r.label[1]} aria-hidden="true">
             {r.km} km
           </span>
         ))}
         {hazeRegions?.regions.map((h) => (
           <span key={h.region} className="mv-haze-label mv-near-only" data-lon={h.lon} data-lat={h.lat}>
-            {h.region === 'central'
-              ? `PSI ${h.psi} · ${h.band} · NEA ${hazeRegions.mode} ${hazeRegions.time} UTC`
-              : `${h.region[0].toUpperCase()}${h.region.slice(1)} ${h.psi}`}
+            {h.region === 'central' ? `PSI ${h.psi} · ${h.band} · NEA measured, ${hazeRegions.mode} ${hazeRegions.time} UTC` : `${h.region[0].toUpperCase()}${h.region.slice(1)} ${h.psi}`}
           </span>
         ))}
         {nea && seaWindToward !== null && (
-          <span
-            className="mv-wind-label mv-near-only"
-            data-lon={SINGAPORE[0]}
-            data-lat={SINGAPORE[1]}
-          >
+          <span className="mv-wind-label mv-near-only" data-lon={SINGAPORE[0]} data-lat={SINGAPORE[1]}>
             Wind {windLine(nea)} · NEA stations
           </span>
         )}
         {driftCone && (
           <span className="mv-drift-label" data-lon={driftCone.label[0]} data-lat={driftCone.label[1]}>
-            Illustrative drift, not a dispersion model
+            Rough drift with Singapore&apos;s wind
           </span>
         )}
 
         {officialCount > 0 && (
-          <div
-            className="mv-official-layer"
-            role="group"
-            aria-label="Official warnings and water-level gauges on the map (arrow keys to move between them)"
-            onKeyDown={onOfficialKeyDown}
-          >
+          <div className="mv-official-layer" role="group" aria-label="Official warnings on the map (arrow keys move between them)" onKeyDown={onOfficialKeyDown}>
             {warningsDrawn.map((w, i) => {
               const official = w.authority === 'official';
               const isSelected = w.id === selectedWarningId;
               const area = w.areaDescription.trim() || w.headline.trim();
-              const label = official
-                ? `Official warning: ${w.issuer} · ${w.level} · ${area}`
-                : `Impact estimate (GDACS, not a warning): ${w.issuer} · ${w.level} · ${area}`;
+              const label = official ? `Official warning: ${w.issuer} · ${w.level} · ${area}` : `Impact estimate (GDACS, not a warning): ${w.issuer} · ${w.level} · ${area}`;
               const kind: OfficialKind = !official ? 'estimate' : w.ended ? 'ended' : 'official';
               const loc = w.location as { lat: number; lon: number };
               return (
@@ -2195,16 +1803,16 @@ export default function MapView({
                   data-lat={loc.lat}
                   aria-label={label}
                   aria-pressed={isSelected}
-                  onClick={onSelectWarning ? () => onSelectWarning(w.id) : undefined}
+                  onClick={() => onSelect(isSelected ? null : { kind: 'warning', id: w.id })}
                   {...officialProps(i)}
                 >
-                  <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <svg className="mv-wsymbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <OfficialSymbol kind={kind} selected={isSelected} />
                   </svg>
                   <span className="mv-wcallout" aria-hidden="true">
                     <strong>{w.issuer}</strong>
                     <span lang={w.language || undefined}>{w.level}</span>
-                    {w.ended && <span className="mv-wcallout-meta">Ended</span>}
+                    {w.levelGloss && <span className="mv-wcallout-meta">Our gloss: {w.levelGloss}</span>}
                     {!official && <span className="mv-wcallout-meta">Impact estimate, not a warning</span>}
                     {w.issuer.startsWith('Pacific Tsunami Warning Center') && (
                       <span className="mv-wcallout-meta" title={PTWC_NATIONAL_AUTHORITIES_NOTE}>
@@ -2217,7 +1825,7 @@ export default function MapView({
             })}
             {gaugesDrawn.map((g, i) => {
               const reading = `${formatValue(g.value)} ${g.unit} (${g.datum})`;
-              const label = `Water level: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
+              const label = `River gauge: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
               const cited = warningMarkers.find((w) => w.id.includes(g.id));
               const isSelected = cited !== undefined && cited.id === selectedWarningId;
               return (
@@ -2229,10 +1837,10 @@ export default function MapView({
                   data-lat={g.lat}
                   aria-label={label}
                   aria-pressed={cited ? isSelected : undefined}
-                  onClick={onSelectWarning && cited ? () => onSelectWarning(cited.id) : undefined}
+                  onClick={cited ? () => onSelect({ kind: 'warning', id: cited.id }) : undefined}
                   {...officialProps(warningsDrawn.length + i)}
                 >
-                  <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <svg className="mv-wsymbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <OfficialSymbol kind="gauge" selected={isSelected} />
                   </svg>
                   <span className="mv-wcallout" aria-hidden="true">
@@ -2249,7 +1857,6 @@ export default function MapView({
               tsunamiAreaMarkers.map((a, i) => {
                 const isSelected = tsunamiWarning.id === selectedWarningId;
                 const level = a.area.level ?? 'No level given';
-                // BMKG's own instruction line for this level, verbatim (no gloss or numbers of ours).
                 const instruction = bmkgLevelInstruction(tsunamiWarning, a.area.level);
                 const place = `${a.area.name}${a.area.province ? `, ${a.area.province}` : ''}`;
                 const kind: OfficialKind = tsunamiWarning.ended ? 'ended' : 'official';
@@ -2262,10 +1869,10 @@ export default function MapView({
                     data-lat={a.lat}
                     aria-label={`Official tsunami warning area (BMKG InaTEWS): ${place} · ${level}${instruction ? ` · BMKG's instruction for this level: ${instruction}` : ''} · ${tsunamiStatus} · position approximate, ${a.note}`}
                     aria-pressed={isSelected}
-                    onClick={onSelectWarning ? () => onSelectWarning(tsunamiWarning.id) : undefined}
+                    onClick={() => onSelect({ kind: 'warning', id: tsunamiWarning.id })}
                     {...officialProps(tsunamiBase + i)}
                   >
-                    <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                    <svg className="mv-wsymbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                       <OfficialSymbol kind={kind} selected={isSelected} />
                     </svg>
                     <span className="mv-tarea-level" lang="id" aria-hidden="true">
@@ -2303,10 +1910,10 @@ export default function MapView({
                     data-lat={o.lat}
                     aria-label={`${text}, tide gauge reading relayed from BMKG InaTEWS`}
                     aria-pressed={isSelected}
-                    onClick={onSelectWarning ? () => onSelectWarning(tsunamiWarning.id) : undefined}
+                    onClick={() => onSelect({ kind: 'warning', id: tsunamiWarning.id })}
                     {...officialProps(tsunamiBase + tsunamiAreaMarkers.length + i)}
                   >
-                    <svg className="mv-wsymbol" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                    <svg className="mv-wsymbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                       <OfficialSymbol kind="gauge" selected={isSelected} />
                     </svg>
                     <span className="mv-wcallout" aria-hidden="true">
@@ -2326,7 +1933,7 @@ export default function MapView({
             className={`mv-river${chart?.kind === 'river' && chart.id === r.pointId ? ' is-selected' : ''}`}
             data-lon={r.requested.lon}
             data-lat={r.requested.lat}
-            aria-label={`${r.river} at ${r.place}: modelled river flow (GloFAS via Open-Meteo), not a flood warning`}
+            aria-label={`${r.river} at ${r.place}: river flow forecast (GloFAS via Open-Meteo), not a flood warning`}
             onClick={(e) => {
               const box = rootRef.current?.getBoundingClientRect();
               const b = e.currentTarget.getBoundingClientRect();
@@ -2335,101 +1942,48 @@ export default function MapView({
           >
             <span className="mv-river-dot" aria-hidden="true" />
             <span className="mv-river-tag" aria-hidden="true">
-              {r.river} <span className="mv-river-sub">modelled</span>
+              {r.river} <span className="mv-river-sub">forecast</span>
             </span>
           </button>
         ))}
 
         {layers.watch &&
-          placed.map((p) => {
-            const isSelected = p.incident.id === selectedId;
+          placed.map(({ incident, name }) => {
+            const isSelected = incident.id === selectedAreaId;
+            const volcano = incident.hazard === 'volcano';
+            const level = volcano ? (levels[incident.id] ?? null) : null;
+            const ring = volcano ? pal.volcano.levelRing[volcanoLevelColour(level?.levelNumber ?? null)] : null;
+            const style = volcano
+              ? ({ '--lvl': rgbCss(ring as Rgba), '--vol-fill': rgbCss(pal.volcano.fill), '--vol-outline': rgbCss(pal.volcano.outline) } as CSSProperties)
+              : undefined;
+            const levelText = volcano ? (level ? `${level.level} (${level.issuer})` : 'No official level retrieved') : null;
             return (
               <button
-                key={p.incident.id}
+                key={incident.id}
                 type="button"
-                className={`mv-marker ${stateClass(p.state)}${isSelected ? ' is-selected' : ''}`}
-                data-lon={p.incident.lon}
-                data-lat={p.incident.lat}
-                aria-label={`${p.incident.title} — ${p.stateLabel}`}
+                className={`mv-marker${volcano ? ' is-volcano' : ' is-area'}${isSelected ? ' is-selected' : ''}`}
+                data-lon={incident.lon}
+                data-lat={incident.lat}
+                style={style}
+                aria-label={volcano ? `${name}, volcano. Official level: ${levelText}.` : `${name}, haze watch area`}
                 aria-pressed={isSelected}
-                aria-describedby={isSelected ? calloutId : undefined}
-                onClick={() => {
-                  if (isSelected) fitTo(p.incident, true);
-                  onSelect(p.incident.id);
-                }}
+                onClick={() => onSelect(isSelected ? null : { kind: 'area', id: incident.id })}
               >
-                <svg className="mv-symbol" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-                  <MarkerSymbol hazard={p.incident.hazard} state={p.state} selected={isSelected} />
+                <svg className="mv-symbol" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+                  {volcano ? <VolcanoSymbol selected={isSelected} /> : <FireAreaSymbol selected={isSelected} />}
                 </svg>
-                {isSelected ? (
-                  <span id={calloutId} className={`mv-tag mv-callout ${stateClass(p.state)}`}>
-                    <span className="mv-callout-title">
-                      <strong>{p.name}</strong>
-                      {!narrow && selectedRest && <> · {selectedRest}</>}
+                <span className="mv-tag" aria-hidden="true">
+                  <span className="mv-tag-name">{name}</span>
+                  {levelText && (
+                    <span className="mv-tag-level" lang={level ? 'id' : undefined}>
+                      {levelText}
                     </span>
-                    {!narrow && (
-                      <span className="mv-callout-coords mono">
-                        <span>{formatCoordinate(p.incident.lat, 'N', 'S')},</span>{' '}
-                        <span>{formatCoordinate(p.incident.lon, 'E', 'W')}</span>
-                      </span>
-                    )}
-                    <span className="mv-callout-state">{p.stateLabel}</span>
-                  </span>
-                ) : (
-                  <span className="mv-tag" aria-hidden="true">
-                    <span className="mv-tag-name">{p.name}</span>
-                    {!narrow && <span className="mv-tag-state"> · {p.stateLabel}</span>}
-                  </span>
-                )}
+                  )}
+                </span>
               </button>
             );
           })}
       </div>
-
-      {/* Legend and layer toggles: one disclosure, open by default on wide maps, closed on phones. */}
-      <details
-        key={narrow ? 'narrow' : tight ? 'tight' : 'wide'}
-        className={narrow ? 'mv-compact' : 'mv-compact is-wide'}
-        open={!narrow && !tight}
-      >
-        <summary className="mv-compact-summary">Legend and layers</summary>
-        <div className="mv-legend is-inline" role="group" aria-label="Map legend and layers">
-          {legendBody}
-        </div>
-      </details>
-
-      {neaShown && nea && drift && (
-        <div className="mv-nea" title={nea.attribution}>
-          <p className="mv-nea-source">
-            <span>{narrow ? 'NEA Singapore' : 'Wind: NEA Singapore stations'}</span>{' '}
-            <span className={`mv-mode is-${nea.dataMode}`}>{modeLabel}</span>{' '}
-            <time dateTime={nea.observedAt}>{formatUtc(nea.observedAt)}</time>
-          </p>
-          <p className={`mv-nea-row${downwindDeg !== null ? '' : ' is-unavailable'}`}>
-            {downwindDeg !== null && <NeaSwatch kind="wind" variable={windVariable} />}
-            <span>{downwindDeg !== null ? windLine(nea) : 'Wind direction unavailable'}</span>
-          </p>
-          {downwindDeg !== null && (
-            <p className="mv-nea-row">
-              <NeaSwatch kind="drift" />
-              <span>
-                {narrow
-                  ? 'Illustrative drift, not a dispersion model'
-                  : `Singapore wind applied to the ${selected?.name ?? 'watch'} hotspot area, ${Math.round(drift.distanceKm)} km away. Illustrative drift, not a dispersion model.`}
-              </span>
-            </p>
-          )}
-          {chipText && (
-            <p className="mv-nea-row mono" title={nea.haze ? `NEA PSI reading ${formatUtc(nea.haze.observedAt)}` : undefined}>
-              {chipText}
-            </p>
-          )}
-        </div>
-      )}
-
-      <button type="button" className="mv-home" title="Back to the regional view" onClick={goHome}>
-        All APAC
-      </button>
 
       {chart?.kind === 'tide' &&
         layers.tide &&
@@ -2444,49 +1998,67 @@ export default function MapView({
           return r ? <RiverFlowPopover series={r} anchor={chart.at} dark={dark} onClose={() => setChart(null)} /> : null;
         })()}
 
-      {city && airQuality && hazeHour && layers.haze && (
-        <CityPopover
-          cityId={city.id}
-          airQuality={airQuality}
-          timeISO={hazeHour.timeISO}
-          nowISO={hazeHour.steps.times[hazeHour.steps.nowIndex] ?? hazeHour.timeISO}
-          neaHaze={layers.nea ? (nea?.haze ?? null) : null}
-          anchor={city.at}
-          dark={dark}
-          onClose={() => setCity(null)}
-        />
+      {card && (
+        <div ref={cardRef} className="mv-card-slot" data-no-pan>
+          <ErrorBoundary
+            resetKey={selection ? `${selection.kind}:${selection.id}` : ''}
+            fallback={(message) => (
+              <p className="mv-card-error" role="alert">
+                This card could not be shown ({message}). The workspace sections still have the data.
+              </p>
+            )}
+          >
+            {card}
+          </ErrorBoundary>
+        </div>
       )}
 
-      <div className="mv-dock">
-        {airQuality && hazeHour && (layers.haze || layers.particles) && (
-          // Phones: the forecast scrubber folds into a disclosure so it never covers the whole map.
-          <details key={narrow ? 'narrow' : 'wide'} className="mv-scrub-box" open={!narrow}>
-            <summary className="mv-scrub-summary">Haze forecast (modelled)</summary>
-            <HazeScrubber
-              className="mv-scrubber"
-              steps={hazeHour.steps}
-              index={hazeHour.index}
-              onIndexChange={hazeHour.setIndex}
-              airQuality={airQuality}
-              dark={dark}
-            />
-          </details>
-        )}
-        {stackedNotes.visible.map((n) => (n.card ? <div key={n.key}>{n.node}</div> : null))}
-        {stackedNotes.visible.some((n) => !n.card) && (
-          <div className="mv-caption">
-            {stackedNotes.visible.map((n) => (n.card ? null : <div key={n.key}>{n.node}</div>))}
-          </div>
-        )}
-        {stackedNotes.hidden.length > 0 && (
-          <details className="mv-caption mv-notes">
-            <summary>Notes ({stackedNotes.hidden.length})</summary>
-            {stackedNotes.hidden.map((n) => (
-              <div key={n.key} className={n.card ? 'mv-notes-card' : undefined}>
-                {n.node}
-              </div>
-            ))}
-          </details>
+      <div ref={dockRef} className="mv-dock" data-no-pan>
+        <div className="mv-chips" role="group" aria-label="Map layers">
+          {MAP_CHIPS.map((c) => {
+            const Icon = c.key === 'particles' ? WindChipIcon : c.key === 'satIr' ? SatelliteChipIcon : CHIP_ICONS[c.key];
+            const on = chipOn(c.key);
+            return (
+              <button
+                key={c.key}
+                type="button"
+                className={`mv-chip mv-chip--${c.key}${on ? ' is-on' : ''}`}
+                aria-pressed={on}
+                title={c.explanation}
+                onClick={() => toggleChip(c.key)}
+              >
+                {Icon && <Icon size={15} />}
+                <span>{c.chipLabel}</span>
+              </button>
+            );
+          })}
+          {onOpenLayers && (
+            <button type="button" className="mv-chip mv-chip--more" onClick={onOpenLayers} title="Every other layer, with an explanation (workspace)">
+              <LayersIcon size={15} />
+              <span>{extrasOn > 0 ? `+${extrasOn} more on` : 'More layers'}</span>
+            </button>
+          )}
+          {offline && (
+            <button type="button" className="mv-chip mv-chip--offline" onClick={() => retryStyleRef.current?.()} title="Street tiles are unavailable; showing bundled country outlines">
+              Offline map · Retry
+            </button>
+          )}
+        </div>
+        {hazeHour && (
+          <HazeScrubber
+            className="mv-scrubber"
+            steps={hazeHour.steps}
+            index={hazeHour.index}
+            onIndexChange={(i) => {
+              hazeHour.setPlaying(false);
+              hazeHour.setIndex(i);
+            }}
+            playing={hazeHour.playing}
+            onPlayingChange={hazeHour.setPlaying}
+            airQuality={airQuality}
+            compact={narrow}
+            scenario={scenarioActive}
+          />
         )}
       </div>
     </div>

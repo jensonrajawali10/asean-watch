@@ -1,10 +1,12 @@
-// Compact app header: brand, workspace, and the persistent data-recency line. Publishes its measured
-// height as --header-offset so the inspector drawers open below it (the recency line stays visible under
-// a dialog). Nothing in the header's own styling reads that variable back (see App.css).
-// The Dark / Light toggle writes <html data-theme> (read by index.css and the map), persists the choice
-// in localStorage (index.html applies it before first paint) and fires 'aw:themechange' on window.
+// The floating top bar of map mode (docs/UX_V3.md section 2). Left: the brand block and one live headline
+// sentence with the time and a freshness chip. Right: the Official-alerts pill (red when a tsunami or
+// evacuation-level message is in force), the Dark / Light toggle and the Workspace button.
+// Publishes its measured height as --header-offset so the inspector drawers open below it.
+// The theme toggle writes <html data-theme> (read by index.css and the map), persists the choice in
+// localStorage (index.html applies it before first paint) and fires 'aw:themechange' on window.
 import { useLayoutEffect, useRef, useState } from 'react';
-import { formatUtc } from './format';
+import type { ReactNode } from 'react';
+import { WarningIcon, LayersIcon } from './shell/icons';
 
 export type Theme = 'dark' | 'light';
 /** localStorage key; index.html's pre-paint script reads the same key. */
@@ -25,13 +27,23 @@ function applyTheme(theme: Theme) {
 }
 
 export interface AppHeaderProps {
-  /** ISO time the loaded observation snapshot was taken; null when unknown. */
-  dataAsOf: string | null;
-  /** False while any loaded record is still a simulated fixture (the line then says so). */
-  allReal: boolean;
+  /** One live sentence built from the data, e.g. "Now: haze is worst over Palangka Raya (604 µg/m³, modelled)." */
+  headline: string;
+  /** The hour the map shows, e.g. "Thu 16 Oct 00:00 UTC". */
+  timeLabel: string | null;
+  /** ISO time behind `timeLabel`, for the <time> element. */
+  timeISO: string | null;
+  /** LIVE or SNAPSHOT with the run time; null while nothing has loaded. */
+  freshness: { mode: 'LIVE' | 'SNAPSHOT'; run: string | null } | null;
+  alerts: { count: number; urgent: boolean; label: string };
+  onAlerts: () => void;
+  workspaceOpen: boolean;
+  onWorkspace: () => void;
+  /** Extra content under the headline (e.g. a data-check notice). */
+  children?: ReactNode;
 }
 
-export default function AppHeader({ dataAsOf, allReal }: AppHeaderProps) {
+export default function AppHeader({ headline, timeLabel, timeISO, freshness, alerts, onAlerts, workspaceOpen, onWorkspace, children }: AppHeaderProps) {
   const ref = useRef<HTMLElement>(null);
   const [theme, setTheme] = useState<Theme>(readTheme);
 
@@ -58,48 +70,55 @@ export default function AppHeader({ dataAsOf, allReal }: AppHeaderProps) {
     return () => observer.disconnect();
   }, []);
 
-  const asOf = dataAsOf ? formatUtc(dataAsOf) : null;
-
   return (
-    <header className="app-header" ref={ref}>
-      <div className="brand">
-        <h1 className="brand-name">ASEAN Watch</h1>
-        <span className="workspace-label">
-          <span className="visually-hidden">Workspace: </span>
-          Environment
-        </span>
-      </div>
-      <div className="theme-toggle" role="group" aria-label="Colour theme">
-        <button type="button" aria-pressed={theme === 'dark'} onClick={() => choose('dark')}>
-          Dark
-        </button>
-        <button type="button" aria-pressed={theme === 'light'} onClick={() => choose('light')}>
-          Light
-        </button>
-      </div>
-      <p className="recency" role="note">
-        <strong>{allReal ? 'Real data' : 'Demo data'}</strong>
-        <span className="recency-long">
-          {' · '}
-          {allReal ? 'data as of' : 'simulated records'}
-          {asOf && (
-            <>
-              {' '}
-              <time dateTime={dataAsOf ?? undefined}>{asOf}</time>
-            </>
+    <header className="topbar" ref={ref}>
+      <div className="topbar__left">
+        <div className="brand">
+          <h1 className="brand-name">ASEAN Watch</h1>
+          <p className="brand-tag">Haze, fires and volcanoes across South-east Asia, with official warnings relayed as issued.</p>
+        </div>
+        <p className="headline" aria-live="polite">
+          {headline}
+        </p>
+        <p className="headline-meta">
+          {timeLabel && <time dateTime={timeISO ?? undefined}>{timeLabel}</time>}
+          {freshness && (
+            <span
+              className={`fresh-chip${freshness.mode === 'SNAPSHOT' ? ' is-snapshot' : ' is-live'}`}
+              title={freshness.mode === 'SNAPSHOT' ? `Bundled snapshot of the model run captured ${freshness.run ?? ''}` : `Model run retrieved ${freshness.run ?? ''}`}
+            >
+              {freshness.mode}
+              {freshness.run && <span className="fresh-chip__run"> {freshness.run}</span>}
+            </span>
           )}
-          {' · official warnings relayed verbatim · not an official warning service'}
-        </span>
-        <span className="recency-short">
-          {asOf && (
-            <>
-              {' · as of '}
-              <time dateTime={dataAsOf ?? undefined}>{asOf}</time>
-            </>
-          )}
-          {' · not an official warning service'}
-        </span>
-      </p>
+          <span className="headline-note">Not an official warning service.</span>
+        </p>
+        {children}
+      </div>
+      <div className="topbar__right">
+        <button
+          type="button"
+          className={`alerts-pill${alerts.urgent ? ' is-urgent' : ''}${alerts.count === 0 ? ' is-empty' : ''}`}
+          onClick={onAlerts}
+          title={alerts.urgent ? 'A tsunami or evacuation-level message is in force. Open the official warnings.' : 'Open the official warnings'}
+        >
+          <WarningIcon size={16} />
+          <span className="alerts-pill__count">{alerts.count}</span>
+          <span className="alerts-pill__text">{alerts.urgent ? 'official alerts: urgent' : alerts.label}</span>
+        </button>
+        <div className="theme-toggle" role="group" aria-label="Colour theme">
+          <button type="button" aria-pressed={theme === 'dark'} onClick={() => choose('dark')}>
+            Dark
+          </button>
+          <button type="button" aria-pressed={theme === 'light'} onClick={() => choose('light')}>
+            Light
+          </button>
+        </div>
+        <button type="button" className="ws-button" aria-pressed={workspaceOpen} onClick={onWorkspace} title="Open the analyst workspace">
+          <LayersIcon size={16} />
+          <span>Workspace</span>
+        </button>
+      </div>
     </header>
   );
 }

@@ -1,68 +1,20 @@
-/* MapView (MapLibre + deck.gl). Scoped under .map-view; shared colours, radii and the shadow come from
-   the tokens in src/index.css. Local custom properties use the --mv- prefix. The floating panels publish
-   --overlay-left / --overlay-right on .map-panel; every control here offsets itself by them.
-   Weights 400/600 only; no gradients, blur or pulsing. */
-
-/* Theme tokens. Light values come from the app tokens (src/index.css); the dark set (default, CARTO Dark
-   Matter basemap) is translucent ink with cream text and thin warm-grey borders. Text contrast on the dark
-   surface: cream #ece4d6 about 14:1, muted #bdb4a6 about 9:1, links #f2c27b about 11:1, official red
-   #ef7a6e about 6.8:1. */
-.map-view {
-  --mv-surface: rgba(255, 255, 255, 0.94);
-  --mv-surface: color-mix(in srgb, var(--panel) 94%, transparent);
-  --mv-solid: var(--panel);
-  --mv-text: var(--text);
-  --mv-muted: var(--text-muted);
-  --mv-border: var(--border);
-  --mv-border-strong: var(--border-strong);
-  --mv-hover: var(--panel-2);
-  --mv-link: var(--accent);
-  --mv-focus: var(--focus);
-  --mv-official: var(--official);
-  --mv-estimate: var(--estimate);
-  --mv-shadow: var(--shadow);
-  --mv-halo: var(--panel);
-  --mv-path: var(--mode-modelled-fg);
-  --mv-haze-ink: #4a3721;
-  --mv-water: var(--map-water);
-  --mv-glow: none;
-}
-
-.map-view.is-dark {
-  --mv-surface: rgba(10, 18, 24, 0.85);
-  --mv-solid: #0f1a21;
-  --mv-text: #ece4d6;
-  --mv-muted: #bdb4a6;
-  --mv-border: rgba(176, 164, 146, 0.45);
-  --mv-border-strong: rgba(196, 184, 166, 0.7);
-  --mv-hover: rgba(36, 48, 56, 0.95);
-  --mv-link: #f2c27b;
-  --mv-focus: #ffd27a;
-  --mv-official: #ef7a6e;
-  --mv-estimate: #b9c1cc;
-  --mv-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.35);
-  --mv-halo: #0a1218;
-  --mv-path: #ffc878;
-  --mv-haze-ink: #ead3ab;
-  --mv-water: #0e1419;
-  --mv-glow: drop-shadow(0 0 2px rgba(244, 166, 58, 0.95)) drop-shadow(0 0 7px rgba(244, 166, 58, 0.5));
-  color-scheme: dark;
-}
+/* Map mode (MapLibre + deck.gl). Scoped under .map-view; tokens only (src/index.css), so the dark and light
+   themes follow <html data-theme>. Map overlay colours drawn by deck.gl come from mapPalette.ts; the HTML
+   markers read theirs from inline custom properties set from the same palette (--lvl, --vol-fill).
+   The shell publishes --overlay-left / --overlay-right / --overlay-top on .map-panel (drawer, card, top
+   bar); MapView publishes --mv-dock-h (the chips and scrubber) for the corner controls. */
 
 .map-view {
-  --mv-ring: var(--map-marker);
-  --mv-fill: var(--mv-solid);
-  --mv-ink: var(--map-marker);
-  --mv-left: calc(var(--overlay-left, 0px) + 10px);
-  --mv-right: calc(var(--overlay-right, 0px) + 10px);
-
+  --mv-surface: var(--panel-glass);
+  --mv-left: calc(var(--overlay-left, 0px) + 12px);
+  --mv-top: calc(var(--overlay-top, 0px) + 8px);
   position: absolute;
   inset: 0;
   min-width: 0;
   overflow: hidden;
   overflow: clip;
-  background: var(--mv-water);
-  color: var(--mv-text);
+  background: var(--map-water);
+  color: var(--text);
   font-family: var(--font);
   font-size: 13px;
   line-height: 1.35;
@@ -86,10 +38,10 @@
 }
 
 .mv-muted {
-  color: var(--mv-muted);
+  color: var(--text-muted);
 }
 
-/* Resolve the panel footprints (calc() custom properties) to pixels for the map padding. */
+/* Resolve the chrome footprints (calc() custom properties) to pixels for the camera padding. */
 .mv-probe {
   position: absolute;
   top: 0;
@@ -106,6 +58,10 @@
   width: var(--overlay-right, 0px);
 }
 
+.mv-probe.is-top {
+  width: var(--overlay-top, 0px);
+}
+
 .mv-map {
   position: absolute;
   inset: 0;
@@ -113,51 +69,81 @@
 }
 
 .mv-map .maplibregl-canvas:focus-visible {
-  outline: 2px solid var(--mv-focus);
+  outline: 2px solid var(--focus);
   outline-offset: -3px;
 }
 
-/* MapLibre controls: zoom/compass bottom-left above "All APAC", attribution bottom-right; both clear of the panels. */
-.map-view .maplibregl-ctrl-bottom-left {
-  left: var(--overlay-left, 0px);
-  bottom: 44px;
-  transition: left 0.2s ease;
+/* MapLibre controls: zoom and compass under the top bar on the right (left of an open card); the
+   attribution sits above the dock. */
+.map-view .maplibregl-ctrl-top-right {
+  top: var(--mv-top);
+  right: var(--overlay-right, 0px);
+  transition: right 220ms ease;
 }
 
 .map-view .maplibregl-ctrl-bottom-right {
-  right: var(--overlay-right, 0px);
-  transition: right 0.2s ease;
+  right: 0;
+  bottom: calc(var(--mv-dock-h, 0px) + 12px);
+}
+
+.map-view .maplibregl-ctrl-group {
+  border-radius: 10px;
+  background: var(--panel-glass);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  box-shadow: var(--shadow);
+}
+
+.map-view .maplibregl-ctrl-group button + button {
+  border-top-color: var(--border);
+}
+
+.map-view.is-dark .maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: invert(0.9);
 }
 
 .map-view .maplibregl-ctrl-group button:focus-visible {
-  box-shadow: 0 0 0 2px var(--mv-focus);
+  box-shadow: 0 0 0 2px var(--focus);
 }
 
 .map-view .maplibregl-ctrl-attrib {
+  max-width: min(520px, calc(100vw - 80px));
+  border-radius: 8px;
+  background: var(--panel-glass);
+  color: var(--text-muted);
   font-family: var(--font);
   font-size: 11px;
 }
 
-/* deck.gl hover tooltip (FIRMS hotspots). */
+.map-view .maplibregl-ctrl-attrib a {
+  color: var(--text-muted);
+}
+
+.map-view.is-dark .maplibregl-ctrl-attrib-button {
+  filter: invert(0.9);
+}
+
+/* deck.gl hover tooltip (hotspots, quakes, tide gauges). */
 .mv-tooltip {
-  padding: 4px 8px 5px !important;
-  border: 1px solid var(--mv-border) !important;
-  border-radius: var(--radius) !important;
-  background: var(--mv-solid) !important;
-  box-shadow: var(--mv-shadow);
-  color: var(--mv-text) !important;
+  padding: 5px 9px 6px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+  background: var(--panel) !important;
+  box-shadow: var(--shadow);
+  color: var(--text) !important;
   font-family: var(--font) !important;
   font-size: 12px !important;
   line-height: 1.4;
   white-space: pre-line;
 }
 
-/* HTML overlay: markers and labels above the map. The layer takes no pointer events; its buttons do.
-   Positioned elements sit at 0,0 and are moved by a CSS transform written on every map move. */
+/* ---------- HTML overlay: markers and labels ------------------------------------------------------
+   The layer takes no pointer events; its buttons do. Positioned elements sit at 0,0 and move by a CSS
+   transform written on every map move. */
 .mv-overlay {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   /* clip, not hidden: focusing a marker near the edge must never scroll the overlay off the map. */
   overflow: hidden;
   overflow: clip;
@@ -182,107 +168,14 @@
   display: none;
 }
 
-/* Marker states (markers, legend swatches, callout) ------------------------------------------- */
-
-.map-view .is-monitoring {
-  --mv-ring: var(--state-monitoring-border);
-  --mv-fill: var(--mv-solid);
-  --mv-ink: var(--state-monitoring-fg);
-  --mv-chip-bg: var(--state-monitoring-bg);
-}
-
-.map-view .is-check {
-  --mv-ring: var(--state-check-border);
-  --mv-fill: var(--state-check-bg);
-  --mv-ink: var(--state-check-fg);
-  --mv-chip-bg: var(--state-check-bg);
-}
-
-.map-view .is-review {
-  --mv-ring: var(--state-review-strong);
-  --mv-fill: var(--state-review-bg);
-  --mv-ink: var(--state-review-fg);
-  --mv-chip-bg: var(--state-review-bg);
-}
-
-.mv-ring {
-  fill: var(--mv-fill);
-  stroke: var(--mv-ring);
-  stroke-width: 2;
-}
-
-/* Shape cues so colour is never the only signal: thin ring, dashed ring, bold ring + "!". */
-.map-view .is-check .mv-ring {
-  stroke-width: 3;
-  stroke-dasharray: 4.3 2.245;
-}
-
-.map-view .is-review .mv-ring {
-  stroke-width: 3.5;
-}
-
-.map-view .is-unknown .mv-ring {
-  stroke-dasharray: 1.5 2.5;
-}
-
-.mv-glyph-fill {
-  fill: var(--mv-ink);
-}
-
-.mv-glyph-stroke {
-  fill: none;
-  stroke: var(--mv-ink);
-  stroke-width: 2.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.mv-badge > circle:first-child {
-  fill: var(--state-review-strong);
-  stroke: var(--mv-solid);
-  stroke-width: 1.5;
-}
-
-.mv-badge > path {
-  fill: none;
-  stroke: var(--mv-solid);
-  stroke-width: 1.8;
-  stroke-linecap: round;
-}
-
-.mv-badge-dot {
-  fill: var(--mv-solid);
-}
-
-/* Static selection ring (no pulse: a pulse reads as a live alarm). */
+/* Selection ring, shared by every symbol. */
 .mv-select-ring {
-  fill: var(--mv-solid);
-  stroke: var(--mv-text);
-  stroke-width: 1.75;
-}
-
-/* Reserved official-style symbols: the shape carries the distinction from round watch areas. */
-.mv-wdiamond,
-.mv-gsquare {
-  fill: var(--mv-solid);
-  stroke: var(--mv-official);
-  stroke-width: 2;
-  stroke-linejoin: miter;
-}
-
-.mv-wdiamond.is-ended {
-  stroke: var(--mv-muted);
-  stroke-dasharray: 3 2;
-}
-
-.mv-wcircle {
   fill: none;
-  stroke: var(--mv-estimate);
-  stroke-width: 1.5;
-  stroke-dasharray: 2.4 1.6;
+  stroke: var(--focus);
+  stroke-width: 2;
 }
 
-/* Watch-area markers ----------------------------------------------------------------------- */
+/* Volcanoes and watch areas ---------------------------------------------------------------------- */
 
 .mv-marker {
   z-index: 3;
@@ -302,7 +195,7 @@
 }
 
 .mv-marker.is-selected {
-  z-index: 4;
+  z-index: 5;
 }
 
 .mv-marker:hover,
@@ -312,19 +205,19 @@
 
 .mv-symbol {
   position: absolute;
-  inset: 2px;
-  width: 32px;
-  height: 32px;
+  inset: 0;
+  width: 36px;
+  height: 36px;
   overflow: visible;
-  transition: transform 120ms ease-out;
+  transition: transform 140ms ease-out;
 }
 
 .mv-marker:hover .mv-symbol {
-  transform: scale(1.08);
+  transform: scale(1.1);
 }
 
 .mv-marker.is-selected .mv-symbol {
-  transform: scale(1.15);
+  transform: scale(1.18);
 }
 
 .mv-marker:focus {
@@ -332,29 +225,69 @@
 }
 
 .mv-marker:focus-visible {
-  outline: 2px solid var(--mv-focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
-/* Name tag (and the selected marker's callout). Side chosen on moveend: data-tag on the marker. */
+/* The ring is the issuer's level colour (MAGMA Level I–IV: green, yellow, orange, red; grey when none). */
+.mv-level-halo {
+  fill: none;
+  stroke: var(--vol-outline, var(--panel));
+  stroke-width: 6;
+  opacity: 0.75;
+}
+
+.mv-level-ring {
+  fill: color-mix(in srgb, var(--lvl, var(--border-strong)) 18%, transparent);
+  stroke: var(--lvl, var(--border-strong));
+  stroke-width: 3;
+}
+
+.mv-volcano {
+  fill: var(--vol-fill, var(--text));
+  stroke: var(--vol-outline, var(--panel));
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.mv-area-ring {
+  fill: var(--panel-glass);
+  stroke: var(--state-check-border);
+  stroke-width: 2;
+  stroke-dasharray: 3.5 2.2;
+}
+
+.mv-area-flame {
+  fill: var(--state-check-fg);
+}
+
+/* Name tag: the place name; the official level (verbatim) appears on hover and focus. */
 .mv-tag {
   position: absolute;
   top: 50%;
   left: calc(100% + 2px);
+  display: grid;
+  gap: 0;
   transform: translateY(-50%);
   width: max-content;
-  max-width: 15rem;
-  padding: 1px 6px;
-  border: 1px solid var(--mv-border);
-  border-radius: var(--radius-sm);
+  max-width: 16rem;
+  padding: 1px 7px 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
   background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-  color: var(--mv-text);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  box-shadow: var(--shadow);
+  color: var(--text);
   font-size: 13px;
   line-height: 18px;
   text-align: left;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.mv-marker[data-clip='1'] .mv-tag {
+  visibility: hidden;
 }
 
 .mv-marker[data-tag='left'] .mv-tag {
@@ -404,54 +337,28 @@
 }
 
 .mv-tag-name {
-  font-weight: 600;
+  font-weight: 650;
 }
 
-.mv-tag-state {
-  color: var(--mv-muted);
+.mv-tag-level {
+  display: none;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .mv-marker:hover .mv-tag,
-.mv-marker:focus-visible .mv-tag {
-  border-color: var(--mv-text);
+.mv-marker:focus-visible .mv-tag,
+.mv-marker.is-selected .mv-tag {
+  border-color: var(--lvl, var(--text));
+  visibility: visible;
 }
 
-.mv-callout {
-  display: grid;
-  gap: 2px;
-  padding: 5px 8px 6px;
-  border-left: 3px solid var(--mv-ring);
-  border-radius: var(--radius);
-  background: var(--mv-solid);
-  line-height: 1.3;
-  white-space: normal;
+.mv-marker:hover .mv-tag-level,
+.mv-marker:focus-visible .mv-tag-level {
+  display: block;
 }
 
-.mv-callout-title {
-  font-size: 14px;
-}
-
-.mv-callout-coords {
-  color: var(--mv-muted);
-  font-size: 13px;
-}
-
-.mv-callout-coords > span {
-  white-space: nowrap;
-}
-
-.mv-callout-state {
-  justify-self: start;
-  margin-top: 2px;
-  padding: 0 6px;
-  border-radius: var(--radius-sm);
-  background: var(--mv-chip-bg, var(--mv-hover));
-  color: var(--mv-ink);
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-/* Official warning and gauge markers (reserved style, unlabelled, callout on hover/focus) ------ */
+/* Official warnings, gauges, tsunami areas (reserved style; callout on hover and focus) ------------- */
 
 .mv-official-layer {
   position: static;
@@ -459,9 +366,9 @@
 
 .mv-wmarker {
   z-index: 2;
-  width: 28px;
-  height: 28px;
-  margin: -14px 0 0 -14px;
+  width: 30px;
+  height: 30px;
+  margin: -26px 0 0 -15px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -474,8 +381,15 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Pins point at their location (the tip); squares and circles centre on it. */
+.mv-wmarker.is-gauge,
+.mv-wmarker.is-estimate {
+  margin: -15px 0 0 -15px;
+}
+
 .mv-wmarker:hover,
-.mv-wmarker:focus-visible {
+.mv-wmarker:focus-visible,
+.mv-wmarker.is-selected {
   z-index: 7;
 }
 
@@ -484,16 +398,56 @@
 }
 
 .mv-wmarker:focus-visible {
-  outline: 2px solid var(--mv-focus);
+  outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
 
 .mv-wsymbol {
   position: absolute;
-  inset: 4px;
-  width: 20px;
-  height: 20px;
+  inset: 3px;
+  width: 24px;
+  height: 24px;
   overflow: visible;
+  transition: transform 120ms ease-out;
+}
+
+.mv-wmarker:hover .mv-wsymbol,
+.mv-wmarker.is-selected .mv-wsymbol {
+  transform: scale(1.15);
+}
+
+.mv-wpin {
+  fill: var(--official-fill);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.mv-wpin.is-ended {
+  fill: var(--panel);
+  stroke: var(--text-muted);
+  stroke-dasharray: 2.5 1.8;
+}
+
+.mv-wpin-dot {
+  fill: var(--on-official);
+}
+
+.mv-wpin.is-ended + .mv-wpin-dot {
+  fill: var(--text-muted);
+}
+
+.mv-gsquare {
+  fill: var(--panel);
+  stroke: var(--official);
+  stroke-width: 2;
+}
+
+.mv-wcircle {
+  fill: none;
+  stroke: var(--estimate);
+  stroke-width: 1.8;
+  stroke-dasharray: 2.6 1.8;
 }
 
 .mv-wcallout {
@@ -504,14 +458,14 @@
   display: none;
   gap: 1px;
   width: max-content;
-  max-width: 220px;
-  padding: 4px 8px 5px 7px;
-  border: 1px solid var(--mv-border);
-  border-left: 3px solid var(--mv-official);
-  border-radius: var(--radius);
-  background: var(--mv-solid);
-  box-shadow: var(--mv-shadow);
-  color: var(--mv-text);
+  max-width: 240px;
+  padding: 5px 9px 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--official);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--text);
   font-size: 13px;
   line-height: 1.35;
   text-align: left;
@@ -531,11 +485,11 @@
 }
 
 .mv-wmarker.is-estimate .mv-wcallout {
-  border-left: 3px dashed var(--mv-estimate);
+  border-left: 3px dashed var(--estimate);
 }
 
 .mv-wmarker.is-ended .mv-wcallout {
-  border-left-color: var(--mv-muted);
+  border-left-color: var(--text-muted);
 }
 
 .mv-wmarker:hover > .mv-wcallout,
@@ -544,7 +498,7 @@
 }
 
 .mv-wcallout-meta {
-  color: var(--mv-muted);
+  color: var(--text-muted);
 }
 
 .mv-wcallout .mono {
@@ -552,679 +506,16 @@
   font-size: 12px;
 }
 
-/* Map labels (rings, NEA PSI regions, NEA wind, drift) ------------------------------------- */
-
-.mv-ring-label,
-.mv-haze-label,
-.mv-wind-label,
-.mv-drift-label {
-  z-index: 1;
-  width: max-content;
-  padding: 0 4px;
-  border-radius: var(--radius-sm);
-  background: var(--mv-surface);
-  font-size: 12px;
-  line-height: 1.35;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.mv-ring-label {
-  margin-top: -18px;
-  translate: -50% 0;
-  color: var(--mv-muted);
-  font-family: var(--mono);
-  font-weight: 600;
-}
-
-.mv-haze-label {
-  translate: -50% -50%;
-  color: var(--mv-haze-ink);
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.mv-wind-label {
-  margin-top: 34px;
-  translate: -50% 0;
-  color: var(--mv-text);
-  font-size: 12px;
-}
-
-.mv-drift-label {
-  max-width: 13rem;
-  translate: -50% -50%;
-  color: var(--mv-muted);
-  white-space: normal;
-  text-align: center;
-}
-
-/* Legend and layers card (top-left, clear of the left panel) ------------------------------- */
-
-/* The shell's "Select a watch area" hint floats at the top while nothing is selected: sit below it. */
-.workspace:has(> .float-hint) .mv-compact.is-wide {
-  top: 74px;
-}
-
-.mv-legend {
-  position: absolute;
-  top: 10px;
-  left: var(--mv-left);
-  z-index: 5;
-  width: max-content;
-  max-width: min(420px, calc(100% - var(--overlay-left, 0px) - var(--overlay-right, 0px) - 20px));
-  max-height: calc(100% - 130px);
-  overflow: auto;
-  padding: 6px 10px 5px;
-  border: 1px solid var(--mv-border);
-  border-radius: var(--radius);
-  background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-  font-size: 13px;
-  line-height: 1.3;
-  transition: left 0.2s ease;
-}
-
-.mv-legend-grid {
-  display: flex;
-  align-items: flex-start;
-  gap: 2px 14px;
-}
-
-.mv-legend-list {
-  display: grid;
-  gap: 3px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.mv-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.mv-legend-list.is-official .mv-legend-item {
-  align-items: flex-start;
-  white-space: normal;
-}
-
-.mv-legend-sub {
-  color: var(--mv-muted);
-  white-space: nowrap;
-}
-
-.mv-swatch {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  overflow: visible;
-}
-
-.mv-dot-swatch {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  margin: 3px;
-  border: 1.5px solid var(--mv-solid);
-  border-radius: 50%;
-  background: rgb(196 78 18);
-  box-shadow: 0 0 0 1px rgb(196 78 18 / 0.5);
-}
-
-.mv-path-swatch {
-  flex: none;
-  width: 16px;
-  height: 0;
-  margin-top: 8px;
-  border-top: 2.5px solid var(--mv-path);
-}
-
-.mv-legend .mv-legend-note {
-  width: 0;
-  min-width: 100%;
-  margin-top: 4px;
-  color: var(--mv-muted);
-  font-size: 12px;
-  line-height: 1.3;
-}
-
-.mv-legend .mv-legend-nea {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  width: 0;
-  min-width: 100%;
-  margin-top: 4px;
-  padding-top: 4px;
-  border-top: 1px solid var(--mv-border);
-}
-
-.mv-layers {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 10px;
-  width: 0;
-  min-width: 100%;
-  margin-top: 5px;
-  padding-top: 3px;
-  border-top: 1px solid var(--mv-border);
-}
-
-.mv-layers-title {
-  min-height: 24px;
-  line-height: 24px;
-  font-weight: 600;
-}
-
-.mv-layer {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  padding: 0 2px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.mv-layer input {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--mv-link);
-  cursor: pointer;
-}
-
-.mv-layer input:focus-visible {
-  outline: 2px solid var(--mv-focus);
-  outline-offset: 1px;
-}
-
-/* Compact maps: legend and layers behind one disclosure, closed by default. */
-.mv-compact {
-  position: absolute;
-  top: 8px;
-  left: calc(var(--overlay-left, 0px) + 8px);
-  z-index: 5;
-  max-width: calc(100% - 16px);
-  border: 1px solid var(--mv-border);
-  border-radius: var(--radius);
-  background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-}
-
-.mv-compact-summary {
-  min-height: 32px;
-  padding: 6px 10px;
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-}
-
-.mv-compact-summary:focus-visible {
-  outline: 2px solid var(--mv-focus);
-  outline-offset: 1px;
-}
-
-.mv-legend.is-inline {
-  position: static;
-  max-width: none;
-  max-height: 50vh;
-  border: 0;
-  border-top: 1px solid var(--mv-border);
-  border-radius: 0;
-  box-shadow: none;
-  background: transparent;
-}
-
-.mv-compact .mv-legend-grid {
-  flex-direction: column;
-}
-
-/* NEA Singapore card (top-right, clear of the right panel) ---------------------------------- */
-
-.mv-nea {
-  position: absolute;
-  top: 10px;
-  right: var(--mv-right);
-  z-index: 5;
-  display: grid;
-  gap: 3px;
-  max-width: min(250px, 40%);
-  padding: 6px 9px 7px;
-  border: 1px solid var(--mv-border);
-  border-radius: var(--radius);
-  background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-  font-size: 12px;
-  line-height: 1.35;
-  transition: right 0.2s ease;
-}
-
-.mv-nea time {
-  color: var(--mv-muted);
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.mv-nea-source {
-  font-weight: 600;
-}
-
-.mv-nea-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.mv-nea-row.is-unavailable {
-  color: var(--mv-muted);
-}
-
-.mv-nea-row.mono {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.mv-nea-swatch {
-  flex: none;
-  width: 22px;
-  height: 16px;
-  overflow: visible;
-}
-
-.mv-drift {
-  fill: rgba(90, 101, 116, 0.16);
-  stroke: var(--mv-muted);
-  stroke-width: 1;
-}
-
-.mv-wind line {
-  stroke: var(--mv-text);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-
-.mv-wind-tip {
-  fill: var(--mv-text);
-}
-
-.mv-wind.is-variable line {
-  stroke-dasharray: 3 2;
-}
-
-.mv-mode {
-  display: inline-block;
-  padding: 0 4px;
-  border: 1px solid var(--nea-snapshot-border);
-  border-radius: var(--radius-sm);
-  color: var(--nea-snapshot-fg);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.4;
-}
-
-.mv-mode.is-live {
-  border-color: var(--nea-live-border);
-  color: var(--nea-live-fg);
-}
-
-/* All APAC (bottom-left, under the zoom control) ----------------------------------------- */
-
-.mv-home {
-  position: absolute;
-  left: var(--mv-left);
-  bottom: 10px;
-  z-index: 5;
-  display: inline-flex;
-  align-items: center;
-  height: 29px;
-  padding: 0 10px;
-  border: 1px solid var(--mv-border-strong);
-  border-radius: var(--radius);
-  background: var(--mv-solid);
-  box-shadow: var(--mv-shadow);
-  color: var(--mv-text);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: left 0.2s ease;
-}
-
-.mv-home:hover {
-  border-color: var(--mv-text);
-  background: var(--mv-hover);
-}
-
-.mv-home:focus-visible {
-  outline: 2px solid var(--mv-focus);
-  outline-offset: 2px;
-}
-
-/* Bottom dock (above the attribution, clear of the zoom control and the panels): the haze forecast
-   scrubber and the caption sit side by side, and stack when the visible map is narrow. ---------- */
-
-.mv-dock {
-  position: absolute;
-  left: calc(var(--overlay-left, 0px) + 112px);
-  right: var(--mv-right);
-  bottom: 34px;
-  z-index: 5;
-  display: flex;
-  flex-wrap: wrap-reverse;
-  justify-content: flex-end;
-  align-items: flex-end;
-  gap: 8px;
-  pointer-events: none;
-  transition:
-    left 0.2s ease,
-    right 0.2s ease;
-}
-
-.mv-dock > * {
-  pointer-events: auto;
-}
-
-.map-view .city-popover {
-  z-index: 9;
-}
-
-/* Caption: what the drawn reference layers are. */
-.mv-caption {
-  z-index: 5;
-  display: grid;
-  gap: 3px;
-  flex: 0 1 auto;
-  max-width: 420px;
-  padding: 5px 8px 6px;
-  border: 1px solid var(--mv-border);
-  border-radius: var(--radius);
-  background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.mv-caption-key {
-  font-weight: 600;
-}
-
-.mv-caption-meta,
-.mv-caption-summary {
-  color: var(--mv-muted);
-}
-
-.mv-caption a {
-  color: var(--mv-link);
-  font-weight: 600;
-}
-
-/* Narrow container (phones): compact caption, smaller NEA card, tags name-only (set in the component). */
-.map-view.is-narrow .mv-dock {
-  left: 8px;
-  right: 8px;
-  bottom: 44px;
-}
-
-.map-view.is-narrow .mv-caption {
-  max-width: none;
-}
-
-.map-view.is-narrow .mv-caption-summary {
-  display: none;
-}
-
-.map-view.is-narrow .mv-nea {
-  top: 48px;
-  left: 8px;
-  right: 8px;
-  max-width: none;
-}
-
-.map-view.is-narrow .mv-compact {
-  z-index: 7;
-}
-
-.map-view.is-narrow .mv-nea ~ .mv-dock .mv-caption {
-  display: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mv-symbol,
-  .mv-legend,
-  .mv-home,
-  .mv-dock,
-  .mv-nea,
-  .map-view .maplibregl-ctrl-bottom-left,
-  .map-view .maplibregl-ctrl-bottom-right {
-    transition: none;
-  }
-
-  .mv-marker:hover .mv-symbol,
-  .mv-marker.is-selected .mv-symbol {
-    transform: none;
-  }
-}
-
-/* Dark theme details ----------------------------------------------------------------------- */
-
-/* Watch markers: amber glow; the monitoring state gets a dark fill with cream ink. */
-.map-view.is-dark .mv-symbol {
-  filter: var(--mv-glow);
-}
-
-.map-view.is-dark .is-monitoring {
-  --mv-ring: #e9d7b5;
-  --mv-fill: #1d2a33;
-  --mv-ink: #ece4d6;
-  --mv-chip-bg: #24323c;
-}
-
-.map-view.is-dark .mv-callout-state {
-  color: var(--mv-ink);
-}
-
-
-/* Labels on the map keep a dark halo. */
-.map-view.is-dark .mv-ring-label,
-.map-view.is-dark .mv-haze-label,
-.map-view.is-dark .mv-wind-label,
-.map-view.is-dark .mv-drift-label {
-  text-shadow:
-    0 0 2px var(--mv-halo),
-    0 0 4px var(--mv-halo);
-}
-
-.map-view.is-dark .mv-mode {
-  border-color: var(--mv-border-strong);
-  color: var(--mv-muted);
-}
-
-.map-view.is-dark .mv-mode.is-live {
-  border-color: var(--mv-text);
-  color: var(--mv-text);
-}
-
-/* MapLibre controls and attribution: translucent ink, cream icons, thin warm-grey borders. */
-.map-view.is-dark .maplibregl-ctrl-group {
-  border: 1px solid var(--mv-border);
-  background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-}
-
-.map-view.is-dark .maplibregl-ctrl-group button + button {
-  border-top-color: var(--mv-border);
-}
-
-.map-view.is-dark .maplibregl-ctrl-group button:not(:disabled):hover {
-  background-color: var(--mv-hover);
-}
-
-.map-view.is-dark .maplibregl-ctrl-icon {
-  filter: invert(0.92) sepia(0.25);
-}
-
-.map-view.is-dark .maplibregl-ctrl-attrib {
-  background: var(--mv-surface);
-  color: var(--mv-muted);
-}
-
-.map-view.is-dark .maplibregl-ctrl-attrib a {
-  color: var(--mv-text);
-}
-
-.map-view.is-dark .maplibregl-ctrl-attrib-button {
-  filter: invert(0.92);
-}
-
-.map-view.is-dark .mv-layer input {
-  accent-color: #f2b04a;
-}
-
-/* Wide maps: the legend disclosure sits top-left, clear of the left panel, open by default. */
-.mv-compact.is-wide {
-  top: 10px;
-  left: var(--mv-left);
-  max-width: min(420px, calc(100% - var(--overlay-left, 0px) - var(--overlay-right, 0px) - 20px));
-  transition: left 0.2s ease;
-}
-
-.mv-compact.is-wide .mv-legend-grid {
-  flex-direction: row;
-}
-
-.mv-compact.is-wide .mv-legend.is-inline {
-  max-height: calc(100vh - 260px);
-  padding-top: 4px;
-}
-
-/* Tight visible map (both panels open on a small screen): keep the caption to its key lines. */
-.map-view.is-tight .mv-caption-meta,
-.map-view.is-tight .mv-caption-firms,
-.map-view.is-tight .mv-caption-summary {
-  display: none;
-}
-
-.map-view.is-tight .mv-caption {
-  max-width: 300px;
-}
-
-/* Forecast scrubber wrapper: open on wide maps (summary hidden), a closed disclosure on phones. */
-.mv-scrub-box {
-  min-width: 0;
-}
-
-.mv-scrub-box[open] > .mv-scrub-summary {
-  display: none;
-}
-
-.map-view.is-narrow .mv-scrub-box[open] > .mv-scrub-summary {
-  display: block;
-}
-
-.mv-scrub-summary {
-  min-height: 32px;
-  padding: 6px 10px;
-  border: 1px solid var(--mv-border);
-  border-radius: var(--radius);
-  background: var(--mv-surface);
-  box-shadow: var(--mv-shadow);
-  color: var(--mv-text);
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-}
-
-.mv-scrub-summary:focus-visible {
-  outline: 2px solid var(--mv-focus);
-  outline-offset: 1px;
-}
-
-/* Phones: pinch and double-tap zoom replace the zoom buttons; All APAC moves to the top-right. */
-.map-view.is-narrow .maplibregl-ctrl-bottom-left {
-  display: none;
-}
-
-.map-view.is-narrow .mv-home {
-  top: 8px;
-  right: 8px;
-  bottom: auto;
-  left: auto;
-  height: 32px;
-}
-
-.map-view.is-narrow .mv-dock {
-  bottom: 30px;
-  flex-direction: column-reverse;
-  flex-wrap: nowrap;
-  align-items: stretch;
-}
-
-.map-view.is-narrow .mv-scrub-box[open] .mv-scrubber {
-  width: 100%;
-}
-
-/* Ash drift (modelled): neutral cream and tan lines, never the reserved official red. ------------- */
-
-.mv-ash-swatch {
-  flex: none;
-  width: 16px;
-  height: 9px;
-  margin-top: 4px;
-  border-top: 2.5px solid rgb(150 120 78);
-  border-bottom: 1.5px solid rgb(82 58 32);
-}
-
-.map-view.is-dark .mv-ash-swatch {
-  border-top-color: rgb(247 239 222);
-  border-bottom-color: rgb(190 152 102);
-}
-
-.mv-caption-ash a {
-  white-space: nowrap;
-}
-
-/* Small text button inside captions and the tsunami panel. */
-.mv-linkbtn {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--mv-link);
-  font: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.mv-linkbtn:focus-visible {
-  outline: 2px solid var(--mv-focus);
-  outline-offset: 1px;
-}
-
-.mv-layer.mv-layer-sub {
-  font-size: 12px;
-}
-
-/* Official BMKG tsunami warning areas: reserved official style, verbatim level always visible. ------ */
-
 .mv-tarea-level {
   position: absolute;
   top: 50%;
   left: calc(100% - 3px);
   translate: 0 -50%;
   padding: 0 4px;
-  border-left: 2px solid var(--mv-official);
-  border-radius: var(--radius-sm);
-  background: var(--mv-solid);
-  color: var(--mv-text);
+  border-left: 2px solid var(--official);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -1234,7 +525,7 @@
 }
 
 .mv-tarea.is-ended .mv-tarea-level {
-  border-left: 2px dashed var(--mv-muted);
+  border-left: 2px dashed var(--text-muted);
 }
 
 .mv-tarea:hover .mv-tarea-level,
@@ -1249,98 +540,58 @@
 }
 
 .mv-tobs .mv-wsymbol {
-  inset: 4px;
-  width: 14px;
-  height: 14px;
+  inset: 2px;
+  width: 18px;
+  height: 18px;
 }
 
-.mv-tsunami {
-  max-width: 380px;
-  border-left: 3px solid var(--mv-official);
+/* Labels (rings, NEA PSI regions, NEA wind, drift) ---------------------------------------------- */
+
+.mv-ring-label,
+.mv-haze-label,
+.mv-wind-label,
+.mv-drift-label {
+  z-index: 1;
+  width: max-content;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--mv-surface);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
-.mv-tsunami .mv-tsunami-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 6px;
+.mv-ring-label {
+  translate: -50% -50%;
+  color: var(--text-muted);
+  font-family: var(--mono);
   font-weight: 600;
 }
 
-.mv-tsunami-meta,
-.mv-tsunami-why {
-  color: var(--mv-muted);
-}
-
-.mv-tsunami-unplaced summary {
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.mv-tsunami-unplaced ul {
-  margin: 2px 0 0;
-  padding-left: 16px;
-  max-height: 96px;
-  overflow: auto;
-}
-
-/* Layer toggles grouped in sections (Watch / Official / Modelled / Imagery). ----------------------- */
-
-.mv-layer-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 10px;
-  width: 100%;
-  min-width: 0;
-  margin: 2px 0 0;
-  padding: 0;
-  border: 0;
-}
-
-.mv-layer-group > legend {
-  float: left;
-  width: 100%;
-  margin: 3px 0 0;
-  padding: 0;
-  color: var(--mv-muted);
+.mv-haze-label {
+  translate: -50% -50%;
+  color: var(--text);
+  font-family: var(--mono);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
-.mv-layer.mv-layer-range input[type='range'] {
-  width: 110px;
+.mv-wind-label {
+  margin-top: 34px;
+  translate: -50% 0;
+  color: var(--text);
 }
 
-/* Connector swatches -------------------------------------------------------------------------------- */
-
-.mv-quake-swatch {
-  flex: none;
-  width: 12px;
-  height: 12px;
-  margin: 2px;
-  border: 1.5px solid var(--mv-solid);
-  border-radius: 50%;
-  background: rgb(242 176 64);
-  box-shadow: 4px 0 0 -1px rgb(64 168 190), 8px 0 0 -2px rgb(150 118 214);
+.mv-drift-label {
+  max-width: 13rem;
+  translate: -50% -50%;
+  color: var(--text-muted);
+  white-space: normal;
+  text-align: center;
 }
 
-.mv-tide-swatch {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin: 4px;
-  border-radius: 50%;
-  background: rgb(30 96 150);
-}
-
-.map-view.is-dark .mv-tide-swatch {
-  background: rgb(150 200 235);
-}
-
-/* Modelled river points (GloFAS): small blue-grey dot with a "modelled" tag, never the official style. */
+/* River points (GloFAS, modelled): dashed violet ring, never the official style. */
 .mv-river {
   z-index: 2;
   display: inline-flex;
@@ -1350,7 +601,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--mv-text);
+  color: var(--text);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -1360,9 +611,9 @@
 .mv-river-dot {
   width: 14px;
   height: 14px;
-  border: 2px dashed var(--mv-path);
+  border: 2px dashed var(--mode-modelled-fg);
   border-radius: 50%;
-  background: var(--mv-solid);
+  background: var(--panel);
 }
 
 .mv-river.is-selected .mv-river-dot {
@@ -1371,66 +622,201 @@
 
 .mv-river-tag {
   padding: 0 4px;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   background: var(--mv-surface);
   white-space: nowrap;
 }
 
 .mv-river-sub {
-  color: var(--mv-muted);
+  color: var(--text-muted);
 }
 
 .mv-river:focus-visible {
-  outline: 2px solid var(--mv-focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 
-/* Caption stack: at most two captions; the rest behind a "Notes (n)" chip. ----------------------- */
-
-.mv-notes {
-  max-width: 420px;
-}
-
-.mv-notes > summary {
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.mv-notes[open] {
-  max-height: 40vh;
+/* ---------- The card slot ------------------------------------------------------------------------
+   Desktop: top-right under the top bar, clear of the dock. Phones: a bottom sheet over the dock. */
+.mv-card-slot {
+  position: absolute;
+  z-index: 25;
+  top: var(--mv-top);
+  right: 12px;
+  max-height: calc(100% - var(--overlay-top, 0px) - var(--mv-dock-h, 0px) - 36px);
   overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 14px;
+  scrollbar-width: thin;
+  animation: mv-card-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-.mv-notes .mv-notes-card > .mv-caption {
-  margin-top: 4px;
-  box-shadow: none;
+.mv-card-error {
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
 }
 
-.chart-popover {
-  z-index: 21;
-}
-
-/* Phones (375 px): a taller map, legend closed (set in the component), labels kept inside. --------- */
-
-@media (max-width: 520px) {
-  .mv-notes,
-  .mv-caption {
-    max-width: calc(100vw - 24px);
-  }
-
-  .mv-layer {
-    white-space: normal;
-  }
-
-  .mv-tarea-level,
-  .mv-river-tag {
-    max-width: 30vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
+@keyframes mv-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
   }
 }
 
-/* Tags that would spill out of the visible map are hidden (the selected callout always shows). */
-.mv-marker[data-clip='1']:not(.is-selected) > .mv-tag {
+/* ---------- The dock: chips above the one scrubber -------------------------------------------- */
+.mv-dock {
+  position: absolute;
+  z-index: 24;
+  left: var(--mv-left);
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  pointer-events: none;
+  transition: left 220ms ease;
+}
+
+.mv-dock > * {
+  pointer-events: auto;
+}
+
+.mv-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.mv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 4px 12px 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel-glass);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  box-shadow: var(--shadow);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+
+.mv-chip:hover {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.mv-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.mv-chip.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  color: var(--text);
+}
+
+.mv-chip.is-on svg {
+  color: var(--accent);
+}
+
+/* Warnings is the one chip in the reserved family: its icon turns official red when on. */
+.mv-chip--warnings.is-on svg {
+  color: var(--official);
+}
+
+.mv-chip--more {
+  border-style: dashed;
+}
+
+.mv-chip--offline {
+  border-color: var(--mode-historical-border);
+  background: var(--mode-historical-bg);
+  color: var(--mode-historical-fg);
+}
+
+/* ---------- Phones ------------------------------------------------------------------------------- */
+.map-view.is-narrow {
+  --mv-left: 8px;
+}
+
+.map-view.is-narrow .mv-dock {
+  right: 8px;
+  bottom: 8px;
+  gap: 6px;
+}
+
+.map-view.is-narrow .mv-chips {
+  flex-wrap: nowrap;
+  align-self: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px;
+  margin: -2px;
+}
+
+.map-view.is-narrow .mv-chip {
+  min-height: 36px;
+  padding-inline: 10px;
+  font-size: 12.5px;
+}
+
+.map-view.is-narrow .mv-card-slot {
+  top: auto;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  max-height: min(62%, calc(100% - var(--overlay-top, 0px) - 16px));
+  animation-name: mv-sheet-in;
+}
+
+.map-view.is-narrow .mv-card-slot .mcard {
+  width: 100%;
+}
+
+.map-view.is-narrow.has-card .mv-dock {
   visibility: hidden;
+}
+
+@keyframes mv-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+.map-view.is-narrow .maplibregl-ctrl-top-right {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-card-slot {
+    animation: none;
+  }
+
+  .mv-symbol,
+  .mv-wsymbol,
+  .mv-chip,
+  .mv-dock {
+    transition: none;
+  }
 }

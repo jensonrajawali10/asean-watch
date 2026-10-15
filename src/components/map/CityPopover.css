@@ -1,327 +1,76 @@
-/* City popover: light panel tokens by default, .is-dark for the dark map (same verified palette as
-   HazeScrubber.css). The NEA chip uses the banner pair (light #ffd27a on #141a22, 12.3:1; dark #14110c on
-   #d9b77f, 9.9:1) so measured data never looks like the modelled value above it. */
-.city-popover {
-  --cp-bg: var(--panel, #ffffff);
-  --cp-fg: var(--text, #141a22);
-  --cp-muted: var(--text-muted, #4e5967);
-  --cp-border: var(--border-strong, #7f8a98);
-  --cp-line: var(--accent, #1b58a8);
-  --cp-area: color-mix(in srgb, var(--accent, #1b58a8) 12%, transparent);
-  --cp-guide: var(--border, #b7bfc9);
-  --cp-focus: var(--focus, #1b58a8);
-  --cp-badge-bg: var(--mode-modelled-bg, #ece6f9);
-  --cp-badge-fg: var(--mode-modelled-fg, #4a2f8d);
-  --cp-badge-border: var(--mode-modelled-border, #c6b6ea);
-  position: absolute;
-  z-index: 20;
-  box-sizing: border-box;
-  width: 300px;
-  max-width: calc(100% - 16px);
-  padding: 10px 12px 8px;
-  border: 1px solid var(--cp-border);
-  border-radius: var(--radius, 4px);
-  background: var(--cp-bg);
-  color: var(--cp-fg);
+/* City card extras (the anatomy is in src/components/ui/MapCard.css). Tokens only, both themes. */
+
+.city-card__sub {
+  color: var(--text-muted);
+}
+
+.city-card__line {
+  margin: 6px 0 0;
   font-size: 13px;
-  line-height: 18px;
-  box-shadow: var(--shadow, 0 2px 10px rgba(20, 26, 34, 0.18));
-  cursor: default;
+  line-height: 1.45;
 }
 
-.city-popover.is-dark {
-  --cp-bg: rgba(14, 18, 22, 0.9);
-  --cp-fg: #ece4d6;
-  --cp-muted: #a9a193;
-  --cp-border: #857c6d;
-  --cp-line: #c9a675;
-  --cp-area: rgba(201, 166, 117, 0.16);
-  --cp-guide: #4a443b;
-  --cp-focus: #d8b680;
-  --cp-badge-bg: #221d31;
-  --cp-badge-fg: #cdbff0;
-  --cp-badge-border: #6c5ca3;
+.city-card__spark {
+  margin: 8px 0 2px;
 }
 
-.city-popover:not(.is-anchored) {
-  right: 12px;
-  top: 12px;
-}
-
-.city-popover p,
-.city-popover h3,
-.city-popover figure {
-  margin: 0;
-}
-
-.city-popover__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.city-popover__head h3 {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.city-popover__kind {
-  margin-left: 6px;
-  color: var(--cp-muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.city-popover__close {
-  flex: none;
-  width: 26px;
-  height: 26px;
-  margin: -3px -5px 0 0;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--radius, 4px);
-  background: transparent;
-  color: var(--cp-fg);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.city-popover__close:hover {
-  border-color: var(--cp-border);
-}
-
-.city-popover button:focus-visible,
-.city-popover a:focus-visible {
-  outline: 2px solid var(--cp-focus);
-  outline-offset: 2px;
-}
-
-.city-popover__sub {
-  margin-top: 1px;
-  color: var(--cp-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.city-popover__rule {
-  height: 0;
-  margin: 7px 0;
-  border: 0;
-  border-top: 1px solid var(--cp-guide);
-}
-
-.city-popover__reading {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 9px;
-  font-variant-numeric: tabular-nums;
-}
-
-.city-popover__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 1px 7px 1px 5px;
-  border: 1px solid var(--band, var(--cp-border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--band, transparent) 16%, transparent);
-  color: var(--cp-fg);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-}
-
-.city-popover__dot {
-  width: 9px;
-  height: 9px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--band, var(--cp-muted));
-  box-shadow: 0 0 0 1px var(--cp-border);
-}
-
-.city-popover__big {
-  font-size: 26px;
-  font-weight: 650;
-  line-height: 30px;
-  letter-spacing: -0.01em;
-}
-
-.city-popover__unit {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  font-size: 12px;
-  line-height: 15px;
-}
-
-.city-popover__when {
-  color: var(--cp-muted);
-  font-size: 11px;
-}
-
-.city-popover__meaning {
-  margin-top: 5px;
-  font-size: 12.5px;
-  line-height: 17px;
-}
-
-.city-popover__section {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.city-popover__tag,
-.city-popover__nea-tag {
-  display: inline-block;
-  padding: 0 5px;
-  border: 1px solid var(--cp-badge-border);
-  border-radius: var(--radius-sm, 3px);
-  background: var(--cp-badge-bg);
-  color: var(--cp-badge-fg);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 15px;
-}
-
-.city-popover__worst {
-  color: var(--cp-fg);
-  font-size: 12px;
-  line-height: 16px;
-  font-variant-numeric: tabular-nums;
-}
-
-.city-popover__trust {
-  display: flex;
-  gap: 6px;
-  color: var(--cp-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.city-popover__info {
-  flex: none;
-  margin-top: 1px;
-}
-
-.city-popover__official {
-  margin-top: 5px;
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.city-popover a {
-  color: var(--cp-line);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.city-popover__about {
-  margin-top: 6px;
-  color: var(--cp-muted);
-  font-size: 11.5px;
-  line-height: 15px;
-}
-
-.city-popover__about summary {
-  width: max-content;
-  color: var(--cp-fg);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.city-popover__about summary:focus-visible {
-  outline: 2px solid var(--cp-focus);
-  outline-offset: 2px;
-}
-
-.city-popover__about ul {
-  margin: 4px 0 0;
-  padding-left: 16px;
-}
-
-.city-popover__about li + li {
-  margin-top: 3px;
-}
-
-.city-popover__about a {
-  color: inherit;
-}
-
-.city-popover__time {
-  color: var(--cp-muted);
-  font-size: 12px;
-}
-
-.city-popover__spark {
-  margin-top: 4px;
-}
-
-.city-popover__spark svg {
+.city-card__spark svg {
   display: block;
-  max-width: 100%;
-  height: auto;
+  width: 100%;
+  height: 54px;
+  overflow: visible;
 }
 
-.city-popover__area {
-  fill: var(--cp-area);
+.city-card__area {
+  fill: var(--band, currentColor);
+  opacity: 0.22;
 }
 
-.city-popover__line {
+.city-card__trace {
   fill: none;
-  stroke: var(--cp-line);
+  stroke: var(--text);
   stroke-width: 1.6;
   stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
-.city-popover__axis {
-  stroke: var(--cp-guide);
-  stroke-width: 1;
-}
-
-.city-popover__guide {
-  stroke: var(--cp-guide);
-  stroke-width: 1;
+.city-card__guide {
+  stroke: var(--text-muted);
   stroke-dasharray: 3 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
-.city-popover__sel {
-  fill: var(--cp-bg);
-  stroke: var(--cp-fg);
-  stroke-width: 1.6;
+.city-card__axis {
+  stroke: var(--border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
-.city-popover__tick {
-  fill: var(--cp-muted);
-  font-family: var(--mono, ui-monospace, monospace);
+.city-card__sel {
+  fill: var(--panel);
+  stroke: var(--text);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.city-card__tick {
+  fill: var(--text-muted);
+  font-family: var(--mono);
   font-size: 10px;
 }
 
-.city-popover__nea {
-  margin-top: 5px;
-  padding: 3px 6px;
-  border-radius: 0;
-  background: var(--nea-chip-bg, #141a22);
-  color: var(--nea-chip-fg, #ffd27a);
-  font-family: var(--mono, ui-monospace, monospace);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.city-popover.is-dark .city-popover__nea {
-  background: #d9b77f;
-  color: #14110c;
-}
-
-.city-popover__nea .city-popover__nea-tag {
-  border-color: currentColor;
-  background: transparent;
-  color: inherit;
+/* NEA's MEASURED reading: its own outline chip, never the modelled violet. */
+.city-card__measured {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--nea-live-border);
+  border-radius: 999px;
+  color: var(--nea-live-fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
