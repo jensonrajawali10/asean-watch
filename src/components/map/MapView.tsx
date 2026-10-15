@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { AttributionControl, Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl';
-import type { IControl, LngLatBoundsLike, MapSourceDataEvent } from 'maplibre-gl';
+import type { IControl, LngLatBoundsLike, MapSourceDataEvent, RasterTileSource } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
@@ -70,6 +70,7 @@ import {
 import type { Bounds, LonLat, MapHotspot, RegionCollection } from './mapGeometry';
 import { PTWC_NATIONAL_AUTHORITIES_NOTE } from '../../lib/ptwc';
 import { endedLabel, isExpired, warningMatchesGauge } from '../../lib/warningsView';
+import { useNowMs } from '../../lib/useNowMs';
 import './MapView.css';
 
 export type { MapHotspot } from './mapGeometry';
@@ -551,8 +552,8 @@ export default function MapView({
   const [chart, setChart] = useState<{ kind: 'tide' | 'river'; id: string; at: { x: number; y: number } } | null>(null);
   /** "History: last BMKG tsunami warning" (only offered when no BMKG tsunami warning is in force). Off by default. */
   const [tsunamiHistory, setTsunamiHistory] = useState(false);
-  /** Wall clock once per mount: the ash drift starts at the forecast hour at or before it. */
-  const [nowMs] = useState(() => Date.now());
+  /** Shared wall clock (every 5 min, on visible, on online): the Himawari frame, "last 24 h" quakes, the ash-drift start, expiry. */
+  const nowMs = useNowMs();
   const [dark, setDark] = useState(() => resolveTheme(theme) === 'dark');
   const [narrow, setNarrow] = useState(false);
   /** The map visible between the panels is narrow (under TIGHT_MAX px): legend closed, caption trimmed. */
@@ -1238,8 +1239,12 @@ export default function MapView({
       const layerId = `${spec.id}-layer`;
       try {
         if (on) {
-          if (!map.getSource(spec.id)) {
+          const source = map.getSource<RasterTileSource>(spec.id);
+          if (!source) {
             map.addSource(spec.id, { type: 'raster', tiles: spec.tiles, tileSize: spec.tileSize, maxzoom: spec.maxzoom, attribution: spec.attribution });
+          } else if (source.tiles?.[0] !== spec.tiles[0]) {
+            // The clock moved on (a newer Himawari slot or UTC day): same layer, the caption's image time.
+            source.setTiles(spec.tiles);
           }
           if (!map.getLayer(layerId)) {
             const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
@@ -1261,9 +1266,12 @@ export default function MapView({
       map.moveLayer(`${gibsTrue.id}-layer`, `${gibsIr.id}-layer`);
     }
   };
+  // Re-sync on a toggle, the opacity, or a newer image time from the clock.
+  const gibsIrTiles = gibsIr.tiles[0];
+  const gibsTrueTiles = gibsTrue.tiles[0];
   useEffect(() => {
     if (ready) syncGibsRef.current();
-  }, [ready, layers.satIr, layers.satTrue, satOpacity]);
+  }, [ready, layers.satIr, layers.satTrue, satOpacity, gibsIrTiles, gibsTrueTiles]);
 
   /** Fit a box (the 24 h ash drift, the tsunami warning areas) in the visible map, above the bottom dock. */
   const fitBox = useCallback(

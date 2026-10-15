@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { REFRESH_MS, startRefreshLoop } from './refreshLoop';
 import type { OnlineSource, VisibilitySource } from './refreshLoop';
 import { createClock } from './useNowMs';
+import { resetConnectorCaches } from './liveLoad';
+import { BUNDLED_PTWC_SNAPSHOT, loadPtwc } from './ptwc';
 
 class FakeDoc extends EventTarget implements VisibilitySource {
   visibilityState = 'visible';
@@ -106,5 +108,30 @@ describe('createClock', () => {
     vi.setSystemTime(Date.parse('2026-10-15T15:00:00Z'));
     await vi.advanceTimersByTimeAsync(REFRESH_MS);
     expect(clock.getSnapshot()).toBe(Date.parse('2026-10-15T14:01:00Z'));
+  });
+});
+
+describe('refreshing a live loader (H3)', () => {
+  it('fetches live again on each 5-minute refresh: the 5-minute cache has expired because the timer starts when the load settles', async () => {
+    resetConnectorCaches();
+    const LOAD_MS = 8000;
+    const fetchImpl = vi.fn(
+      () =>
+        new Promise<Response>((resolve) =>
+          setTimeout(() => resolve(new Response(JSON.stringify(BUNDLED_PTWC_SNAPSHOT), { status: 200 })), LOAD_MS),
+        ),
+    );
+    const statuses: string[] = [];
+    const stop = startRefreshLoop(
+      () => loadPtwc({ fetchImpl: fetchImpl as unknown as typeof fetch, timeoutMs: 20000 }).then((r) => statuses.push(r.status.status)),
+      { immediate: true, doc: new FakeDoc(), win: fakeWin() },
+    );
+    await vi.advanceTimersByTimeAsync(LOAD_MS);
+    expect(statuses).toEqual(['live']);
+    await vi.advanceTimersByTimeAsync(REFRESH_MS + LOAD_MS);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(statuses).toEqual(['live', 'live']);
+    stop();
+    resetConnectorCaches();
   });
 });

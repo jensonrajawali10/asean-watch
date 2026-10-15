@@ -1,7 +1,8 @@
 // ASEAN Watch app shell. App is the single owner of the selected watch area, the replay index, the
 // generated brief and the inspected object; everything else is derived from them, the real-data
-// snapshot loaded once below, and the two context feeds (NEA Singapore, official warnings) loaded
-// once after mount. Every watch area replays over the same seven UTC days of the snapshot.
+// snapshot loaded once below, and the context feeds: NEA Singapore (loaded once after mount) and the
+// official warnings with PTWC (refreshed every 5 minutes by useOfficialWarnings). Every watch area
+// replays over the same seven UTC days of the snapshot.
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
@@ -12,9 +13,9 @@ import { buildBriefing, briefingFilename, downloadText } from './lib/briefing';
 import type { BriefingInput } from './lib/briefing';
 import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
-import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
-import type { OfficialWarningsResult } from './lib/warnings';
+import { warningDistanceKm, warningsNear } from './lib/warnings';
 import { mergeWarnings } from './lib/warningsView';
+import { useOfficialWarnings } from './lib/useOfficialWarnings';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
@@ -24,8 +25,6 @@ import { loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
 import type { QuakesResult } from './lib/quakesLive';
 import { loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
 import type { FloodModelResult } from './lib/floodModel';
-import { loadPtwc, loadPtwcSnapshot } from './lib/ptwc';
-import type { PtwcResult } from './lib/ptwc';
 import type { WindGrid, WindLoadResult } from './lib/windField';
 import { loadAirQuality } from './lib/airQuality';
 import type { AirQualityData } from './lib/airQuality';
@@ -135,16 +134,6 @@ const RULES_BY_WATCH: Record<string, string[]> = (() => {
   return out;
 })();
 
-/** Bundled official-warning snapshot, so the rail renders before any network reply (never throws). */
-const WARNINGS_SNAPSHOT: OfficialWarningsResult = (() => {
-  try {
-    return loadWarningsSnapshot();
-  } catch (err) {
-    console.error('Official warnings snapshot could not be read:', err);
-    return { warnings: [], feeds: [], gauges: [] };
-  }
-})();
-
 /** The grid time nearest to now (the snapshot's first time when now is outside the grid). */
 function nearestTime(times: string[], now: number): string {
   let best = times[0];
@@ -248,9 +237,8 @@ export default function App() {
   const [inspectedWarningId, setInspectedWarningId] = useState<string | null>(null);
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
-  /** The snapshot until the live load settles. */
-  const [warningsResult, setWarningsResult] = useState<OfficialWarningsResult>(WARNINGS_SNAPSHOT);
-  const [warningsLoading, setWarningsLoading] = useState(true);
+  /** Official feeds and PTWC: the bundled snapshot first, then live, refreshed every 5 minutes. */
+  const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
   /** Modelled wind field (Open-Meteo, live or snapshot); null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
@@ -262,7 +250,6 @@ export default function App() {
   /** Connector layers: bundled snapshot first (HISTORICAL), replaced by the live load when it settles. */
   const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
   const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
-  const [ptwc, setPtwc] = useState<PtwcResult>(() => loadPtwcSnapshot());
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
   /** Floating panels over the full-screen map: the left list can shrink to a slim tab; the review can collapse. */
@@ -570,29 +557,6 @@ export default function App() {
         if (alive) setRiverFlow(result);
       })
       .catch((err: unknown) => console.error('River flow could not be loaded:', err));
-    loadPtwc()
-      .then((result) => {
-        if (alive) setPtwc(result);
-      })
-      .catch((err: unknown) => console.error('PTWC could not be loaded:', err));
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Official warnings: loaded once, live first with per-feed snapshot fallback; never throws.
-  useEffect(() => {
-    let alive = true;
-    loadOfficialWarnings()
-      .then((result) => {
-        if (!alive) return;
-        setWarningsResult(result);
-        setWarningsLoading(false);
-      })
-      .catch((err: unknown) => {
-        console.error('Official warnings could not be loaded:', err);
-        if (alive) setWarningsLoading(false);
-      });
     return () => {
       alive = false;
     };

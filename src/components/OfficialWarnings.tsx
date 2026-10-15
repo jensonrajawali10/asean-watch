@@ -244,7 +244,7 @@ function WarningItem({
     >
       <div className="ow-eyebrow">
         <OfficialTag issuer={w.issuer} authority={w.authority} />
-        <ModeBadge mode={w.dataMode} time={w.dataMode === 'historical' ? w.retrievedAt : null} title="Data mode and retrieval time" />
+        <ModeBadge mode={w.dataMode} time={w.retrievedAt} title="Data mode and retrieval time" />
       </div>
 
       <div className="ow-level">
@@ -414,7 +414,8 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
           <header className="drawer-head">
             <div className="drawer-head-text">
               <p className="eyebrow">
-                <OfficialTag issuer={w.issuer} authority={w.authority} /> · <ModeBadge mode={w.dataMode} />
+                <OfficialTag issuer={w.issuer} authority={w.authority} /> ·{' '}
+                <ModeBadge mode={w.dataMode} time={w.retrievedAt} title="Data mode and retrieval time" />
               </p>
               <h2 id="warning-title" className="ow-verbatim" lang={lang}>
                 {w.headline.trim()}
