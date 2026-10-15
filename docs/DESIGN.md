@@ -52,37 +52,40 @@ No emoji, no gradients, no glassmorphism or `backdrop-filter`, no pulse or radar
 
 ## 2. Design tokens (light theme)
 
-The light theme is now the alternative (`data-theme="light"`, for bright projector rooms); the dark default is in section 2a.
+The light theme is the designed daylight counterpart to the dark default (`data-theme="light"`). Revised 15 October 2026 (UX v3, "the light version isn't as good"): a warm paper canvas, white panels with real shadows, crisp ink, a deep-teal accent that complements the amber haze, a light basemap with overlays recoloured for it (section 2b), and AQ colours that are safe as text. It is designed, not inverted.
 
-Token names already in `src/index.css` are contract: values change, names stay; new names are added. Contrast ratios were computed with the dataviz skill's `contrast()` (WCAG 2.x relative luminance). Text must be ≥ 4.5:1; large state text ≥ 3:1; control borders and focus rings ≥ 3:1 against their surface.
+Token names already in `src/index.css` are contract: values change, names stay. Contrast ratios are WCAG 2.x relative luminance, measured with a node script over the values in `src/index.css` (the dataviz skill's `contrast()` formula). Text must be ≥ 4.5:1; control borders, state and mode borders and focus rings ≥ 3:1 against their surface. Only the 1 px panel hairline `--border` is decorative (panels also carry `--shadow`).
 
 ### Surfaces, ink, action
 
 | Token | Value | Use | Contrast |
 |---|---|---|---|
-| `--bg` | `#eef0f3` | page plane | — |
+| `--bg` | `#f3f2ee` | page plane: warm paper | — |
 | `--panel` | `#ffffff` | panels, cards, dialogs | — |
-| `--panel-2` | `#f5f6f8` | nested surfaces (state block, brief bar, raw JSON) | — |
-| `--border` | `#b7bfc9` | panel and card hairlines (1 px) | 1.9:1 on white; decorative, allowed |
-| `--border-strong` | `#7f8a98` | button borders, pills | 3.5:1 on white (1.4.11 pass) |
-| `--text` | `#141a22` | primary ink | 17.5:1 on white |
-| `--text-muted` | `#4e5967` | secondary ink, labels, map country names | 7.1:1 white, 6.6:1 panel-2, 6.2:1 bg, 6.4:1 map land |
-| `--accent` | `#1b58a8` | links, primary buttons, selection bar, "New" tag | 7.0:1 on white; white on it 7.0:1 |
-| `--accent-strong` | `#154686` | primary hover | white on it 9.3:1 |
-| `--focus` | `#1b58a8` | 2 px focus ring, 2 px offset | 7.0:1 white, 6.1:1 bg |
-| `--focus-on-dark` | `#ffd27a` | focus ring inside the dark header | 12.3:1 |
-| `--banner-bg` / `--banner-fg` | `#141a22` / `#ffd27a` | header; the recency line's emphasis | 12.3:1 |
-| `--selected-bg` | `#eef4fc` | selected row tint (always with a 3 px accent bar) | muted on it 6.4:1 |
-| `--new-row` | `#edf3fc` | newly revealed record tint (with a 3 px accent bar) | muted on it 6.4:1 |
-| `--backdrop` | `rgba(20,26,34,0.28)` | dialog backdrop; the header stays readable | — |
+| `--panel-2` | `#f7f6f2` | nested surfaces | — |
+| `--panel-glass` | `rgba(255,255,255,0.95)` | floating panels over the map; no blur | text 17.3:1 over the sea, 16.8:1 over the densest haze |
+| `--border` | `#d5d1c8` | 1 px hairline, warm grey | 1.5:1 on white; decorative (the shadow carries the edge) |
+| `--border-strong` | `#837d71` | button borders, pills | 4.1 / 3.8 / 3.6 on panel / panel-2 / bg |
+| `--text` | `#16191d` | primary ink | 17.6 / 16.3 / 15.7 on panel / panel-2 / bg |
+| `--text-muted` | `#545a62` | secondary ink, labels | 7.0 / 6.4 / 6.2 / 6.1 on panel / panel-2 / bg / selected row; 6.8 on glass over the sea |
+| `--accent` | `#0d6a6c` | links, primary buttons, selection bar. Deep teal, the complement of the amber haze, so actions never read as data | 6.4 / 5.9 / 5.7 / 5.6 on panel / panel-2 / bg / selected row |
+| `--accent-strong` | `#08504f` | primary hover | `--on-accent` (white) on it 9.2:1; on `--accent` 6.4:1 |
+| `--focus` | `#0d6a6c` | 2 px focus ring, 2 px offset | 6.4 / 5.9 / 5.7 on panel / panel-2 / bg |
+| `--link-underline` | `#8fc4c1` | link underline (decorative; the ink carries the link) | — |
+| `--selected-bg` / `--new-row` | `#e7f2f1` / `#eaf4f3` | selected row, newly revealed record (with a 3 px accent bar) | muted 6.1:1, accent 5.6:1 on it |
+| `--banner-bg` / `--banner-fg` | `#16191d` / `#ffd27a` | the ink frame (header, timeline) | 12.4:1; `--on-dark` 15.8:1, `--on-dark-muted` 10.4:1 |
+| `--on-dark-control` / `--accent-edge` | `#8d887d` / `#5fb6b2` | button edges on the ink frame | 5.0:1; 7.4:1 on banner, 5.6:1 on a done day cell |
+| `--shadow` | `0 1px 2px rgba(28,24,18,.07), 0 4px 14px rgba(28,24,18,.10)` | panels and floating map overlays: white panels lift off the light map | — |
+| `--shadow-drawer` / `--shadow-dialog` | `-10px 0 32px` at .16 / `0 18px 50px` at .24, warm ink | drawer, dialogs | — |
+| `--backdrop` | `rgba(22,25,29,0.32)` | dialog backdrop | — |
 | `--header-h` / `--header-offset` | `40px` / measured | the header's literal minimum height; the measured height AppHeader publishes for the drawer inset. The header never reads `--header-offset` back (a measured value fed into `min-height` locks in an unstyled first-paint height) | — |
 
 ### Review states (workflow urgency; never an alert level; always with text)
 
 | State | `-bg` | `-fg` | border | Dot / ring cue | Contrast |
 |---|---|---|---|---|---|
-| Monitoring | `#e8ecf1` | `#3a4654` | `#aab4c0` | no dot; thin ring | 8.1:1 |
-| Check observation | `#fff3d6` | `#7a4a00` | `#b97a0e` (`--state-check-border`) | hollow dot; dashed ring | 6.8:1; border 3.4:1 on white |
+| Monitoring | `#ebe9e3` | `#3d4249` | `#8c877b` | no dot; thin ring | 8.3:1; border 3.6:1 on white (was 2.0:1 before this revision) |
+| Check observation | `#fff3d6` | `#7a4a00` | `#b97a0e` (`--state-check-border`) | hollow dot; dashed ring | 6.8:1; border 3.6:1 on white |
 | Review needed | `#f2a43a` (`--state-review-bg`) | `#241500` | `#a35c00` (`--state-review-strong`) | filled dot; bold ring + "!" | 8.6:1 text; border 5.1:1 on white |
 
 The amber fill is 2.1:1 against white, below the 3:1 non-text mark on purpose: a fill dark enough to pass would not hold 4.5:1 text. The 5.1:1 border carries the boundary and the word carries the meaning. CVD check (dataviz validator, all pairs): Check-border vs Review-fill ΔE 7.4 protan / 8.1 normal, in the "floor" band, which is legal only with secondary encoding; the hollow/filled dot and dashed/bold ring are that encoding, and every badge carries its label. No red is used for any of our states.
@@ -91,37 +94,51 @@ The amber fill is 2.1:1 against white, below the 3:1 non-text mark on purpose: a
 
 | Badge | Values | Style |
 |---|---|---|
-| **HISTORICAL SNAPSHOT** · `as of <time> UTC` | `--mode-historical-bg #e3f1ea`, `-fg #1a5e44`, border `#a4d0bf` | uppercase, green tint, always followed by the snapshot time (6.6:1) |
-| **LIVE** · `<reading time> UTC` | `--mode-live-fg #141a22`, border `#141a22`, white fill, static 6 px dot | outlined ink; never red, never animated (17.5:1) |
-| **MODELLED** | `--mode-modelled-bg #ece6f9`, `-fg #4a2f8d`, border `#c6b6ea` | uppercase, violet tint; context only, never evidence (8.3:1). Retires the SIMULATED purple (same tokens kept under their old `--mode-simulated-*` names for compatibility, plus new `--mode-modelled-*` aliases) |
+| **HISTORICAL SNAPSHOT** · `as of <time> UTC` | `--mode-historical-bg #e3f1ea`, `-fg #1a5e44`, border `#528e76` | uppercase, green tint, always followed by the snapshot time (6.6:1; border 3.8:1) |
+| **LIVE** · `<reading time> UTC` | `--mode-live-fg #16191d`, border `#16191d`, white fill, static 6 px dot | outlined ink; never red, never animated (17.6:1) |
+| **MODELLED** | `--mode-modelled-bg #ece6f9`, `-fg #4a2f8d`, border `#8a72c6` | uppercase, violet tint; context only, never evidence (8.3:1; border 4.0:1). The same values sit under the old `--mode-simulated-*` names for compatibility |
 | **OFFICIAL** | reserved, see below | only for relayed agency warnings |
-| Counted / Not counted | `--counted-bg #141a22` on white / dashed outline | small text pills, neutral |
+| Counted / Not counted | `--counted-bg #16191d` on white / dashed outline | small text pills, neutral (17.6:1) |
 
-Validator (all pairs, light): modelled-violet vs historical-green vs live-ink: CVD ΔE 16.2, normal 21.0, all ≥ 3:1. Pass.
+Mode borders were raised to ≥ 3:1 in this revision (they were 1.7–1.9:1), matching the dark theme. Validator (all pairs, light): modelled-violet vs historical-green vs live-ink: CVD ΔE 16.2, normal 21.0, all ≥ 3:1. Pass.
 
 ### Official warnings (reserved; never used for our states)
 
 | Token | Value | Use |
 |---|---|---|
-| `--official` | `#8a1f1f` | 4 px left rail, verbatim level chip fill, "OFFICIAL" word, "Follow <issuer>" link ink (9.1:1 on white; white on it 9.1:1) |
-| `--official-bg` | `#fdf2f2` | item surface (ink on it 16:1; official ink 8.3:1) |
-| `--official-border` | `#d9a3a3` | item hairline |
-| `--estimate` | `#5b6573` | GDACS "Impact estimate" rail and label (5.9:1); dashed rail |
+| `--official` / `--official-fill` | `#8a1f1f` | 4 px left rail, verbatim level chip fill, "OFFICIAL" word, "Follow <issuer>" link ink (9.1:1 on white, 8.3:1 on `--official-bg`; white on it 9.1:1) |
+| `--official-bg` | `#fdf2f2` | item surface (ink on it 16:1) |
+| `--official-border` | `#c27474` | item hairline (3.5:1 on white, 3.2:1 on `--official-bg`; was 2.2:1) |
+| `--estimate` | `#5d6168` | GDACS "Impact estimate" rail and label (6.2:1); dashed rail |
 | `--ended` | `--text-muted` | ENDED chip, outlined |
 
 Why red-ink here and nowhere else: red is the universal warning colour and these *are* the warnings. One colour for every official item regardless of level, because the level is verbatim and we do not rank issuers' levels. Separation from Review needed: different hue (red-brown vs amber, 4.4:1 between them), different shape (square corners, uppercase verbatim text, issuer prefix) and different words ("OFFICIAL · PVMBG MAGMA" vs "Workflow state, not an official alert level").
 
-### Map
+### Air-quality scale (`--aq-*`)
+
+Used for legend fills and for the big PM2.5 numbers on map cards (`MapCard.css`), so both themes keep them text-safe. Light deepens the EPA hues; dark keeps the earlier desaturated values except the two that failed as text.
+
+| Token | Light | on panel / panel-2 | Dark | on panel / panel-2 |
+|---|---|---|---|---|
+| `--aq-good` | `#2f7a45` | 5.3 / 4.9 | `#6f9a6a` | 5.8 / 5.4 |
+| `--aq-moderate` | `#806600` | 5.5 / 5.1 | `#c8b25a` | 8.9 / 8.2 |
+| `--aq-sensitive` | `#a95511` | 5.3 / 4.9 | `#c98648` | 6.3 / 5.8 |
+| `--aq-unhealthy` | `#ad3f2f` | 6.0 / 5.5 | `#d9776c` (was `#b5544a`, 3.9:1) | 6.1 / 5.6 |
+| `--aq-very-unhealthy` | `#764a9c` | 6.5 / 6.0 | `#b294cc` (was `#84609a`, 3.7:1) | 7.2 / 6.6 |
+
+Light unhealthy is a brick red kept apart from the official red by lightness (1.5:1) and, as always, by its band word. Before this revision both themes shared one set of values, so moderate (`#c8b25a`) was 2.1:1 as text on a white card.
+
+### Map (CSS tokens for the offline fallback map and the legacy RegionMap)
 
 | Token | Value | Note |
 |---|---|---|
-| `--map-water` | `#c9d7e2` | darker than before so land stays visible on a projector |
-| `--map-land` | `#e4e1d9` | context countries (1.13:1 vs water, plus a 1 px stroke) |
-| `--map-land-asean` | `#f7f4eb` | ASEAN members (1.3:1 vs water, 1.17:1 vs context land) |
-| `--map-stroke` | `#b3ab9d` | context coastlines, 0.7 px |
-| `--map-stroke-asean` | `#6f6756` | member coastlines, 1 px (4.6:1 on member land) |
-| `--map-marker` | `#3a4654` | default marker ink |
-| overlay surface | `color-mix(var(--panel) 94%, transparent)` | no blur |
+| `--map-water` | `#c8d3d9` | the same sea as the tuned light basemap (section 2b) |
+| `--map-land` | `#ecebe6` | context countries |
+| `--map-land-asean` | `#fafaf8` | ASEAN members: Positron's land |
+| `--map-stroke` | `#b8b6b0` | context coastlines, 0.7 px |
+| `--map-stroke-asean` | `#6f6a5e` | member coastlines, 1 px (5.2:1 on member land) |
+| `--map-marker` | `#2f3640` | default marker ink (11.7:1 on land, 8.0:1 on the sea) |
+| overlay surface | `--panel-glass` | no blur |
 
 ### Type scale
 
@@ -143,7 +160,7 @@ Font stack stays local: `'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple
 - Space: 4, 8, 12, 16, 24, 32 px. Column gap 12 px (`--gap`).
 - Radius (near-square, console discipline): 4 px panels, buttons, dialogs, map overlays (`--radius`); 3 px badges, pills, tags, day cells (`--radius-sm`); **0 px for the official level chip** (reserved cue); 50 % only for marker rings and dots.
 - Borders: 1 px `--border` on panels; selected row = 3 px `--accent` left bar + `--selected-bg`; new record = 3 px `--accent` left bar + `--new-row`; official item = 4 px `--official` left bar; impact estimate = 4 px dashed `--estimate` bar.
-- Elevation: `--shadow` on dialogs and floating map overlays only. Panels use borders.
+- Elevation: dark keeps `--shadow` for dialogs and floating map overlays (panels use borders). Light gives every floating panel `--shadow` too: white panels over a light map need a real shadow to lift, and the hairline is only decorative.
 
 ## 2a. Dark theme (default)
 
@@ -151,7 +168,7 @@ Since 14 October 2026 the app opens in a dark, map-first theme (cinematic: near-
 
 **Mechanism.** `src/index.css` keeps the light values on `:root` and overrides the same token names under `:root[data-theme='dark']`; no token was renamed. An inline script in `index.html` sets `<html data-theme>` before first paint from `localStorage['aw-theme']` (default `dark`; storage errors fall back to dark), and two inline background rules stop a light flash before the stylesheet loads. The header has a **Dark / Light** toggle (two buttons, `aria-pressed`) that writes the attribute, persists it in a try/catch and fires `aw:themechange` on `window`. The attribute is always present (`dark` or `light`); the map reads it for the basemap.
 
-**New token names (both themes).** `--on-accent`, `--official-fill`, `--on-official`, `--panel-glass`, `--panel-filter` (`blur(6px)` in dark, `none` in light), `--link-underline`, `--track`, `--hairline-on-fill`, `--on-dark-control`, `--on-dark-hover`, `--accent-edge(-hover)`, `--day-done-bg/-border`, `--day-current-bg/-fg`, `--day-count-bg`, `--nea-chip-bg/-fg`, `--shadow-drawer`, `--shadow-dialog`, and an air-quality scale `--aq-good #6f9a6a`, `--aq-moderate #c8b25a`, `--aq-sensitive #c98648`, `--aq-unhealthy #b5544a`, `--aq-very-unhealthy #84609a` (desaturated, map fills only, always labelled). Light values reproduce the earlier literals, so the light theme is unchanged.
+**New token names (both themes).** `--on-accent`, `--official-fill`, `--on-official`, `--panel-glass`, `--panel-filter` (`blur(6px)` in dark, `none` in light), `--link-underline`, `--track`, `--hairline-on-fill`, `--on-dark-control`, `--on-dark-hover`, `--accent-edge(-hover)`, `--day-done-bg/-border`, `--day-current-bg/-fg`, `--day-count-bg`, `--nea-chip-bg/-fg`, `--shadow-drawer`, `--shadow-dialog`, and an air-quality scale `--aq-good #6f9a6a`, `--aq-moderate #c8b25a`, `--aq-sensitive #c98648`, `--aq-unhealthy #b5544a`, `--aq-very-unhealthy #84609a` (desaturated, always labelled). On 15 October 2026 the light values were redesigned (section 2) and the AQ scale became text-safe in both themes: map cards print PM2.5 values in these colours, so dark now overrides `--aq-*` itself, with unhealthy and very unhealthy lifted to `#d9776c` and `#b294cc` (they were 3.9:1 and 3.7:1 as text).
 
 | Token | Dark value | Note |
 |---|---|---|
@@ -166,7 +183,7 @@ Since 14 October 2026 the app opens in a dark, map-first theme (cinematic: near-
 | Modes | MODELLED `#cdbff0` on `#221d31` / `#6c5ca3`; HISTORICAL `#9dd3b9` on `#13231c` / `#4f7f69`; LIVE cream outline | the uppercase word carries the meaning |
 | Official (reserved) | ink and rail `#e5675f`, surface `#2b1110`, hairline `#b04a40`, chip `#ffffff` on `#9e2b23` | deep-red family; used only for relayed official warnings |
 
-**Contrast (WCAG 2.x, computed with a node script using the dataviz `contrast()` formula).** Text ≥ 4.5:1; control borders, state borders and focus ≥ 3:1. The 1 px panel hairline `--border` is decorative in both themes (light 1.9:1, dark 2.0:1); every control, badge and focus ring carries its own ≥ 3:1 edge.
+**Contrast (WCAG 2.x, computed with a node script using the dataviz `contrast()` formula).** Text ≥ 4.5:1; control borders, state borders and focus ≥ 3:1. The 1 px panel hairline `--border` is decorative in both themes (light 1.5:1, dark 2.0:1); every control, badge and focus ring carries its own ≥ 3:1 edge.
 
 | Pair (dark) | Ratio |
 |---|---|
@@ -186,11 +203,56 @@ Since 14 October 2026 the app opens in a dark, map-first theme (cinematic: near-
 | Mode borders: MODELLED (panel / panel-2), HISTORICAL, NEA snapshot | 3.3 / 3.1, 4.1, 4.0 |
 | `--official-border` vs panel / official-bg | 3.5 / 3.3 |
 | `--map-stroke-asean` vs member land | 3.6 |
-| Light additions: white on accent; white on official fill; `--on-dark-control` vs banner | 7.0; 9.1; 5.7 |
+| `--aq-*` on panel (good, moderate, sensitive, unhealthy, very unhealthy) | 5.8, 8.9, 6.3, 6.1, 7.2 |
 
 Scrubber and popover (`.is-dark` variants, translucent over the densest tan smoke, about `#1e1e1e` composited): text 13.2:1, muted 6.5:1, control edge 4.1:1.
 
 **Separation rules in dark.** Official red (`#e5675f`, hue about 3°) and the Review amber (`#eea443`, hue about 35°) are close in luminance (1.6:1), so they are kept apart by hue, shape and words, exactly as in light: square uppercase verbatim chip on a deep-red fill with the "OFFICIAL · issuer" prefix, versus a rounded state badge with a dot and the words "Workflow state, not an official alert level". No workflow state uses red in either theme.
+
+## 2b. Map basemaps and overlay palette (both themes)
+
+Decided 15 October 2026. Overlay colours are not CSS tokens: every colour the map draws (deck.gl and MapLibre) comes from one module, `src/components/map/mapPalette.ts` (`getMapPalette(theme)`), and the basemap from `src/components/map/basemap.ts`. `mapPalette.test.ts` asserts the ratios below, so a colour change that breaks one fails the tests.
+
+**Basemaps.** Dark: CARTO Dark Matter, unchanged. Light: **CARTO Positron GL**, tuned by `transformStyle`. Compared against OpenFreeMap positron (the previous light map) and OpenFreeMap bright:
+
+- Positron's labels are muted blue-grey (`#697b89` places, `#8a99a4` countries), so they sit under the haze, fires and particles. OpenFreeMap positron prints place and country names in black from zoom 3, the loudest thing on the map after the overlays.
+- OpenFreeMap bright draws roads in yellow and orange and parks in green: the hues of the fire ramp and the PM2.5 bands. Rejected.
+- CARTO Positron uses the same vector tiles, source id (`carto`) and layer set as Dark Matter, so the theme toggle changes colours only, the same places are labelled at the same zooms, and the 3D building extrusion (source `carto`, source-layer `building`, `render_height`) works on both themes with no code change. Checked at zoom 15.8 over the Singapore CBD.
+- Licence: the same CARTO basemap terms as the Dark Matter style already in use (attribution "© CARTO, © OpenStreetMap contributors", carried by the style's source). Nothing new to agree to.
+
+`transformStyle(style, 'light')` matches layers by source-layer and type (the OpenMapTiles schema), never by id: the sea goes from `#d4dadc` to `#c8d3d9` (1.4:1 → 1.5:1 against `#fafaf8` land, so islands read at the regional zoom), waterways follow, thin border lines turn neutral grey (Positron's pink borders were a faint red cue), and village/hamlet/suburb labels start one zoom later and POIs at 16 so the haze city labels own zooms 6–10. It is pure and wrapped by `safeTransformStyle`, which returns the style as fetched on any error. MapView applies it through MapLibre's own hook: `map.setStyle(basemapStyleFor(theme), basemapStyleOptions(theme))`.
+
+**Light overlays: designed, not inverted.**
+
+- Wind particles: deep slate-navy ink `[24,34,52]` at 0.66, normally blended (additive blending washes out on white).
+- Haze: amber → burnt sienna → deep umber with a plum cast, chosen so ordinary alpha compositing reads like a multiply (dark colour, low alpha). The haze has its own deck.gl canvas above the map canvas, so a true multiply against the basemap is not possible.
+- City circles keep the PM2.5 band fill (it matches the legend, scrubber and cards) and gain a 1.5 px ink outline: pale fills (moderate yellow is 1.6:1 on white) cannot carry the edge. The glow becomes a normally blended band-tinted aura. Labels are ink with a white SDF halo in both themes (no boxed labels).
+- Fires: a normally blended ramp from amber to deep brown, hue 18–36°, away from the official red. Quakes, tide gauges, level rings and tsunami strokes are deepened until each is ≥ 3:1 on the sea. Ash is grey-violet (plume) and cool grey (drift lines), so it never reads as the warm smoke. The selection ring is the accent teal.
+
+**Measured ratios (light).** Each mark is composited at its alpha over Positron land `#fafaf8` / land under the landcover tint `#f2f6f1` / the tuned sea `#c8d3d9`.
+
+| Mark | Land / tinted land / sea |
+|---|---|
+| Particle head (alpha 0.66) | 5.1 / 5.0 / 4.3 (3.5 over unhealthy haze, 2.6 over 400 µg/m³ haze) |
+| Haze 25 / 55 / 150 / 250 / 400 µg/m³ (area fill, context) | 1.1 / 1.3 / 1.8 / 2.5 / 3.7 on land; 3.1 on the sea at 400 |
+| City outline (ink) | 16.0 / 15.4 / 11.0 |
+| City label ink; on its white halo | 17.0 / 16.3 / 11.7; 17.8 |
+| Fire-prone-area outline | 9.3 / 8.9 / 6.4 |
+| Volcano triangle | 11.7 / 11.2 / 8.1 |
+| Level ring green / yellow / orange / red (issuer's colour code) | 5.5 / 4.6 / 4.8 / 8.8 on land; 3.8 / 3.2 / 3.3 / 6.0 on the sea |
+| Distance ring | 7.4 / 7.1 / 5.3 |
+| Ash drift lines 700 / 500 / 300 hPa | 4.9 / 6.6 / 10.6 on land; 3.4 / 4.6 / 7.3 on the sea |
+| Plume footprint outline | 7.3 / 7.0 / 5.4 |
+| Fire ramp 1 / 10 / 50 / 200 / 1000 MW | 1.6 / 2.8 / 4.5 / 7.1 / 10.9 on land; 3.2 on the sea from 50 MW (weak cells are context inside labelled clusters) |
+| FIRMS hotspot | 5.1 / 4.9 / 3.5 |
+| Official pin (reserved red) | 8.8 / 8.4 / 6.0 |
+| Tsunami strokes Awas / Siaga / Waspada | 8.8 / 5.2 / 5.5 on land; 6.0 / 3.5 / 3.7 on the sea |
+| Tide gauge; river point (MODELLED violet) | 5.9 / 5.7 / 4.2; 7.8 / 7.5 / 5.6 |
+| Quakes shallow / intermediate / deep / unknown | 5.1 / 5.8 / 6.6 / 5.5 on land; 3.5 / 4.0 / 4.5 / 3.8 on the sea |
+| Modelled haze path | 9.6 / 9.2 / 6.6 |
+| Selection ring (accent teal) | 6.1 / 5.8 / 4.2 |
+
+**Dark overlays** reproduce the colours the map drew before (a test pins them). Against Dark Matter land `#0e0e0e` / sea `#2c353c`: particle head 4.8 / 4.0, city labels 16.2 / 10.4, selection ring 13.6 / 8.8, quakes ≥ 5.4 / 3.5, fire ramp from 50 MW ≥ 5.6 / 4.0. In dark the band fill carries the circle edge (the outline is a dark separator).
 
 ## 3. Badge system (must never be confused)
 
