@@ -400,6 +400,30 @@ describe('assessDrift', () => {
     );
   });
 
+  it('gives a snapshot its reading time and never calls it current or now', () => {
+    const snap = ctxWith(236, { dataMode: 'historical' });
+    expect(snap.observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    const when = `${snap.observedAt.slice(0, 10)} ${snap.observedAt.slice(11, 16)} UTC`;
+    expect(assessDrift(riau, snap)?.text).toBe(
+      `Wind measured at ${when} (snapshot) at NEA Singapore stations (from SW, 4.1 kn; not on the replay day) ` +
+        'would carry haze from these FIRMS hotspots toward Singapore, about 170 km away. Illustrative only; not a dispersion model.',
+    );
+    expect(assessDrift(riau, ctxWith(56, { dataMode: 'historical' }))?.text).toBe(
+      `Wind measured at ${when} (snapshot) at NEA Singapore stations (from NE, 4.1 kn; not on the replay day) ` +
+        'blew toward SW, not from these FIRMS hotspots toward Singapore (about 170 km away). Haze can still ' +
+        "reach Singapore from other fires; use NEA's measured PSI for air quality. Illustrative only; not a dispersion model.",
+    );
+    for (const from of [236, 56, null]) {
+      expect(assessDrift(riau, ctxWith(from, { dataMode: 'historical' }))?.text).not.toMatch(/\bcurrent\b|\bnow\b/i);
+    }
+    // The bundled snapshot the server and the offline fallback use reads the same way.
+    const bundled = loadNeaSnapshot();
+    expect(bundled?.dataMode).toBe('historical');
+    const text = assessDrift(riau, bundled as NeaContext)?.text ?? '';
+    expect(text).toMatch(/^Wind measured at \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \(snapshot\) at NEA Singapore stations/);
+    expect(text).not.toMatch(/\bcurrent\b|\bnow\b/i);
+  });
+
   it('uses a ±45° downwind cone', () => {
     const bearing = assessDrift(riau, ctxWith(0))?.bearingToSingaporeDeg as number;
     const fromFor = (offset: number) => (bearing + 180 + offset + 360) % 360;
@@ -410,7 +434,11 @@ describe('assessDrift', () => {
 
   it('mentions low station agreement, snapshot mode, and missing wind', () => {
     expect(assessDrift(riau, ctxWith(236, { consistency: 0.3 }))?.text).toContain('low station agreement');
-    expect(assessDrift(riau, ctxWith(236, { dataMode: 'historical' }))?.text).toContain('(snapshot, from SW, 4.1 kn; the wind now, not on the replay day)');
+    const snap = ctxWith(236, { dataMode: 'historical', consistency: 0.3 });
+    expect(assessDrift(riau, snap)?.text).toContain(
+      `Wind measured at ${snap.observedAt.slice(0, 10)} ${snap.observedAt.slice(11, 16)} UTC (snapshot) at NEA Singapore stations ` +
+        '(from SW, 4.1 kn, low station agreement; not on the replay day)',
+    );
     const none = assessDrift(riau, ctxWith(null));
     expect(none?.downwindDeg).toBeNull();
     expect(none?.singaporeDownwind).toBeNull();

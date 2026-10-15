@@ -83,6 +83,13 @@ describe('buildFactsFor', () => {
     expect(buildFactsFor('watch-nowhere', 0)).toBeNull();
   });
 
+  it('gives the model the NEA snapshot wind with its reading time, never as current', () => {
+    const text = buildFactsFor('watch-riau-haze', 6)?.text ?? '';
+    const drift = text.split('\n').find((l) => l.includes('Haze drift')) ?? '';
+    expect(drift).toMatch(/Wind measured at \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \(snapshot\) at NEA Singapore stations/);
+    expect(drift).not.toMatch(/\bcurrent\b|\bnow\b/i);
+  });
+
   it('tells the model the warnings come from the bundled snapshot', () => {
     expect(buildFactsFor('watch-merapi', 6)?.contextLine).toMatch(/bundled data snapshot/);
   });
