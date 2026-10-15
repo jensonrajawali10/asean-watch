@@ -17,6 +17,7 @@ import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
+import { warningMatchesGauge } from '../lib/warningsView';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -37,15 +38,12 @@ function warningPoint(w: OfficialWarning): { lat: number; lon: number } | null {
 /**
  * The gauge behind a flood warning, or null.
  * 1. By id: the adapters build the warning id as "<gauge id>:<observedAt>" (ThaiWater, DSDA), so the
- *    gauge id must equal the warning id or be a ':'-delimited prefix or segment of it.
+ *    gauge id must equal the warning id or be its ':'-delimited prefix (warningMatchesGauge).
  * 2. Else by place: the nearest gauge from the same issuer within 1 km of the warning's point.
  */
 export function gaugeForWarning(w: OfficialWarning, gauges: GaugeReading[]): GaugeReading | null {
   if (w.hazard !== 'flood' || gauges.length === 0) return null;
-  const byId = gauges.find((g) => {
-    if (!g.id || g.id.endsWith(':')) return false;
-    return w.id === g.id || w.id.startsWith(`${g.id}:`) || w.id.includes(`:${g.id}:`);
-  });
+  const byId = gauges.find((g) => warningMatchesGauge(w.id, g.id));
   if (byId) return byId;
   const point = warningPoint(w);
   if (!point) return null;

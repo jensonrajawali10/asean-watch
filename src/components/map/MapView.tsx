@@ -69,6 +69,7 @@ import {
 } from './mapGeometry';
 import type { Bounds, LonLat, MapHotspot, RegionCollection } from './mapGeometry';
 import { PTWC_NATIONAL_AUTHORITIES_NOTE } from '../../lib/ptwc';
+import { warningMatchesGauge } from '../../lib/warningsView';
 import './MapView.css';
 
 export type { MapHotspot } from './mapGeometry';
@@ -619,7 +620,7 @@ export default function MapView({
     return (gauges ?? [])
       .filter((g) => Number.isFinite(g.lat) && Number.isFinite(g.lon) && Number.isFinite(g.value))
       .map((gauge) => ({ gauge, excess: gaugeExcess(gauge) }))
-      .filter((m) => (m.excess !== null ? m.excess >= 0 : m.gauge.situation !== null && drawnIds.some((id) => id.includes(m.gauge.id))))
+      .filter((m) => (m.excess !== null ? m.excess >= 0 : m.gauge.situation !== null && drawnIds.some((id) => warningMatchesGauge(id, m.gauge.id))))
       .sort((a, b) => (b.excess ?? Number.NEGATIVE_INFINITY) - (a.excess ?? Number.NEGATIVE_INFINITY) || 0)
       .slice(0, MAX_GAUGE_MARKERS)
       .map((m) => m.gauge);
@@ -2218,7 +2219,7 @@ export default function MapView({
             {gaugesDrawn.map((g, i) => {
               const reading = `${formatValue(g.value)} ${g.unit} (${g.datum})`;
               const label = `Water level: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
-              const cited = warningMarkers.find((w) => w.id.includes(g.id));
+              const cited = warningMarkers.find((w) => warningMatchesGauge(w.id, g.id));
               const isSelected = cited !== undefined && cited.id === selectedWarningId;
               return (
                 <button

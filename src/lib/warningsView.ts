@@ -52,3 +52,13 @@ export function officialLevelFor(
   if (naming) return naming;
   return candidates.find((w) => idGvpNumbers(w).every((n) => n === gvp)) ?? null;
 }
+
+/**
+ * True when the warning was relayed from this gauge. The adapters build the id as
+ * "<gauge id>:<observedAt>" (ThaiWater, DSDA), so the warning id equals the gauge id or starts with it
+ * plus ':'. A substring test is wrong: "thaiwater:T.1" is inside "thaiwater:T.13:…".
+ */
+export function warningMatchesGauge(warningId: string, gaugeId: string): boolean {
+  if (!gaugeId || gaugeId.endsWith(':')) return false;
+  return warningId === gaugeId || warningId.startsWith(`${gaugeId}:`);
+}

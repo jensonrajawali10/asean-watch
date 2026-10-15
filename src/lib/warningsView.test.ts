@@ -5,7 +5,7 @@ import type { Incident, OfficialWarning } from '../types';
 import { compareWarnings, loadWarningsSnapshot, warningsNear } from './warnings';
 import { loadPtwcSnapshot } from './ptwc';
 import { loadFixtures } from './fixtures';
-import { mergeWarnings, officialLevelFor } from './warningsView';
+import { mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
 
 const FEED = loadWarningsSnapshot();
 const PTWC = loadPtwcSnapshot();
@@ -135,5 +135,36 @@ describe('officialLevelFor (H2)', () => {
     const record = byId(MAGMA['watch-merapi']);
     expect(officialLevelFor(merapi, [{ ...record, authority: 'aggregator' }])).toBeNull();
     expect(officialLevelFor(merapi, [{ ...record, ended: true }])).toBeNull();
+  });
+});
+
+describe('warningMatchesGauge (M2)', () => {
+  const T1 = 'thaiwater:T.1';
+
+  it("links gauge T.1 to its own ThaiWater message, not T.13's", () => {
+    // Real data: T.13, T.14 and T.15 all sort before T.1, and "thaiwater:T.1" is a substring of each.
+    const linked = ALL.find((w) => warningMatchesGauge(w.id, T1));
+    expect(linked?.id).toBe('thaiwater:T.1:2026-10-13T06:00:00Z');
+    expect(linked?.areaDescription).toMatch(/Nakhon Chai Si/);
+    expect(warningMatchesGauge('thaiwater:T.13:2026-10-13T06:00:00Z', T1)).toBe(false);
+  });
+
+  it('matches every snapshot gauge to at most one message, and each message to at most one gauge', () => {
+    const relayed = ALL.filter((w) => FEED.gauges.some((g) => warningMatchesGauge(w.id, g.id)));
+    expect(relayed.length).toBeGreaterThan(0);
+    for (const w of relayed) expect(FEED.gauges.filter((g) => warningMatchesGauge(w.id, g.id)), w.id).toHaveLength(1);
+    for (const g of FEED.gauges) expect(ALL.filter((w) => warningMatchesGauge(w.id, g.id)).length, g.id).toBeLessThanOrEqual(1);
+    // C.3 is a prefix of C.35, C.36 and C.37 in the same snapshot.
+    for (const id of ['thaiwater:C.35', 'thaiwater:C.36', 'thaiwater:C.37']) {
+      const w = ALL.find((x) => x.id.startsWith(`${id}:`));
+      if (w) expect(warningMatchesGauge(w.id, 'thaiwater:C.3')).toBe(false);
+    }
+  });
+
+  it('accepts an exact id and rejects empty or open-ended gauge ids', () => {
+    expect(warningMatchesGauge('dsda-jakarta:107', 'dsda-jakarta:107')).toBe(true);
+    expect(warningMatchesGauge('dsda-jakarta:107:2026-10-13T07:40:00Z', 'dsda-jakarta:107')).toBe(true);
+    expect(warningMatchesGauge('dsda-jakarta:107:2026-10-13T07:40:00Z', '')).toBe(false);
+    expect(warningMatchesGauge('dsda-jakarta:107:2026-10-13T07:40:00Z', 'dsda-jakarta:')).toBe(false);
   });
 });
