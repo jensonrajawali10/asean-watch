@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AI_BRIEF_FALLBACK_BETA, BRIEF_TAG, WARNINGS_TAG } from '../lib/aiBrief';
 import {
+  AI_BRIEF_ERROR_MESSAGES,
   CACHE_TTL_MS,
   RATE_LIMIT_MAX,
   TRUNCATED_CACHE_TTL_MS,
@@ -9,6 +10,7 @@ import {
   handleAiBriefRequest,
   knownWatchIds,
   rateLimitKey,
+  redactForLog,
   resetAiBriefCache,
   resetAiBriefRateLimit,
 } from './aiBriefHandler';
@@ -451,5 +453,75 @@ describe('handleAiBriefRequest cost controls', () => {
     for (const r of responses) expect(await r.text()).not.toContain(KEY);
     expect(logged.length).toBeGreaterThan(0);
     for (const line of logged) expect(line).not.toContain(KEY);
+  });
+});
+
+describe('handleAiBriefRequest error messages', () => {
+  const env = { ANTHROPIC_API_KEY: KEY };
+  function captureLog(): string[] {
+    const logged: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    });
+    return logged;
+  }
+
+  it('answers upstream HTTP errors with a fixed message and logs the detail without the key', async () => {
+    const logged = captureLog();
+    const cases: Array<[number, string]> = [
+      [401, AI_BRIEF_ERROR_MESSAGES.upstream],
+      [400, AI_BRIEF_ERROR_MESSAGES.upstream],
+      [403, AI_BRIEF_ERROR_MESSAGES.upstream],
+      [500, AI_BRIEF_ERROR_MESSAGES.upstream],
+      [429, AI_BRIEF_ERROR_MESSAGES.busy],
+      [529, AI_BRIEF_ERROR_MESSAGES.busy],
+    ];
+    for (const [status, expected] of cases) {
+      resetAiBriefCache();
+      const upstreamBody = JSON.stringify({
+        type: 'error',
+        error: { type: 'authentication_error', message: `invalid x-api-key ${KEY} (billing state: overdue)` },
+      });
+      const fetchImpl = vi.fn(async () => new Response(upstreamBody, { status, headers: { 'request-id': 'req_011CTest' } }));
+      const res = await handleAiBriefRequest(valid(), { env, clientIp: `198.51.100.${status % 250}`, fetchImpl });
+      expect(res.status).toBe(502);
+      const text = await res.text();
+      expect(JSON.parse(text)).toEqual({ error: 'upstream_error', message: expected });
+      for (const leak of [String(status), 'authentication_error', 'billing', 'x-api-key', 'req_011CTest', KEY]) {
+        expect(text).not.toContain(leak);
+      }
+    }
+    const line = logged.find((l) => l.includes('upstream HTTP 401'));
+    expect(line).toContain('authentication_error: invalid x-api-key [redacted] (billing state: overdue)');
+    expect(line).toContain('request-id req_011CTest');
+    for (const l of logged) expect(l).not.toContain(KEY);
+  });
+
+  it('answers network failures and internal errors with fixed messages; the exception text stays in the log', async () => {
+    const logged = captureLog();
+    const net = await handleAiBriefRequest(valid(), {
+      env,
+      clientIp: 'a',
+      fetchImpl: vi.fn(async () => Promise.reject(new TypeError('fetch failed: getaddrinfo ENOTFOUND api.anthropic.com'))),
+    });
+    expect(await net.json()).toEqual({ error: 'upstream_error', message: AI_BRIEF_ERROR_MESSAGES.unreachable });
+    expect(logged.join('\n')).toContain('TypeError: fetch failed: getaddrinfo ENOTFOUND api.anthropic.com');
+
+    const notJson = await handleAiBriefRequest(validFor('watch-merapi', 5), {
+      env,
+      clientIp: 'a',
+      fetchImpl: vi.fn(async () => new Response('<html>proxy error</html>', { status: 200 })),
+    });
+    expect(notJson.status).toBe(500);
+    const body = await notJson.json();
+    expect(body).toEqual({ error: 'internal_error', message: AI_BRIEF_ERROR_MESSAGES.internal });
+    expect(logged.some((l) => l.startsWith('ai-brief: internal error: SyntaxError'))).toBe(true);
+  });
+
+  it('redacts the key and Anthropic-shaped keys from log text', () => {
+    expect(redactForLog(`a ${KEY} b ${KEY}`, ` ${KEY} `)).toBe('a [redacted] b [redacted]');
+    expect(redactForLog('key sk-ant-api03-AbC_d-9 here')).toBe('key [redacted] here');
+    expect(redactForLog('two\nlines')).toBe('two lines');
+    expect(redactForLog('x'.repeat(2000))).toHaveLength(500);
   });
 });

@@ -384,6 +384,52 @@ interface UpstreamMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Errors. Responses carry only these fixed messages; upstream detail (status, error type and
+// message, request id, exception text) goes to the server log with the key removed.
+
+export const AI_BRIEF_ERROR_MESSAGES = {
+  unreachable: 'The AI service could not be reached; try again later.',
+  busy: 'The AI service is busy; try again shortly.',
+  upstream: 'The AI service could not produce a summary; try again later.',
+  empty: 'The AI service returned no usable text; try again later.',
+  refused: 'The model declined to summarise this brief.',
+  internal: 'The AI brief could not be produced.',
+} as const;
+
+const KEY_SHAPE = /sk-ant-[A-Za-z0-9_-]+/g;
+const LOG_MAX_CHARS = 500;
+
+/** Text for the server log: the key and anything shaped like an Anthropic key removed, one line, capped. */
+export function redactForLog(text: string, apiKey?: string): string {
+  let out = String(text);
+  const key = (apiKey ?? '').trim();
+  if (key.length >= 8) out = out.split(key).join('[redacted]');
+  return out.replace(KEY_SHAPE, '[redacted]').replace(/\s+/g, ' ').trim().slice(0, LOG_MAX_CHARS);
+}
+
+function errorDetail(err: unknown): string {
+  return err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+}
+
+/** The error type and message of an upstream error body (for the log only). */
+async function upstreamErrorDetail(res: Response): Promise<string> {
+  let text: string;
+  try {
+    text = (await res.text()).slice(0, 4000);
+  } catch {
+    return 'body unreadable';
+  }
+  try {
+    const parsed = JSON.parse(text) as { error?: { type?: unknown; message?: unknown } } | null;
+    const parts = [parsed?.error?.type, parsed?.error?.message].filter((p): p is string => typeof p === 'string' && p !== '');
+    if (parts.length > 0) return parts.join(': ');
+  } catch {
+    // not JSON: log the start of the body as text
+  }
+  return text === '' ? 'empty body' : text;
+}
+
+// ---------------------------------------------------------------------------
 // One model call. Shared by every request for the same cache key while it is in flight, so its
 // outcome is plain data (each waiter builds its own Response) and it never rejects.
 
@@ -426,30 +472,33 @@ async function callModel(call: ModelCall): Promise<CallOutcome> {
         signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
     } catch (err) {
-      console.error('ai-brief: upstream request failed:', err instanceof Error ? err.name : 'unknown error');
-      return { ok: false, status: 502, error: 'upstream_error', message: 'The AI service could not be reached.' };
+      console.error(`ai-brief: upstream request failed: ${redactForLog(errorDetail(err), apiKey)}`);
+      return { ok: false, status: 502, error: 'upstream_error', message: AI_BRIEF_ERROR_MESSAGES.unreachable };
     }
     if (!upstream.ok) {
-      // Log the status only: never the key, never the request body.
-      console.error(`ai-brief: upstream HTTP ${upstream.status}`);
+      // The status and the upstream error go to the server log (key removed), never to the client.
+      const requestId = upstream.headers.get('request-id');
+      const detail = await upstreamErrorDetail(upstream);
+      console.error(
+        `ai-brief: upstream HTTP ${upstream.status}${requestId ? ` (request-id ${redactForLog(requestId, apiKey)})` : ''}: ` +
+          redactForLog(detail, apiKey),
+      );
       const busy = upstream.status === 429 || upstream.status === 529;
-      return {
-        ok: false,
-        status: 502,
-        error: 'upstream_error',
-        message: busy ? 'The AI service is busy; try again shortly.' : `The AI service returned HTTP ${upstream.status}.`,
-      };
+      return { ok: false, status: 502, error: 'upstream_error', message: busy ? AI_BRIEF_ERROR_MESSAGES.busy : AI_BRIEF_ERROR_MESSAGES.upstream };
     }
     const message = (await upstream.json()) as UpstreamMessage;
     if (message.stop_reason === 'refusal') {
-      return { ok: false, status: 502, error: 'refused', message: 'The model declined to summarise this brief.' };
+      return { ok: false, status: 502, error: 'refused', message: AI_BRIEF_ERROR_MESSAGES.refused };
     }
     const raw = (message.content ?? [])
       .filter((b) => b.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text as string)
       .join('\n');
     const summary = sanitiseAiBriefText(raw, { allowedUrls: sourceUrlsIn(facts.text), allowedCitations: citationIdsIn(facts.text) });
-    if (summary === '') return { ok: false, status: 502, error: 'upstream_error', message: 'The AI service returned no text.' };
+    if (summary === '') {
+      console.error(`ai-brief: upstream returned no usable text (stop_reason ${redactForLog(String(message.stop_reason), apiKey)})`);
+      return { ok: false, status: 502, error: 'upstream_error', message: AI_BRIEF_ERROR_MESSAGES.empty };
+    }
     const result: AiBriefSuccess = {
       summary,
       model: typeof message.model === 'string' && message.model ? message.model : body.model,
@@ -463,8 +512,8 @@ async function callModel(call: ModelCall): Promise<CallOutcome> {
     cacheSet(cacheKey, result, now());
     return { ok: true, result };
   } catch (err) {
-    console.error('ai-brief: internal error:', err instanceof Error ? err.message : String(err));
-    return { ok: false, status: 500, error: 'internal_error', message: 'The AI brief could not be produced.' };
+    console.error(`ai-brief: internal error: ${redactForLog(errorDetail(err), apiKey)}`);
+    return { ok: false, status: 500, error: 'internal_error', message: AI_BRIEF_ERROR_MESSAGES.internal };
   }
 }
 
@@ -524,7 +573,7 @@ export async function handleAiBriefRequest(request: Request, ctx: AiBriefContext
     inFlight.set(cacheKey, call);
     return outcomeResponse(await call, 'miss');
   } catch (err) {
-    console.error('ai-brief: internal error:', err instanceof Error ? err.message : String(err));
-    return fail(500, 'internal_error', 'The AI brief could not be produced.');
+    console.error(`ai-brief: internal error: ${redactForLog(errorDetail(err), ctx.env.ANTHROPIC_API_KEY)}`);
+    return fail(500, 'internal_error', AI_BRIEF_ERROR_MESSAGES.internal);
   }
 }
