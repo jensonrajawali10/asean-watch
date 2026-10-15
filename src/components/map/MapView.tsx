@@ -46,6 +46,7 @@ import { himawariIrLayer, trueColourLayer } from '../../lib/gibs';
 import type { QuakeEvent, RiverDischargeSeries, SeaLevelStation } from '../../types';
 import { QUAKE_DEPTH_RGB, isRecentQuake, quakeDepthBand, quakeRadiusPx, quakeTooltip, stackNotes } from './connectorRender';
 import { RiverFlowPopover, TideGaugePopover } from './ChartPopover';
+import { quakeCaption } from './quakeCaption';
 import { psiBand } from '../../lib/nea';
 import { HAZE_ATTRIBUTION, HazeLayerController } from './HazeLayerController';
 import type { AirQualityData, HazeCity, HazeLayerInput } from './HazeLayerController';
@@ -712,7 +713,6 @@ export default function MapView({
         : [],
     [layers.quakes, quakes],
   );
-  const quakesRecent = quakesShown.filter((q) => isRecentQuake(q.timeISO, nowMs)).length;
   const tideStations = useMemo<SeaLevelStation[]>(() => {
     try {
       return loadSeaLevelStations().stations;
@@ -2095,16 +2095,14 @@ export default function MapView({
       ),
     });
   }
-  if (quakesShown.length > 0) {
+  if (layers.quakes && quakes) {
+    // Mode and retrieval time from the quake statuses; no "last 24 h" count when no source is live.
+    const caption = quakeCaption(quakes.statuses, quakesShown, nowMs);
     notes.push({
       key: 'quakes',
       node: (
         <p>
-          <span className="mv-caption-key">Earthquakes M4.5+ (USGS filled, BMKG rings), sized by magnitude, coloured by depth.</span>{' '}
-          <span className="mv-caption-meta">
-            {quakesRecent} in the last 24 h (bright), {quakesShown.length - quakesRecent} earlier, last 7 days. Each agency&apos;s report
-            is shown separately. Not a tsunami warning.
-          </span>
+          <span className="mv-caption-key">{caption.key}</span> <span className="mv-caption-meta">{caption.meta}</span>
         </p>
       ),
     });
