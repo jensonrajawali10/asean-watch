@@ -2,8 +2,9 @@
 // Capture GloFAS river discharge (Open-Meteo Flood API) for the named river points: npm run refresh:flood
 // One request: a 5x5 neighbourhood (0.05 deg step) around each point, past 7 days + today + 7 days.
 // Keep the point list in step with RIVER_POINTS in src/lib/floodModel.ts. MODELLED data, never a
-// warning. Fail-safe: on any failure nothing is written. No dependencies.
-import { writeFile } from 'node:fs/promises';
+// warning. Fail-safe: on any failure nothing is written; the file is written atomically (temp file +
+// rename). No dependencies.
+import { writeFileAtomic } from './lib/atomicWrite.mjs';
 
 const OUT = new URL('../data/flood-snapshot.json', import.meta.url);
 const POINTS = [
@@ -53,7 +54,7 @@ async function main() {
     retrievedAt,
     raw,
   };
-  await writeFile(OUT, `${JSON.stringify(snapshot)}\n`, 'utf8');
+  await writeFileAtomic(OUT, `${JSON.stringify(snapshot)}\n`);
   console.log(`refresh:flood: wrote data/flood-snapshot.json (${raw.length} cells)`);
 }
 

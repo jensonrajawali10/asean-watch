@@ -3,8 +3,9 @@
 // USGS FDSN (APAC / W Pacific box across the dateline, M4.5+, past 7 days), BMKG gempaterkini and
 // BMKG InaTEWS datagempa. Raw responses are kept (USGS trimmed to the fields src/lib/quakesLive.ts
 // reads). Fail-safe: a feed that fails keeps its previous snapshot entry; if nothing new was fetched,
-// the file is left untouched. No dependencies.
-import { readFile, writeFile } from 'node:fs/promises';
+// the file is left untouched (exit code 1). Written atomically (temp file + rename). No dependencies.
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './lib/atomicWrite.mjs';
 
 const OUT = new URL('../data/quakes-snapshot.json', import.meta.url);
 const TIMEOUT_MS = 30000;
@@ -72,7 +73,7 @@ async function main() {
     note: 'HISTORICAL snapshot for offline fallback. USGS "tsunami" flag is not a tsunami warning.',
     feeds,
   };
-  await writeFile(OUT, `${JSON.stringify(snapshot)}\n`, 'utf8');
+  await writeFileAtomic(OUT, `${JSON.stringify(snapshot)}\n`);
   console.log(`refresh:quakes: wrote data/quakes-snapshot.json (${fresh}/${Object.keys(FEEDS).length} feeds fresh)`);
 }
 
