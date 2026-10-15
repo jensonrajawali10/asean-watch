@@ -5,7 +5,7 @@ import type { Incident, OfficialWarning } from '../types';
 import { compareWarnings, loadWarningsSnapshot, warningsNear } from './warnings';
 import { loadPtwcSnapshot } from './ptwc';
 import { loadFixtures } from './fixtures';
-import { mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
+import { endedLabel, isExpired, mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
 
 const FEED = loadWarningsSnapshot();
 const PTWC = loadPtwcSnapshot();
@@ -13,6 +13,8 @@ const ALL = mergeWarnings(FEED.warnings, PTWC.warnings);
 const INCIDENTS = loadFixtures().incidents;
 /** App's radius for "near" a watch area. */
 const NEAR_KM = 150;
+/** A fixed clock after every snapshot capture (2026-10-13/14). */
+const NOW = Date.parse('2026-10-15T12:00:00Z');
 
 const incident = (id: string): Incident => {
   const found = INCIDENTS.find((i) => i.id === id);
@@ -77,7 +79,7 @@ describe('officialLevelFor (H2)', () => {
     // Real data: a DSDA Jakarta flood gate (~140 km, issued 07:40Z) sorts before the undated MAGMA record.
     expect(near[0].issuer).toMatch(/DSDA/);
     expect(near[0].hazard).toBe('flood');
-    const official = officialLevelFor(ak, near);
+    const official = officialLevelFor(ak, near, NOW);
     expect(official?.id).toBe(MAGMA['watch-anak-krakatau']);
     expect(official?.level).toBe('Level III (Siaga)');
     expect(official?.issuer).toMatch(/PVMBG/);
@@ -86,13 +88,13 @@ describe('officialLevelFor (H2)', () => {
   it('picks each volcano its own MAGMA record', () => {
     for (const [watchId, magmaId] of Object.entries(MAGMA)) {
       const i = incident(watchId);
-      expect(officialLevelFor(i, nearTo(i))?.id, watchId).toBe(magmaId);
+      expect(officialLevelFor(i, nearTo(i), NOW)?.id, watchId).toBe(magmaId);
     }
   });
 
   it('carries the record mode and retrieval time for the badge (recorded MAGMA level = historical)', () => {
     const ak = incident('watch-anak-krakatau');
-    const official = officialLevelFor(ak, nearTo(ak));
+    const official = officialLevelFor(ak, nearTo(ak), NOW);
     expect(official?.dataMode).toBe('historical');
     expect(official?.retrievedAt).toBe('2026-10-13T07:51:22Z');
   });
@@ -101,25 +103,25 @@ describe('officialLevelFor (H2)', () => {
     const ak = incident('watch-anak-krakatau');
     const floodOnly = nearTo(ak).filter((w) => w.hazard === 'flood');
     expect(floodOnly.length).toBeGreaterThan(0);
-    expect(officialLevelFor(ak, floodOnly)).toBeNull();
+    expect(officialLevelFor(ak, floodOnly, NOW)).toBeNull();
     // Riau (wildfire, smoke) is only answered by a haze message; a flood gate is not one.
     const riau = incident('watch-riau-haze');
-    expect(officialLevelFor(riau, floodOnly)).toBeNull();
-    expect(officialLevelFor(riau, nearTo(riau))).toBeNull();
+    expect(officialLevelFor(riau, floodOnly, NOW)).toBeNull();
+    expect(officialLevelFor(riau, nearTo(riau), NOW)).toBeNull();
   });
 
   it("never shows a record that carries another volcano's GVP number", () => {
     const merapi = incident('watch-merapi');
-    expect(officialLevelFor(merapi, [byId(MAGMA['watch-semeru'])])).toBeNull();
+    expect(officialLevelFor(merapi, [byId(MAGMA['watch-semeru'])], NOW)).toBeNull();
   });
 
   it('prefers the record naming the volcano, else falls back to a volcano record with no GVP number', () => {
     const merapi = incident('watch-merapi');
     const jma = ALL.find((w) => w.id.startsWith('jma-volcano:') && !w.ended) as OfficialWarning;
     // The record naming the volcano wins over an earlier one that does not.
-    expect(officialLevelFor(merapi, [jma, byId(MAGMA['watch-merapi'])])?.id).toBe(MAGMA['watch-merapi']);
+    expect(officialLevelFor(merapi, [jma, byId(MAGMA['watch-merapi'])], NOW)?.id).toBe(MAGMA['watch-merapi']);
     // Fallback (a JMA or GeoNet record carries no GVP number); App only passes records within 150 km.
-    expect(officialLevelFor(merapi, [jma])?.id).toBe(jma.id);
+    expect(officialLevelFor(merapi, [jma], NOW)?.id).toBe(jma.id);
   });
 
   it('matches by area name when the id carries no GVP number', () => {
@@ -127,14 +129,22 @@ describe('officialLevelFor (H2)', () => {
     const record = byId(MAGMA['watch-merapi']);
     const renamed = { ...record, id: 'magma-level-list:merapi:2026-10-13T07:51:22Z' };
     const other = { ...byId(MAGMA['watch-semeru']), id: 'magma-level-list:semeru:2026-10-13T07:51:22Z' };
-    expect(officialLevelFor(merapi, [other, renamed])?.id).toBe(renamed.id);
+    expect(officialLevelFor(merapi, [other, renamed], NOW)?.id).toBe(renamed.id);
   });
 
   it('skips aggregator estimates and messages the issuer ended', () => {
     const merapi = incident('watch-merapi');
     const record = byId(MAGMA['watch-merapi']);
-    expect(officialLevelFor(merapi, [{ ...record, authority: 'aggregator' }])).toBeNull();
-    expect(officialLevelFor(merapi, [{ ...record, ended: true }])).toBeNull();
+    expect(officialLevelFor(merapi, [{ ...record, authority: 'aggregator' }], NOW)).toBeNull();
+    expect(officialLevelFor(merapi, [{ ...record, ended: true }], NOW)).toBeNull();
+  });
+
+  it('skips a message whose expiry has passed on the clock, even if not marked ended (M4)', () => {
+    const merapi = incident('watch-merapi');
+    const record = { ...byId(MAGMA['watch-merapi']), expiresAt: '2026-10-14T00:00:00Z' };
+    expect(record.ended).toBe(false);
+    expect(officialLevelFor(merapi, [record], Date.parse('2026-10-13T12:00:00Z'))?.id).toBe(record.id);
+    expect(officialLevelFor(merapi, [record], NOW)).toBeNull();
   });
 });
 
@@ -166,5 +176,53 @@ describe('warningMatchesGauge (M2)', () => {
     expect(warningMatchesGauge('dsda-jakarta:107:2026-10-13T07:40:00Z', 'dsda-jakarta:107')).toBe(true);
     expect(warningMatchesGauge('dsda-jakarta:107:2026-10-13T07:40:00Z', '')).toBe(false);
     expect(warningMatchesGauge('dsda-jakarta:107:2026-10-13T07:40:00Z', 'dsda-jakarta:')).toBe(false);
+  });
+});
+
+describe('isExpired and endedLabel (M4)', () => {
+  const jmaTsunami = ALL.filter((w) => w.id.startsWith('jma-tsunami:'));
+  const ptwc = PTWC.warnings[0];
+
+  it('reads real expired messages as EXPIRED with the issuer expiry', () => {
+    // Real data: JMA tsunami items expired 2026-10-11T11:00Z, captured 2026-10-13; PTWC expired 13:34:39Z.
+    expect(jmaTsunami.length).toBeGreaterThan(0);
+    for (const w of jmaTsunami) {
+      expect(isExpired(w, NOW)).toBe(true);
+      expect(endedLabel(w, NOW)).toEqual({ text: 'EXPIRED', at: w.expiresAt });
+    }
+    expect(ptwc.expiresAt).toBe('2026-10-13T13:34:39Z');
+    expect(endedLabel(ptwc, NOW)).toEqual({ text: 'EXPIRED', at: '2026-10-13T13:34:39Z' });
+  });
+
+  it('expires an un-ended message once its expiry passes on the clock (snapshot shown later, or a tab left open)', () => {
+    // As captured while the advisory was still valid: not ended, expiry ahead of the retrieval time.
+    const valid = { ...jmaTsunami[0], ended: false, retrievedAt: '2026-10-11T09:00:00Z' };
+    const before = Date.parse('2026-10-11T10:00:00Z');
+    expect(isExpired(valid, before)).toBe(false);
+    expect(endedLabel(valid, before)).toBeNull();
+    expect(isExpired(valid, NOW)).toBe(true);
+    expect(endedLabel(valid, NOW)).toEqual({ text: 'EXPIRED', at: '2026-10-11T11:00:00Z' });
+  });
+
+  it('labels a message cancelled before its expiry ENDED, never "EXPIRED <a future time>"', () => {
+    // A PTWC Cancel (or JMA 解除) retrieved while its expiry was still two hours ahead.
+    const cancelled = { ...ptwc, ended: true, retrievedAt: '2026-10-13T12:40:00Z', expiresAt: '2026-10-13T14:40:00Z' };
+    const soon = Date.parse('2026-10-13T12:45:00Z');
+    expect(isExpired(cancelled, soon)).toBe(true);
+    expect(endedLabel(cancelled, soon)).toEqual({ text: 'ENDED' });
+    // Still ENDED (not EXPIRED) after the expiry has also passed: the issuer ended it first.
+    expect(endedLabel(cancelled, NOW)).toEqual({ text: 'ENDED' });
+  });
+
+  it('keeps messages with no expiry active until the issuer ends them', () => {
+    const magma = ALL.filter((w) => w.id.startsWith('magma-level-list:'));
+    expect(magma).toHaveLength(4);
+    for (const w of magma) {
+      expect(isExpired(w, NOW)).toBe(false);
+      expect(endedLabel(w, NOW)).toBeNull();
+    }
+    const bmkgEnded = ALL.find((w) => w.id.startsWith('bmkg-inatews:') && w.ended) as OfficialWarning;
+    expect(bmkgEnded.expiresAt).toBeNull();
+    expect(endedLabel(bmkgEnded, NOW)).toEqual({ text: 'ENDED' });
   });
 });

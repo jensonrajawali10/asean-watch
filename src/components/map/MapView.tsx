@@ -69,7 +69,7 @@ import {
 } from './mapGeometry';
 import type { Bounds, LonLat, MapHotspot, RegionCollection } from './mapGeometry';
 import { PTWC_NATIONAL_AUTHORITIES_NOTE } from '../../lib/ptwc';
-import { warningMatchesGauge } from '../../lib/warningsView';
+import { endedLabel, isExpired, warningMatchesGauge } from '../../lib/warningsView';
 import './MapView.css';
 
 export type { MapHotspot } from './mapGeometry';
@@ -679,7 +679,7 @@ export default function MapView({
   const ashShown = Boolean(ashDrift && layers.ash);
 
   // Official BMKG InaTEWS tsunami warning areas (verbatim levels) at district centres (approximate).
-  const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings), [warnings]);
+  const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings, nowMs), [warnings, nowMs]);
   const tsunamiInForce = tsunamiPick.inForce !== null;
   const tsunamiWarning = tsunamiPick.inForce ?? (tsunamiHistory ? tsunamiPick.latest : null);
   const tsunamiPlacement = useMemo(() => (tsunamiWarning ? placeTsunamiAreas(tsunamiWarning.areas, idnDistrictIndex()) : null), [tsunamiWarning]);
@@ -1685,7 +1685,7 @@ export default function MapView({
     ? ''
     : tsunamiInForce
       ? `${tsunamiWarning.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} · issued ${tsunamiIssued}`
-      : `HISTORICAL · ${tsunamiIssued} · ${tsunamiWarning.ended ? 'ended' : 'not ended'}`;
+      : `HISTORICAL · ${tsunamiIssued} · ${isExpired(tsunamiWarning, nowMs) ? 'ended' : 'not ended'}`;
   const ashModeLabel = ashWind?.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT';
   const ashDirections = ashDrift
     ? ashDrift.tracks
@@ -1767,7 +1767,7 @@ export default function MapView({
             {tsunamiAreaMarkers.length > 0 && (
               <li className="mv-legend-item">
                 <svg className="mv-swatch" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
-                  <OfficialSymbol kind={tsunamiWarning?.ended ? 'ended' : 'official'} />
+                  <OfficialSymbol kind={tsunamiWarning && isExpired(tsunamiWarning, nowMs) ? 'ended' : 'official'} />
                 </svg>
                 <span>
                   Tsunami warning area <span className="mv-legend-sub">(BMKG, district centre)</span>
@@ -2185,7 +2185,8 @@ export default function MapView({
               const label = official
                 ? `Official warning: ${w.issuer} · ${w.level} · ${area}`
                 : `Impact estimate (GDACS, not a warning): ${w.issuer} · ${w.level} · ${area}`;
-              const kind: OfficialKind = !official ? 'estimate' : w.ended ? 'ended' : 'official';
+              const ended = endedLabel(w, nowMs);
+              const kind: OfficialKind = !official ? 'estimate' : ended ? 'ended' : 'official';
               const loc = w.location as { lat: number; lon: number };
               return (
                 <button
@@ -2205,7 +2206,9 @@ export default function MapView({
                   <span className="mv-wcallout" aria-hidden="true">
                     <strong>{w.issuer}</strong>
                     <span lang={w.language || undefined}>{w.level}</span>
-                    {w.ended && <span className="mv-wcallout-meta">Ended</span>}
+                    {ended && (
+                      <span className="mv-wcallout-meta">{ended.text === 'EXPIRED' ? `Expired ${formatUtc(ended.at)}` : 'Ended'}</span>
+                    )}
                     {!official && <span className="mv-wcallout-meta">Impact estimate, not a warning</span>}
                     {w.issuer.startsWith('Pacific Tsunami Warning Center') && (
                       <span className="mv-wcallout-meta" title={PTWC_NATIONAL_AUTHORITIES_NOTE}>
@@ -2253,7 +2256,7 @@ export default function MapView({
                 // BMKG's own instruction line for this level, verbatim (no gloss or numbers of ours).
                 const instruction = bmkgLevelInstruction(tsunamiWarning, a.area.level);
                 const place = `${a.area.name}${a.area.province ? `, ${a.area.province}` : ''}`;
-                const kind: OfficialKind = tsunamiWarning.ended ? 'ended' : 'official';
+                const kind: OfficialKind = isExpired(tsunamiWarning, nowMs) ? 'ended' : 'official';
                 return (
                   <button
                     key={`ta-${a.area.name}-${i}`}

@@ -138,4 +138,12 @@ describe('selectTsunamiAreaWarnings on the real snapshot', () => {
     expect(selectTsunamiAreaWarnings([base, open]).inForce?.id).toBe('bmkg-inatews:open');
     expect(selectTsunamiAreaWarnings([base, open]).latest?.id).toBe(base.id);
   });
+
+  it('given a clock, does not draw a message whose expiry has passed as in force (M4)', () => {
+    const base = REAL.find((w) => w.product === 'Warning Tsunami PD-3.4' && w.issuedAt === '2026-08-15T00:05:32Z') as OfficialWarning;
+    const open = { ...base, id: 'bmkg-inatews:open', ended: false, expiresAt: '2026-08-15T06:00:00Z' };
+    expect(selectTsunamiAreaWarnings([open], Date.parse('2026-08-15T01:00:00Z')).inForce?.id).toBe(open.id);
+    expect(selectTsunamiAreaWarnings([open], Date.parse('2026-10-15T12:00:00Z')).inForce).toBeNull();
+    expect(selectTsunamiAreaWarnings([open], Date.parse('2026-10-15T12:00:00Z')).latest?.id).toBe(open.id);
+  });
 });

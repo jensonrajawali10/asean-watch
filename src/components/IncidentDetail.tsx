@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import type { Incident, OfficialWarning, ReviewResult, SourceRef, Volcano } from '../types';
 import { RULE_SUMMARY, RULE_TEXT } from '../lib/reviewRules';
 import { officialLevelFor } from '../lib/warningsView';
+import { useNowMs } from '../lib/useNowMs';
 import { CountedPill, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag, StateBadge } from './Badges';
 import { categoryLabel, formatCoords, formatUtc, hazardLabel } from './format';
 
@@ -91,7 +92,8 @@ function SelectedIncident({
   // explanation[0] restates the rule (RULE_SUMMARY); the rule is shown once, as RULE_TEXT.
   const derivation =
     review && review.explanation[0] === RULE_SUMMARY ? review.explanation.slice(1) : (review?.explanation ?? []);
-  const official = officialLevelFor(incident, officialNear);
+  const nowMs = useNowMs();
+  const official = officialLevelFor(incident, officialNear, nowMs);
   const moreOfficial = officialNear.length - (official ? 1 : 0);
 
   return (

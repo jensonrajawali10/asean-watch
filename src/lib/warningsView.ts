@@ -33,16 +33,18 @@ function idGvpNumbers(w: OfficialWarning): string[] {
 
 /**
  * The official level to show beside a watch area's own state: the first active official message (in
- * the given order) for the watch's hazard. For a volcano, the record naming that volcano (by GVP number
- * or by area name) is preferred, and a record naming another volcano is never used. Returns null rather
- * than a message for another hazard or another volcano: no block is better than a misleading one.
+ * the given order, judged on the nowMs clock) for the watch's hazard. For a volcano, the record naming
+ * that volcano (by GVP number or by area name) is preferred, and a record carrying another volcano's GVP
+ * number is never used. Returns null rather than a message for another hazard: no block is better than a
+ * misleading one.
  */
 export function officialLevelFor(
   incident: Pick<Incident, 'hazard' | 'title' | 'volcanoId'>,
   warnings: readonly OfficialWarning[],
+  nowMs: number,
 ): OfficialWarning | null {
   const hazards = XREF_HAZARDS[incident.hazard] ?? [];
-  const candidates = warnings.filter((w) => w.authority === 'official' && !w.ended && hazards.includes(w.hazard));
+  const candidates = warnings.filter((w) => w.authority === 'official' && !isExpired(w, nowMs) && hazards.includes(w.hazard));
   if (incident.hazard !== 'volcano') return candidates[0] ?? null;
   const gvp = gvpNumber(incident.volcanoId);
   const title = norm(incident.title);
@@ -61,4 +63,39 @@ export function officialLevelFor(
 export function warningMatchesGauge(warningId: string, gaugeId: string): boolean {
   if (!gaugeId || gaugeId.endsWith(':')) return false;
   return warningId === gaugeId || warningId.startsWith(`${gaugeId}:`);
+}
+
+/** Epoch ms of an ISO time, or null when absent or unreadable. */
+function timeMs(iso: string | null | undefined): number | null {
+  const t = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * True when a message is no longer in force: the issuer ended or cancelled it, or its expiry has passed
+ * on the nowMs clock. `ended` alone was fixed when the message was parsed (against its retrieval time),
+ * so a bundled snapshot or a tab left open would otherwise keep an expired message active.
+ */
+export function isExpired(w: Pick<OfficialWarning, 'ended' | 'expiresAt'>, nowMs: number): boolean {
+  if (w.ended) return true;
+  const expires = timeMs(w.expiresAt);
+  return expires !== null && expires <= nowMs;
+}
+
+/** How an inactive message is labelled. EXPIRED carries the issuer's expiry time. */
+export type EndedLabel = { text: 'ENDED' } | { text: 'EXPIRED'; at: string };
+
+/**
+ * The label for a message that is no longer in force, or null while it is active:
+ * - ENDED when the issuer ended or cancelled it before its expiry (expiry still ahead when retrieved),
+ *   or ended it without giving an expiry;
+ * - EXPIRED <expiry> only once the expiry has passed on the nowMs clock.
+ */
+export function endedLabel(w: Pick<OfficialWarning, 'ended' | 'expiresAt' | 'retrievedAt'>, nowMs: number): EndedLabel | null {
+  if (!isExpired(w, nowMs)) return null;
+  const expires = timeMs(w.expiresAt);
+  const retrieved = timeMs(w.retrievedAt);
+  const endedBeforeExpiry = w.ended && expires !== null && retrieved !== null && expires > retrieved;
+  if (w.expiresAt && expires !== null && expires <= nowMs && !endedBeforeExpiry) return { text: 'EXPIRED', at: w.expiresAt };
+  return { text: 'ENDED' };
 }
