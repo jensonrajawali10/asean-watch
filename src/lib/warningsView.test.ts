@@ -5,14 +5,12 @@ import type { Incident, OfficialWarning } from '../types';
 import { compareWarnings, loadWarningsSnapshot, warningsNear } from './warnings';
 import { loadPtwcSnapshot } from './ptwc';
 import { loadFixtures } from './fixtures';
-import { endedLabel, isExpired, mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
+import { NEAR_KM, emptyWarningsText, endedLabel, isExpired, mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
 
 const FEED = loadWarningsSnapshot();
 const PTWC = loadPtwcSnapshot();
 const ALL = mergeWarnings(FEED.warnings, PTWC.warnings);
 const INCIDENTS = loadFixtures().incidents;
-/** App's radius for "near" a watch area. */
-const NEAR_KM = 150;
 /** A fixed clock after every snapshot capture (2026-10-13/14). */
 const NOW = Date.parse('2026-10-15T12:00:00Z');
 
@@ -224,5 +222,25 @@ describe('isExpired and endedLabel (M4)', () => {
     const bmkgEnded = ALL.find((w) => w.id.startsWith('bmkg-inatews:') && w.ended) as OfficialWarning;
     expect(bmkgEnded.expiresAt).toBeNull();
     expect(endedLabel(bmkgEnded, NOW)).toEqual({ text: 'ENDED' });
+  });
+});
+
+describe('emptyWarningsText (L7)', () => {
+  it('near a watch area with nothing within the radius, says what was searched, not that nothing was retrieved', () => {
+    const riau = incident('watch-riau-haze');
+    // Real data: nothing within 150 km of Riau, while 111 warnings were retrieved.
+    expect(nearTo(riau)).toHaveLength(0);
+    expect(ALL.length).toBeGreaterThan(100);
+    expect(NEAR_KM).toBe(150);
+    expect(emptyWarningsText({ loading: false, nearName: 'Riau' })).toBe(
+      'None within 150 km of Riau in the feeds below. This is not an all-clear.',
+    );
+  });
+
+  it('keeps the APAC-wide and loading texts', () => {
+    expect(emptyWarningsText({ loading: false, nearName: null })).toBe(
+      'No official warnings retrieved from the feeds below. This is not an all-clear.',
+    );
+    expect(emptyWarningsText({ loading: true, nearName: 'Riau' })).toBe('Loading official feeds…');
   });
 });

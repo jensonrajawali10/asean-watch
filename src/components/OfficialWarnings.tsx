@@ -17,7 +17,7 @@ import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
-import { endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
+import { emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
 
 // ---------------------------------------------------------------------------
@@ -162,9 +162,7 @@ export default function OfficialWarningsPanel({
 
       <div className="ow-scroll">
         {n === 0 ? (
-          <p className="ow-empty">
-            {loading ? 'Loading official feeds…' : 'No official warnings retrieved from the feeds below. This is not an all-clear.'}
-          </p>
+          <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>
         ) : (
           <ul className="ow-list" ref={listRef}>
             {shown.map((w) => (

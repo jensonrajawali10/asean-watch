@@ -1493,7 +1493,11 @@ export default function MapView({
 
     map.on('move', positionOverlays);
     map.on('movestart', (e) => {
-      if ((e as { originalEvent?: unknown }).originalEvent) setCity(null);
+      // A user pan or zoom: the popovers are pinned to a pixel, so close them.
+      if ((e as { originalEvent?: unknown }).originalEvent) {
+        setCity(null);
+        setChart(null);
+      }
     });
     map.on('moveend', () => {
       positionOverlays();
@@ -1591,6 +1595,7 @@ export default function MapView({
     if (!ready) return;
     const animate = !firstFit.current || selectedIncident !== null;
     setCity(null);
+    setChart(null);
     firstFit.current = false;
     fitTo(selectedIncident, animate);
     // Only a change of selection refits; free zoom and pan are left alone otherwise.
@@ -1599,6 +1604,7 @@ export default function MapView({
 
   const goHome = () => {
     setCity(null);
+    setChart(null);
     if (selectedId !== null && onClearSelection) onClearSelection();
     else fitTo(null, true);
   };

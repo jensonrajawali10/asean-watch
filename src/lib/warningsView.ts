@@ -99,3 +99,16 @@ export function endedLabel(w: Pick<OfficialWarning, 'ended' | 'expiresAt' | 'ret
   if (w.expiresAt && expires !== null && expires <= nowMs && !endedBeforeExpiry) return { text: 'EXPIRED', at: w.expiresAt };
   return { text: 'ENDED' };
 }
+
+/** Official warnings within this distance of a watch area are listed next to it (km). */
+export const NEAR_KM = 150;
+
+/**
+ * The panel's text when its list is empty. Near a watch area it says what was searched (the radius and
+ * place), because other warnings were retrieved; it never reads as an all-clear.
+ */
+export function emptyWarningsText(opts: { loading: boolean; nearName: string | null; nearKm?: number }): string {
+  if (opts.loading) return 'Loading official feeds…';
+  if (opts.nearName) return `None within ${opts.nearKm ?? NEAR_KM} km of ${opts.nearName} in the feeds below. This is not an all-clear.`;
+  return 'No official warnings retrieved from the feeds below. This is not an all-clear.';
+}

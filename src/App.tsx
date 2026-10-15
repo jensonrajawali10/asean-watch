@@ -14,7 +14,7 @@ import type { BriefingInput } from './lib/briefing';
 import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
 import { warningDistanceKm, warningsNear } from './lib/warnings';
-import { mergeWarnings } from './lib/warningsView';
+import { NEAR_KM, mergeWarnings } from './lib/warningsView';
 import { useOfficialWarnings } from './lib/useOfficialWarnings';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
@@ -77,8 +77,6 @@ const INCIDENTS: Incident[] = Array.isArray(FIXTURES.incidents) ? FIXTURES.incid
 const STEPS: ReplayStep[] = Array.isArray(FIXTURES.replaySteps) ? FIXTURES.replaySteps : [];
 const FIRST_STEP = STEPS[0]?.index ?? 0;
 const PLAY_INTERVAL_MS = 1500;
-/** Official warnings within this distance of a watch area are listed next to it. */
-const NEAR_KM = 150;
 /** The watch area the overview offers to open first. */
 const FIRST_INCIDENT: Incident | null = INCIDENTS[0] ?? null;
 
@@ -589,6 +587,8 @@ export default function App() {
   }, [selectedIncidentId]);
 
   const selectFromList = (id: string) => {
+    // Picking the area already selected changes nothing; a stale flag would scroll on the next map pick.
+    if (id === selectedIncidentId) return;
     pendingReveal.current = true;
     selectIncident(id);
   };
