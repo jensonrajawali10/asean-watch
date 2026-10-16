@@ -40,9 +40,9 @@ The app has two modes on one map:
 
 ## Demo video (30 s)
 
-[![ASEAN Watch demo video](docs/media/demo-poster.png)](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4)
+[![ASEAN Watch demo video](docs/media/demo-poster.png)](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v6.mp4)
 
-[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
+[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v6.mp4) (1920×1080, 13 MB; [captioned version](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s-v6-captions.mp4)) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
 
 ## Quick start
 
