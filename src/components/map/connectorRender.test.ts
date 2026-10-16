@@ -3,6 +3,7 @@ import type { QuakeEvent } from '../../types';
 import {
   QUAKE_DEPTH_RGB,
   isRecentQuake,
+  quakeDepthRgb,
   lineChart,
   quakeDepthBand,
   quakeRadiusPx,
@@ -49,6 +50,17 @@ describe('quake styling', () => {
 
   it('never uses the reserved official red for depth colours', () => {
     for (const [r, g] of Object.values(QUAKE_DEPTH_RGB)) expect(r > 190 && g < 110).toBe(false);
+    for (const band of ['shallow', 'intermediate', 'deep', 'unknown'] as const) {
+      const [r, g] = quakeDepthRgb(band, 'light');
+      expect(r > 190 && g < 110).toBe(false);
+    }
+  });
+
+  it('keeps the dark depth colours as the default and deepens them on the light map', () => {
+    expect(quakeDepthRgb('shallow')).toEqual(QUAKE_DEPTH_RGB.shallow);
+    expect(quakeDepthRgb('deep', true)).toEqual(QUAKE_DEPTH_RGB.deep);
+    const sum = (c: number[]) => c[0] + c[1] + c[2];
+    expect(sum(quakeDepthRgb('shallow', 'light'))).toBeLessThan(sum(QUAKE_DEPTH_RGB.shallow));
   });
 
   it('emphasises the last 24 h', () => {

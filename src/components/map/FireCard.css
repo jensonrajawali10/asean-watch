@@ -1,0 +1,47 @@
+/* Fire card extras inside MapCard's slot. Tokens only (src/index.css); both themes. */
+.firecard__heading {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.firecard__tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--mode-modelled-border);
+  border-radius: 999px;
+  background: var(--mode-modelled-bg);
+  color: var(--mode-modelled-fg);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  vertical-align: 1px;
+}
+
+.firecard__muted {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.firecard__heading .firecard__muted {
+  margin: 0;
+}
+
+/* The 7-day strip: shorter than the workspace bars, with a small caption. */
+.firecard__bars .an-bars {
+  margin: 0;
+}
+
+.firecard__bars .an-bars__plot {
+  height: 40px;
+}
+
+.firecard__bars figcaption {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}

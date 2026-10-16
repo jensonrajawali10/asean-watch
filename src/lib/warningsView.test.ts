@@ -6,6 +6,8 @@ import { compareWarnings, loadWarningsSnapshot, warningsNear } from './warnings'
 import { loadPtwcSnapshot } from './ptwc';
 import { loadFixtures } from './fixtures';
 import { NEAR_KM, emptyWarningsText, endedLabel, isExpired, mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
+import { findMagmaLevel } from './volcanoOfficial';
+import { officialVolcanoLevel } from '../components/map/volcanoLevels';
 
 const FEED = loadWarningsSnapshot();
 const PTWC = loadPtwcSnapshot();
@@ -118,8 +120,15 @@ describe('officialLevelFor (H2)', () => {
     const jma = ALL.find((w) => w.id.startsWith('jma-volcano:') && !w.ended) as OfficialWarning;
     // The record naming the volcano wins over an earlier one that does not.
     expect(officialLevelFor(merapi, [jma, byId(MAGMA['watch-merapi'])], NOW)?.id).toBe(MAGMA['watch-merapi']);
-    // Fallback (a JMA or GeoNet record carries no GVP number); App only passes records within 150 km.
-    expect(officialLevelFor(merapi, [jma], NOW)?.id).toBe(jma.id);
+    // Fallback: a volcano record with no GVP number (JMA, GeoNet) counts only within LEVEL_RADIUS_KM of the
+    // watch (the v3 map rule). The real JMA record is in Japan, so it is not Merapi's level.
+    expect(officialLevelFor(merapi, [jma], NOW)).toBeNull();
+    const jmaNearby = { ...jma, location: { lat: merapi.lat + 0.2, lon: merapi.lon }, areas: [] };
+    expect(officialLevelFor(merapi, [jmaNearby], NOW)?.id).toBe(jma.id);
+    const tooFar = { ...jmaNearby, location: { lat: merapi.lat + 1, lon: merapi.lon } };
+    expect(officialLevelFor(merapi, [tooFar], NOW)).toBeNull();
+    // Without a position for the watch, the first unnamed record in the given order (the near list).
+    expect(officialLevelFor({ hazard: 'volcano', title: 'Merapi', volcanoId: merapi.volcanoId }, [jma], NOW)?.id).toBe(jma.id);
   });
 
   it('matches by area name when the id carries no GVP number', () => {
@@ -143,6 +152,45 @@ describe('officialLevelFor (H2)', () => {
     expect(record.ended).toBe(false);
     expect(officialLevelFor(merapi, [record], Date.parse('2026-10-13T12:00:00Z'))?.id).toBe(record.id);
     expect(officialLevelFor(merapi, [record], NOW)).toBeNull();
+  });
+});
+
+describe('one official level everywhere (H2 on the v3 shell)', () => {
+  const VOLCANO_WATCHES = ['watch-merapi', 'watch-semeru', 'watch-anak-krakatau', 'watch-sinabung'];
+
+  it('gives each of the four volcanoes its own PVMBG/MAGMA level in the review, the map ring, the card and the MAGMA lookup', () => {
+    for (const watchId of VOLCANO_WATCHES) {
+      const i = incident(watchId);
+      const review = officialLevelFor(i, nearTo(i), NOW);
+      const fromAll = officialLevelFor(i, ALL, NOW);
+      const ring = officialVolcanoLevel(i, nearTo(i), NOW);
+      const magma = findMagmaLevel(ALL, i, NOW);
+      expect(review?.id, watchId).toMatch(/^magma-level-list:\d{6}:/);
+      expect(review?.issuer, watchId).toMatch(/PVMBG/);
+      expect(review?.level, watchId).toBe('Level III (Siaga)');
+      expect(fromAll?.id, watchId).toBe(review?.id);
+      expect(ring?.warningId, watchId).toBe(review?.id);
+      expect(ring?.dataMode, watchId).toBe('historical');
+      expect(ring?.retrievedAt, watchId).toBe('2026-10-13T07:51:22Z');
+      expect(magma?.id, watchId).toBe(review?.id);
+    }
+  });
+
+  it("never gives Anak Krakatau the Jakarta flood gate's Siaga 3, whichever helper is asked", () => {
+    const ak = incident('watch-anak-krakatau');
+    const dsda = nearTo(ak).filter((w) => /DSDA/.test(w.issuer));
+    expect(dsda.length).toBeGreaterThan(0);
+    for (const level of [officialLevelFor(ak, dsda, NOW), officialVolcanoLevel(ak, dsda, NOW), findMagmaLevel(dsda, ak, NOW)]) {
+      expect(level).toBeNull();
+    }
+  });
+
+  it('the MAGMA lookup follows the clock when given one, and the issuer flag otherwise', () => {
+    const merapi = incident('watch-merapi');
+    const record = { ...byId('magma-level-list:263250:2026-10-13T07:51:22Z'), expiresAt: '2026-10-14T00:00:00Z' };
+    expect(findMagmaLevel([record], merapi, NOW)).toBeNull();
+    expect(findMagmaLevel([record], merapi)?.id).toBe(record.id);
+    expect(findMagmaLevel([{ ...record, ended: true }], merapi)).toBeNull();
   });
 });
 

@@ -3,44 +3,18 @@
 // particle system advected by a 925 hPa wind slice. MODELLED context only.
 import { sampleRegular, sampleSlice } from '../../lib/windField';
 import type { WindSlice } from '../../lib/windField';
+import { getMapPalette, rampRgba } from './mapPalette';
+import type { MapTheme, Rgba } from './mapPalette';
 
-export type Rgba = [number, number, number, number];
+export type { Rgba };
 
-/** Ramp stops: PM2.5 µg/m³ → colour and alpha (0..1). Transparent below the first stop. */
-interface Stop {
-  v: number;
-  c: [number, number, number];
-  a: number;
-}
-const SMOKE_LIGHT: readonly Stop[] = [
-  { v: 12, c: [214, 190, 150], a: 0 },
-  { v: 25, c: [208, 180, 134], a: 0.22 },
-  { v: 55, c: [190, 148, 96], a: 0.38 },
-  { v: 150, c: [150, 100, 58], a: 0.52 },
-  { v: 400, c: [104, 66, 36], a: 0.62 },
-];
-/** Dark basemap (CARTO Dark Matter): a warm tan smoke around #c9a675, never above 0.55 opacity. */
-const SMOKE_DARK: readonly Stop[] = [
-  { v: 12, c: [201, 166, 117], a: 0 },
-  { v: 25, c: [201, 166, 117], a: 0.14 },
-  { v: 55, c: [201, 166, 117], a: 0.27 },
-  { v: 150, c: [196, 156, 104], a: 0.42 },
-  { v: 400, c: [188, 142, 92], a: 0.55 },
-];
-
-/** Smoke colour for a PM2.5 value: transparent when clean, warm tan to brown (light map) or tan smoke (dark map). */
-export function smokeRgba(v: number, dark: boolean): Rgba {
-  const stops = dark ? SMOKE_DARK : SMOKE_LIGHT;
-  if (!(v > stops[0].v)) return [stops[0].c[0], stops[0].c[1], stops[0].c[2], 0];
-  const last = stops[stops.length - 1];
-  if (v >= last.v) return [last.c[0], last.c[1], last.c[2], Math.round(last.a * 255)];
-  let k = 1;
-  while (v > stops[k].v) k += 1;
-  const s0 = stops[k - 1];
-  const s1 = stops[k];
-  const t = (Math.log(v) - Math.log(s0.v)) / (Math.log(s1.v) - Math.log(s0.v));
-  const mix = (a: number, b: number) => Math.round(a + (b - a) * t);
-  return [mix(s0.c[0], s1.c[0]), mix(s0.c[1], s1.c[1]), mix(s0.c[2], s1.c[2]), Math.round((s0.a + (s1.a - s0.a) * t) * 255)];
+/**
+ * Smoke colour for a PM2.5 value from the theme's haze ramp (mapPalette): transparent when clean; a tan
+ * smoke on the dark map, amber to deep brown on the light map. `theme` also accepts the older
+ * `dark: boolean` flag; it defaults to dark.
+ */
+export function smokeRgba(v: number, theme: MapTheme | boolean = 'dark'): Rgba {
+  return rampRgba(getMapPalette(theme).haze.stops, v);
 }
 
 const mercY = (latDeg: number) => Math.log(Math.tan(Math.PI / 4 + (latDeg * Math.PI) / 360));
@@ -64,7 +38,7 @@ export function rasterisePm25(
   slice: ArrayLike<number>,
   lats: readonly number[],
   lons: readonly number[],
-  dark: boolean,
+  theme: MapTheme | boolean = 'dark',
   opts: { pxPerDeg?: number; featherDeg?: number } = {},
 ): HazeRaster {
   const pxPerDeg = opts.pxPerDeg ?? 10;
@@ -84,7 +58,7 @@ export function rasterisePm25(
     for (let c = 0; c < width; c += 1) {
       const lon = west + ((c + 0.5) / width) * (east - west);
       const v = sampleRegular(slice, lats, lons, lat, lon);
-      const [cr, cg, cb, ca] = smokeRgba(v, dark);
+      const [cr, cg, cb, ca] = smokeRgba(v, theme);
       const edge = Math.min(edgeLat, lon - west, east - lon);
       const fade = feather > 0 ? Math.max(0, Math.min(1, edge / feather)) : 1;
       const o = (r * width + c) * 4;

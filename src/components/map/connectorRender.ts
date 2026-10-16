@@ -1,6 +1,8 @@
 // Pure render helpers for the connector layers (earthquakes, tide gauges, modelled river flow) and the
 // map's caption stack. No DOM, no map: tested in connectorRender.test.ts.
 import type { QuakeEvent } from '../../types';
+import { getMapPalette } from './mapPalette';
+import type { MapTheme } from './mapPalette';
 
 export type RGB = [number, number, number];
 
@@ -23,13 +25,16 @@ export function quakeDepthBand(depthKm: number | null): DepthBand {
   return 'deep';
 }
 
-/** Depth colours: amber, teal, violet, grey. Never the reserved official red. */
-export const QUAKE_DEPTH_RGB: Record<DepthBand, RGB> = {
-  shallow: [242, 176, 64],
-  intermediate: [64, 168, 190],
-  deep: [150, 118, 214],
-  unknown: [150, 150, 150],
-};
+/**
+ * Depth colours on the dark map (the default): amber, teal, violet, grey. Never the reserved official
+ * red. Kept for existing callers; theme-aware callers use quakeDepthRgb(band, theme).
+ */
+export const QUAKE_DEPTH_RGB: Readonly<Record<DepthBand, RGB>> = getMapPalette('dark').quake;
+
+/** Depth colour for a theme (mapPalette): deepened on the light map so every disc is >= 3.5:1 on the sea. */
+export function quakeDepthRgb(band: DepthBand, theme: MapTheme | boolean = 'dark'): RGB {
+  return getMapPalette(theme).quake[band];
+}
 
 export const DEPTH_LABEL: Record<DepthBand, string> = {
   shallow: 'shallow (< 70 km)',

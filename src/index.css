@@ -1,29 +1,34 @@
 /* Design tokens shared by every component. Token names are contract: values change, names stay.
    Two themes on the same names: DARK is the default (map-first, near-black canvas, cream ink, tan accent);
-   LIGHT is for bright projector rooms. index.html sets <html data-theme> before first paint and the header
-   toggle persists the choice. :root holds the light values; :root[data-theme='dark'] overrides them.
+   LIGHT is the designed daylight counterpart (warm paper canvas, white panels with real shadows, crisp ink,
+   a deep-teal accent that complements the amber haze). index.html sets <html data-theme> before first
+   paint and the header toggle persists the choice. :root holds the light values;
+   :root[data-theme='dark'] overrides them. Map overlay colours are not tokens: they live in
+   src/components/map/mapPalette.ts (one theme-aware module).
    Every text/background pair is >= 4.5:1 and every control border, state border or focus ring >= 3:1 in
-   both themes; see docs/DESIGN.md section 2 (light) and "Dark theme" for the measured tables. */
+   both themes; see docs/DESIGN.md section 2 (light) and 2a (dark) for the measured tables. */
 :root {
   color-scheme: light;
 
   --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, monospace;
 
-  --bg: #eef0f3;
+  /* Warm paper canvas, white panels, warm-grey hairlines, ink text. */
+  --bg: #f3f2ee;
   --panel: #ffffff;
-  --panel-2: #f5f6f8;
-  --border: #b7bfc9;
-  --text: #141a22;
-  --text-muted: #4e5967;
-  --accent: #1b58a8;
-  --focus: #1b58a8;
+  --panel-2: #f7f6f2;
+  --border: #d5d1c8; /* decorative hairline; panels also carry --shadow */
+  --text: #16191d;
+  --text-muted: #545a62;
+  /* Deep teal: the complement of the amber/brown haze, so links and actions never read as data. */
+  --accent: #0d6a6c;
+  --focus: #0d6a6c;
 
   /* Review states: workflow urgency only, never official alert levels. Always paired with text. */
   /* Neutral (Monitoring) -> amber outline (Check observation) -> solid amber (Review needed). */
-  --state-monitoring-bg: #e8ecf1;
-  --state-monitoring-fg: #3a4654;
-  --state-monitoring-border: #aab4c0;
+  --state-monitoring-bg: #ebe9e3;
+  --state-monitoring-fg: #3d4249;
+  --state-monitoring-border: #8c877b;
   --state-check-bg: #fff3d6;
   --state-check-fg: #7a4a00;
   --state-check-border: #b97a0e;
@@ -35,90 +40,93 @@
   /* "simulated" tokens are kept for compatibility; the same violet now means MODELLED (context only). */
   --mode-simulated-bg: #ece6f9;
   --mode-simulated-fg: #4a2f8d;
-  --mode-simulated-border: #c6b6ea;
+  --mode-simulated-border: #8a72c6;
   --mode-modelled-bg: #ece6f9;
   --mode-modelled-fg: #4a2f8d;
-  --mode-modelled-border: #c6b6ea;
+  --mode-modelled-border: #8a72c6;
   --mode-historical-bg: #e3f1ea;
   --mode-historical-fg: #1a5e44;
-  --mode-historical-border: #a4d0bf;
+  --mode-historical-border: #528e76;
   /* LIVE is an ink outline with a static dot: never red, never animated. */
   --mode-live-bg: #ffffff;
-  --mode-live-fg: #141a22;
-  --mode-live-border: #141a22;
+  --mode-live-fg: #16191d;
+  --mode-live-border: #16191d;
 
   /* Official warnings: reserved. Never used for our own states or any other badge. */
   --official: #8a1f1f;
   --official-bg: #fdf2f2;
-  --official-border: #d9a3a3;
+  --official-border: #c27474;
   /* Aggregator impact estimates (GDACS): visibly not a warning. */
-  --estimate: #5b6573;
+  --estimate: #5d6168;
 
-  /* Header and bottom timeline: the dark frame around the light workspace. */
-  --banner-bg: #141a22;
+  /* Header and bottom timeline: an ink frame around the light workspace. */
+  --banner-bg: #16191d;
   --banner-fg: #ffd27a;
-  --on-dark: #f3f5f8;
-  --on-dark-muted: #c6ceda;
-  --on-dark-border: #3a4654;
+  --on-dark: #f4f2ee;
+  --on-dark-muted: #cbc6bc;
+  --on-dark-border: #3d4148;
 
-  /* Map */
-  --map-water: #c9d7e2;
-  --map-land: #e4e1d9;
-  --map-land-asean: #f7f4eb;
-  --map-stroke: #b3ab9d;
-  --map-stroke-asean: #6f6756;
-  --map-marker: #3a4654;
+  /* Map: matches the light basemap (CARTO Positron tuned by map/basemap.ts) for the fallback map. */
+  --map-water: #c8d3d9;
+  --map-land: #ecebe6;
+  --map-land-asean: #fafaf8;
+  --map-stroke: #b8b6b0;
+  --map-stroke-asean: #6f6a5e;
+  --map-marker: #2f3640;
 
   --radius: 4px;
   --radius-sm: 3px;
-  --shadow: 0 1px 2px rgba(20, 26, 34, 0.08), 0 2px 6px rgba(20, 26, 34, 0.1);
+  /* Real, soft shadows (warm ink) so white panels lift off the light map. */
+  --shadow: 0 1px 2px rgba(28, 24, 18, 0.07), 0 4px 14px rgba(28, 24, 18, 0.1);
 
   /* NEA context badges: calm, never the alarm colour, never the modelled violet. */
-  --nea-live-fg: #141a22;
-  --nea-live-border: #141a22;
-  --nea-snapshot-fg: #4e5967;
-  --nea-snapshot-border: #9aa3ae;
-  --border-strong: #7f8a98;
-  --accent-strong: #154686;
-  --selected-bg: #eef4fc;
-  --new-row: #edf3fc;
-  --new-flash: #edf3fc;
-  --counted-bg: #141a22;
+  --nea-live-fg: #16191d;
+  --nea-live-border: #16191d;
+  --nea-snapshot-fg: #545a62;
+  --nea-snapshot-border: #8a857a;
+  --border-strong: #837d71;
+  --accent-strong: #08504f;
+  --selected-bg: #e7f2f1;
+  --new-row: #eaf4f3;
+  --new-flash: #eaf4f3;
+  --counted-bg: #16191d;
   --counted-fg: #ffffff;
   --ok-fg: #1a5e44;
   --danger-fg: #8a1f1f;
   --focus-on-dark: #ffd27a;
-  --backdrop: rgba(20, 26, 34, 0.28);
+  --backdrop: rgba(22, 25, 29, 0.32);
   --gap: 12px;
 
-  /* Added for the two-theme system (values below reproduce the earlier light literals). */
+  /* Added for the two-theme system. */
   --on-accent: #ffffff; /* text on an --accent / --accent-strong fill */
   --official-fill: #8a1f1f; /* the verbatim level chip's fill (reserved) */
   --on-official: #ffffff; /* text on --official-fill */
-  --panel-glass: rgba(255, 255, 255, 0.96); /* floating panels over the map */
+  --panel-glass: rgba(255, 255, 255, 0.95); /* floating panels over the map */
   --panel-filter: none; /* backdrop-filter for floating panels */
-  --link-underline: #b9c9e6;
-  --track: #d5dae1; /* slider and scrubber tracks */
-  --hairline-on-fill: rgba(20, 26, 34, 0.22); /* edge that keeps pale data fills visible */
-  --on-dark-control: #8a94a3; /* button borders on the header and timeline */
-  --on-dark-hover: #2a3442;
-  --accent-edge: #6a9be0; /* primary button edge on the dark timeline */
-  --accent-edge-hover: #9bbdf0;
-  --day-done-bg: #2a3442;
-  --day-done-border: #3a4654;
+  --link-underline: #8fc4c1;
+  --track: #d6d2c9; /* slider and scrubber tracks */
+  --hairline-on-fill: rgba(22, 25, 29, 0.22); /* edge that keeps pale data fills visible */
+  --on-dark-control: #8d887d; /* button borders on the header and timeline */
+  --on-dark-hover: #2a2e34;
+  --accent-edge: #5fb6b2; /* primary button edge on the dark timeline */
+  --accent-edge-hover: #8fd0cc;
+  --day-done-bg: #2c3036;
+  --day-done-border: #3d4148;
   --day-current-bg: #ffffff;
-  --day-current-fg: #141a22;
+  --day-current-fg: #16191d;
   --day-count-bg: rgba(255, 255, 255, 0.12);
-  --nea-chip-bg: #141a22; /* measured NEA value chip (banner pair) */
+  --nea-chip-bg: #16191d; /* measured NEA value chip (banner pair) */
   --nea-chip-fg: #ffd27a;
-  --shadow-drawer: -8px 0 24px rgba(20, 26, 34, 0.18);
-  --shadow-dialog: 0 12px 40px rgba(20, 26, 34, 0.25);
-  /* Air-quality scale for map and legend fills: desaturated, never the official red (always labelled). */
-  --aq-good: #6f9a6a;
-  --aq-moderate: #c8b25a;
-  --aq-sensitive: #c98648;
-  --aq-unhealthy: #b5544a;
-  --aq-very-unhealthy: #84609a;
+  --shadow-drawer: -10px 0 32px rgba(28, 24, 18, 0.16);
+  --shadow-dialog: 0 18px 50px rgba(28, 24, 18, 0.24);
+  /* Air-quality scale: legend fills and the big numbers on map cards, so text-safe (>= 4.5:1 on panel,
+     panel-2 and bg). Deepened EPA hues; unhealthy is a brick red kept apart from the official red by
+     lightness (1.5:1) and always by its band word. */
+  --aq-good: #2f7a45;
+  --aq-moderate: #806600;
+  --aq-sensitive: #a95511;
+  --aq-unhealthy: #ad3f2f;
+  --aq-very-unhealthy: #764a9c;
 
   /* Layout */
   --rail-w: 248px;
@@ -225,6 +233,13 @@
   --nea-chip-fg: #14110c;
   --shadow-drawer: -8px 0 28px rgba(0, 0, 0, 0.5);
   --shadow-dialog: 0 12px 44px rgba(0, 0, 0, 0.6);
+  /* Air-quality scale on dark: the earlier shared values, except unhealthy and very unhealthy, which
+     were 3.9:1 and 3.7:1 as map-card text on --panel and are lifted to 6.1:1 and 7.2:1. */
+  --aq-good: #6f9a6a;
+  --aq-moderate: #c8b25a;
+  --aq-sensitive: #c98648;
+  --aq-unhealthy: #d9776c;
+  --aq-very-unhealthy: #b294cc;
 }
 
 * {

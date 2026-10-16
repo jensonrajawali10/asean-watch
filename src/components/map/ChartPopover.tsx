@@ -10,7 +10,7 @@ import type { RiverDischargeSeries, SeaLevelSeries, SeaLevelStation } from '../.
 import { loadSeaLevelReadings, seaLevelStationPage, SEA_LEVEL_ATTRIBUTION } from '../../lib/seaLevel';
 import { FLOOD_MODEL_ATTRIBUTION, FLOOD_MODEL_NOTE } from '../../lib/floodModel';
 import { lineChart } from './connectorRender';
-import './CityPopover.css';
+import './ChartPopover.css';
 
 const W = 260;
 const H = 72;
@@ -145,7 +145,7 @@ export function TideGaugePopover({
           />
           <p className="city-popover__time">
             {fmt(Math.min(...vals))} to {fmt(Math.max(...vals))} m (station datum, includes the tide) · sensor {series.sensor} ·{' '}
-            {series.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} {utc(series.retrievedAt)}
+            {series.dataMode === 'live' ? 'Live' : 'Saved'} {utc(series.retrievedAt)}
           </p>
         </>
       )}
@@ -178,10 +178,10 @@ export function RiverFlowPopover({
       <p className="city-popover__value">
         <span className="city-popover__badge">MODELLED</span>
         <strong>
-          {today?.dischargeM3s != null ? `${Math.round(today.dischargeM3s)} m³/s today` : 'River discharge'}
+          {today?.dischargeM3s != null ? `${Math.round(today.dischargeM3s).toLocaleString('en-US')} m³/s today` : 'River discharge'}
         </strong>
       </p>
-      <p className="city-popover__note">MODELLED (GloFAS via Open-Meteo), not a flood warning</p>
+      <p className="city-popover__note">River flow forecast (GloFAS via Open-Meteo), not a flood warning</p>
       {series.days.length > 0 && vals.length > 0 && (
         <Chart
           points={pts}
@@ -192,7 +192,7 @@ export function RiverFlowPopover({
       )}
       <p className="city-popover__time">
         {series.days.length} days ({series.days.filter((d) => d.kind === 'forecast').length} forecast) ·{' '}
-        {series.dataMode === 'live' ? 'LIVE' : 'HISTORICAL SNAPSHOT'} {utc(series.retrievedAt)} · cell {fmt(series.cell.lat)}, {fmt(series.cell.lon)}
+        {series.dataMode === 'live' ? 'Live' : 'Saved'} {utc(series.retrievedAt)} · cell {fmt(series.cell.lat)}, {fmt(series.cell.lon)}
       </p>
       <p className="city-popover__prov">{FLOOD_MODEL_NOTE}</p>
       <p className="city-popover__note">{FLOOD_MODEL_ATTRIBUTION}</p>

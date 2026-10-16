@@ -2,7 +2,6 @@
 // marker. Each row shows the name, hazard and location, the current review state and the record count.
 import type { Incident, ReviewResult } from '../types';
 import { StateBadge } from './Badges';
-import RoadmapList from './RoadmapList';
 import { hazardLabel } from './format';
 
 export interface IncidentQueueProps {
@@ -31,11 +30,11 @@ export default function IncidentQueue({
     <section className="panel rail-panel rail-watch" aria-labelledby="queue-heading">
       <div className="panel-head">
         <h2 id="queue-heading">
-          Watch areas <span className="panel-meta">({incidents.length})</span>
+          Areas <span className="panel-meta">({incidents.length})</span>
         </h2>
         {selectedId !== null && onClearSelection && (
           <button type="button" className="link-button head-action" onClick={onClearSelection}>
-            All APAC
+            Show all areas
           </button>
         )}
       </div>
@@ -58,7 +57,7 @@ export default function IncidentQueue({
                 >
                   <span className="watch-title">{name}</span>
                   <span className="watch-meta">
-                    {count} {count === 1 ? 'record' : 'records'} · {hazardLabel(incident.hazard)}
+                    {hazardLabel(incident.hazard)} · {count} {count === 1 ? 'detection' : 'detections'}
                     {isScenario ? ' · replay' : ''}
                     <span className="visually-hidden"> · {incident.locationName}</span>
                   </span>
@@ -71,7 +70,6 @@ export default function IncidentQueue({
           })}
         </ul>
       )}
-      <RoadmapList />
     </section>
   );
 }

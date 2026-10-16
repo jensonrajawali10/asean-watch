@@ -2,7 +2,7 @@
 // the UI. Pure and deterministic (any clock is passed in), so the map, the rail and the analyst
 // workspace all make the same decisions. Nothing here rewords, re-scores or merges an issuer's text.
 import type { HazardType, Incident, OfficialWarning, WarningHazard } from '../types';
-import { compareWarnings } from './warnings';
+import { compareWarnings, warningDistanceKm } from './warnings';
 
 /**
  * One list from several sources (the official feeds and PTWC), newest first with the same ordering as
@@ -31,28 +31,55 @@ function idGvpNumbers(w: OfficialWarning): string[] {
   return w.id.split(':').filter((s) => /^\d{6}$/.test(s));
 }
 
+/** An official volcano message that does not name the volcano is about it only within this distance (km). */
+export const LEVEL_RADIUS_KM = 60;
+
+/** A watch area as the official-level lookup needs it; lat/lon enable the distance rule for unnamed records. */
+export type OfficialLevelWatch = Pick<Incident, 'hazard' | 'title' | 'volcanoId'> & { lat?: number; lon?: number };
+
+/** True when the record names this volcano: its GVP number as an id segment, or an area with the watch's name. */
+export function namesVolcano(w: OfficialWarning, watch: Pick<Incident, 'title' | 'volcanoId'>): boolean {
+  const gvp = gvpNumber(watch.volcanoId);
+  const title = norm(watch.title);
+  return (gvp !== null && idGvpNumbers(w).includes(gvp)) || (title !== '' && w.areas.some((a) => norm(a.name) === title));
+}
+
+/** Issue time, else retrieval time, in ms (newest-first tie-breaks); -Infinity when neither reads. */
+function newestMs(w: OfficialWarning): number {
+  const t = Date.parse(w.issuedAt ?? w.retrievedAt);
+  return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
+}
+
 /**
- * The official level to show beside a watch area's own state: the first active official message (in
- * the given order, judged on the nowMs clock) for the watch's hazard. For a volcano, the record naming
- * that volcano (by GVP number or by area name) is preferred, and a record carrying another volcano's GVP
- * number is never used. Returns null rather than a message for another hazard: no block is better than a
- * misleading one.
+ * THE official level for a watch area or a watched volcano. Every place that shows one uses this: the
+ * cross-reference beside our state (IncidentDetail), the volcano ring on the map and the volcano card
+ * (volcanoLevels.ts), and the MAGMA lookup (volcanoOfficial.ts findMagmaLevel).
+ *
+ * Only active official messages (judged on the nowMs clock: isExpired) for the watch's own hazard count,
+ * so a flood gate's "Siaga 3" can never stand in for a volcano's "Level III (Siaga)". For a volcano:
+ * 1. the record naming it (GVP number in the id, or an area with its name), newest first;
+ * 2. else a volcano record carrying no other volcano's GVP number: with the watch's lat/lon, the nearest
+ *    within LEVEL_RADIUS_KM of it (ties: newest); without them, the first in the given order.
+ * Other hazards: the first candidate in the given order (callers pass the near list, newest first).
+ * Returns null rather than a message for another hazard or another volcano: no block beats a misleading one.
  */
-export function officialLevelFor(
-  incident: Pick<Incident, 'hazard' | 'title' | 'volcanoId'>,
-  warnings: readonly OfficialWarning[],
-  nowMs: number,
-): OfficialWarning | null {
-  const hazards = XREF_HAZARDS[incident.hazard] ?? [];
+export function officialLevelFor(watch: OfficialLevelWatch, warnings: readonly OfficialWarning[], nowMs: number): OfficialWarning | null {
+  const hazards = XREF_HAZARDS[watch.hazard] ?? [];
   const candidates = warnings.filter((w) => w.authority === 'official' && !isExpired(w, nowMs) && hazards.includes(w.hazard));
-  if (incident.hazard !== 'volcano') return candidates[0] ?? null;
-  const gvp = gvpNumber(incident.volcanoId);
-  const title = norm(incident.title);
-  const naming = candidates.find(
-    (w) => (gvp !== null && idGvpNumbers(w).includes(gvp)) || (title !== '' && w.areas.some((a) => norm(a.name) === title)),
-  );
-  if (naming) return naming;
-  return candidates.find((w) => idGvpNumbers(w).every((n) => n === gvp)) ?? null;
+  if (watch.hazard !== 'volcano') return candidates[0] ?? null;
+  const naming = candidates.filter((w) => namesVolcano(w, watch));
+  if (naming.length > 0) return naming.reduce((best, w) => (newestMs(w) > newestMs(best) ? w : best));
+  const gvp = gvpNumber(watch.volcanoId);
+  const unnamed = candidates.filter((w) => idGvpNumbers(w).every((n) => n === gvp));
+  const { lat, lon } = watch;
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) return unnamed[0] ?? null;
+  let best: { w: OfficialWarning; km: number } | null = null;
+  for (const w of unnamed) {
+    const km = warningDistanceKm(w, lat, lon);
+    if (km === null || km > LEVEL_RADIUS_KM) continue;
+    if (!best || km < best.km - 1e-6 || (Math.abs(km - best.km) <= 1e-6 && newestMs(w) > newestMs(best.w))) best = { w, km };
+  }
+  return best?.w ?? null;
 }
 
 /**

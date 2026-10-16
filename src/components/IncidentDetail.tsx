@@ -106,7 +106,7 @@ function SelectedIncident({
       </p>
       <p className="detail-meta">
         {hazardLabel(incident.hazard)}
-        {isScenario ? ' · 7-day replay' : ''}
+        {isScenario ? ' · last 7 days' : ''}
         {volcano && catalogUrl && (
           <>
             {' · '}
@@ -148,7 +148,7 @@ function SelectedIncident({
             </ExternalLink>
           </p>
           <p className="official-xref-note">
-            Relayed verbatim from the issuer{moreOfficial > 0 ? `; ${moreOfficial} more under Official warnings` : ''}.
+            Shown exactly as issued{moreOfficial > 0 ? `; ${moreOfficial} more in the Warnings section` : ''}.
           </p>
         </div>
       )}
@@ -229,7 +229,8 @@ function shortRefName(name: string): string {
   if (!m) return trimmed;
   const head = m[1].replace(/[:\s]+$/, '');
   const paren = m[2]?.trim() ?? '';
-  const note = /official/i.test(paren) ? ' (official)' : /not official|independent/i.test(paren) ? ' (not official)' : '';
+  // "not official" / "independent" is tested first: "(independent research, not official)" is never "(official)".
+  const note = /not official|independent/i.test(paren) ? ' (not official)' : /official/i.test(paren) ? ' (official)' : '';
   return `${head}${note}`;
 }
 
@@ -243,10 +244,10 @@ export function IncidentExtras({ incident, review }: { incident: Incident | null
     : [];
   return (
     <details className="disclosure">
-      <summary>Details</summary>
+      <summary>About this area</summary>
       <div className="disclosure-body">
         <p>
-          <span className="k">Watch window</span>{' '}
+          <span className="k">Period checked</span>{' '}
           <time dateTime={incident.scenarioWindow?.start}>{formatUtc(incident.scenarioWindow?.start)}</time> to{' '}
           <time dateTime={incident.scenarioWindow?.end}>{formatUtc(incident.scenarioWindow?.end)}</time>
         </p>

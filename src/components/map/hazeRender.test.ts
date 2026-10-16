@@ -35,6 +35,14 @@ describe('smokeRgba', () => {
     const hi = smokeRgba(400, false);
     expect(hi[0] + hi[1] + hi[2]).toBeLessThan(lo[0] + lo[1] + lo[2]);
   });
+
+  it('takes a theme name, defaulting to dark, and matches the boolean flag', () => {
+    for (const v of [5, 30, 120, 600]) {
+      expect(smokeRgba(v, 'light')).toEqual(smokeRgba(v, false));
+      expect(smokeRgba(v, 'dark')).toEqual(smokeRgba(v, true));
+      expect(smokeRgba(v)).toEqual(smokeRgba(v, 'dark'));
+    }
+  });
 });
 
 describe('rasterisePm25', () => {

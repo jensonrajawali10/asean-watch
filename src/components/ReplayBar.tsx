@@ -1,6 +1,7 @@
-// Bottom timeline: one cell per replay step (a UTC day on real data), the current step in words, and
-// Next step / Play / Reset. Keyboard shortcuts (→ next step, R reset) work only while focus is inside
-// this bar, so they never fire under a dialog or while reading elsewhere (WCAG 2.1.4).
+// Seven-day evidence replay (Volcanoes section of the analyst workspace): one button per UTC day that
+// jumps to it, the current day in words, and Next day / Play / Back to day 1. Keyboard shortcuts (→ next
+// day, R back to day 1) work only while focus is inside this bar, so they never fire under a dialog or
+// while reading elsewhere (WCAG 2.1.4).
 import type { KeyboardEvent } from 'react';
 import type { ReplayStep } from '../types';
 import { formatUtc } from './format';
@@ -20,6 +21,8 @@ export interface ReplayBarProps {
   onNext: () => void;
   onTogglePlay: () => void;
   onReset: () => void;
+  /** Jump straight to a day (the day cells are buttons when this is given). */
+  onJump?: (index: number) => void;
 }
 
 export default function ReplayBar({
@@ -33,6 +36,7 @@ export default function ReplayBar({
   onNext,
   onTogglePlay,
   onReset,
+  onJump,
 }: ReplayBarProps) {
   const pos = steps.findIndex((s) => s.index === replayIndex);
   const current = pos >= 0 ? steps[pos] : null;
@@ -60,23 +64,18 @@ export default function ReplayBar({
       onKeyDown={onKeyDown}
     >
       <h2 id="replay-heading" className="visually-hidden">
-        Replay timeline
+        Last seven days
       </h2>
 
       {steps.length > 0 ? (
-        <ol className="day-strip" aria-label={`${steps.length} replay steps`}>
+        <ol className="day-strip" aria-label={`${steps.length} days`}>
           {steps.map((s, i) => {
             const phase = s.index < replayIndex ? 'done' : s.index === replayIndex ? 'current' : 'todo';
             const n = counts ? (counts[s.index] ?? 0) : null;
-            const countText = n === null ? '' : `, ${n} ${n === 1 ? 'record' : 'records'}`;
-            return (
-              <li
-                key={s.index}
-                className="day"
-                data-phase={phase}
-                aria-current={phase === 'current' ? 'step' : undefined}
-                title={`Step ${i + 1} of ${steps.length}: ${s.label}${countText}`}
-              >
+            const countText = n === null ? '' : `, ${n} ${n === 1 ? 'detection' : 'detections'}`;
+            const title = `Day ${i + 1} of ${steps.length}: ${s.label}${countText}`;
+            const body = (
+              <>
                 <span className="day-label">{s.label}</span>
                 {n !== null && (
                   <span className="day-count" aria-hidden="true">
@@ -84,12 +83,23 @@ export default function ReplayBar({
                   </span>
                 )}
                 {n !== null && <span className="visually-hidden">{countText}</span>}
+              </>
+            );
+            return (
+              <li key={s.index} className="day" data-phase={phase} aria-current={phase === 'current' ? 'step' : undefined} title={title}>
+                {onJump && enabled ? (
+                  <button type="button" className="day-btn" onClick={() => onJump(s.index)} aria-label={`Show ${title}`}>
+                    {body}
+                  </button>
+                ) : (
+                  body
+                )}
               </li>
             );
           })}
         </ol>
       ) : (
-        <p className="replay-status">No replay steps are loaded.</p>
+        <p className="replay-status">No replay days are loaded.</p>
       )}
 
       <p className="replay-status" aria-live="polite">
@@ -97,7 +107,7 @@ export default function ReplayBar({
           current ? (
             <>
               <span className="status-step">
-                Step {pos + 1} of {steps.length}
+                Day {pos + 1} of {steps.length}
               </span>
               <span className="sep" aria-hidden="true">
                 ·
@@ -113,13 +123,13 @@ export default function ReplayBar({
                     ·
                   </span>
                   <span className="status-count">
-                    {visibleCount} {visibleCount === 1 ? 'record' : 'records'} so far
+                    {visibleCount} {visibleCount === 1 ? 'detection' : 'detections'} so far
                   </span>
                 </>
               )}
             </>
           ) : (
-            'No replay step selected.'
+            'No day selected.'
           )
         ) : (
           disabledNote
@@ -132,12 +142,12 @@ export default function ReplayBar({
           className="btn btn-primary"
           disabled={!enabled}
           aria-disabled={nextUnavailable || undefined}
-          title={enabled ? 'Reveal the next step (→ while the timeline has focus)' : undefined}
+          title={enabled ? 'Show the next day (→ while the timeline has focus)' : undefined}
           onClick={() => {
             if (!nextUnavailable) onNext();
           }}
         >
-          Next step
+          Next day
         </button>
         <button
           type="button"
@@ -154,10 +164,10 @@ export default function ReplayBar({
           type="button"
           className="btn"
           disabled={!enabled}
-          title={enabled ? 'Back to the first step (R while the timeline has focus)' : undefined}
+          title={enabled ? 'Back to day 1 (R while the timeline has focus)' : undefined}
           onClick={onReset}
         >
-          Reset
+          Day 1
         </button>
       </div>
     </section>
