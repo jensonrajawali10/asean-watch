@@ -5,7 +5,9 @@
 // App is the single owner of the selection (one thing on the map), the open workspace section (both in the
 // URL hash), the layer toggles, the forecast hour, the seven-day evidence replay, the generated brief and
 // the inspected record or warning. Everything else is derived from those, the real-data snapshot loaded
-// once below, and the live feeds loaded once after mount.
+// once below, the live feeds loaded once after mount, and the official warnings with PTWC, which
+// useOfficialWarnings refreshes every 5 minutes (and on visible and online). Expiry is judged on the shared
+// page clock (useNowMs).
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
@@ -16,8 +18,10 @@ import { buildBriefing, briefingFilename, downloadText } from './lib/briefing';
 import type { BriefingInput } from './lib/briefing';
 import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
-import { loadOfficialWarnings, loadWarningsSnapshot, warningDistanceKm, warningsNear } from './lib/warnings';
-import type { OfficialWarningsResult } from './lib/warnings';
+import { warningDistanceKm, warningsNear } from './lib/warnings';
+import { NEAR_KM, mergeWarnings } from './lib/warningsView';
+import { useOfficialWarnings } from './lib/useOfficialWarnings';
+import { useNowMs } from './lib/useNowMs';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
 import type { MapHotspot } from './components/map/mapGeometry';
@@ -28,8 +32,6 @@ import { loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
 import type { QuakesResult } from './lib/quakesLive';
 import { loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
 import type { FloodModelResult } from './lib/floodModel';
-import { loadPtwc, loadPtwcSnapshot } from './lib/ptwc';
-import type { PtwcResult } from './lib/ptwc';
 import type { WindGrid, WindLoadResult } from './lib/windField';
 import { loadAirQuality } from './lib/airQuality';
 import type { AirQualityData } from './lib/airQuality';
@@ -114,8 +116,6 @@ const FIRST_STEP = STEPS[0]?.index ?? 0;
 /** The replay opens on the newest day (audit fix 3): the state a reader expects is today's. */
 const LAST_STEP = STEPS[STEPS.length - 1]?.index ?? 0;
 const PLAY_INTERVAL_MS = 1500;
-/** Official warnings within this distance of a watch area are listed next to it. */
-const NEAR_KM = 150;
 const FIRST_INCIDENT: Incident | null = INCIDENTS[0] ?? null;
 
 const DATA_AS_OF: string | null = FIXTURES.snapshot?.retrievedAt || null;
@@ -170,16 +170,6 @@ const RULES_BY_WATCH: Record<string, string[]> = (() => {
     out[i.id] = rules.filter((r): r is string => typeof r === 'string' && r.trim() !== '');
   }
   return out;
-})();
-
-/** Bundled official-warning snapshot, so the lists render before any network reply (never throws). */
-const WARNINGS_SNAPSHOT: OfficialWarningsResult = (() => {
-  try {
-    return loadWarningsSnapshot();
-  } catch (err) {
-    console.error('Official warnings snapshot could not be read:', err);
-    return { warnings: [], feeds: [], gauges: [] };
-  }
 })();
 
 /** The FIRMS whole-region snapshot (fires module): the Fires chip's heat grid, the fire cards and section. */
@@ -353,9 +343,10 @@ export default function App() {
   const [flyRequest, setFlyRequest] = useState<{ lat: number; lon: number; zoom?: number; seq: number } | null>(null);
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
-  /** The snapshot until the live load settles. */
-  const [warningsResult, setWarningsResult] = useState<OfficialWarningsResult>(WARNINGS_SNAPSHOT);
-  const [warningsLoading, setWarningsLoading] = useState(true);
+  /** Official feeds and PTWC: the bundled snapshot first, then live, refreshed every 5 minutes. */
+  const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
+  /** Shared page clock (every 5 minutes, on visible, on online): warning expiry and the quake layer's 24 h. */
+  const nowMs = useNowMs();
   /** Modelled 10 m wind field (Open-Meteo, live or snapshot) for the haze paths; null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
@@ -367,7 +358,6 @@ export default function App() {
   /** Connector layers: bundled snapshot first, replaced by the live load when it settles. */
   const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
   const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
-  const [ptwc, setPtwc] = useState<PtwcResult>(() => loadPtwcSnapshot());
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
 
@@ -467,7 +457,8 @@ export default function App() {
 
   // PTWC messages are official and relayed verbatim alongside the other feeds (its feed status carries the
   // "for national authorities" note).
-  const allWarnings = useMemo(() => [...warningsResult.warnings, ...ptwc.warnings], [warningsResult.warnings, ptwc.warnings]);
+  // One list, newest first (mergeWarnings re-sorts, so a PTWC message is never stuck behind the feed list).
+  const allWarnings = useMemo(() => mergeWarnings(warningsResult.warnings, ptwc.warnings), [warningsResult.warnings, ptwc.warnings]);
   const allFeeds = useMemo(
     () => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }],
     [warningsResult.feeds, ptwc],
@@ -499,22 +490,25 @@ export default function App() {
   );
   const inspectedFeed = useMemo(() => (inspectedWarning ? feedForWarning(inspectedWarning, allFeeds) : null), [inspectedWarning, allFeeds]);
 
-  /** Official activity level per volcano watch (verbatim, from the official feeds near the summit). */
+  /**
+   * Official activity level per volcano watch: the issuer's level, verbatim, chosen by the one shared rule
+   * (officialLevelFor), so the map ring, the volcano card and the review show the same record.
+   */
   const levels = useMemo<Record<string, OfficialVolcanoLevel | null>>(() => {
     const out: Record<string, OfficialVolcanoLevel | null> = {};
     for (const i of INCIDENTS) {
       if (i.hazard !== 'volcano') continue;
       try {
         const v = findVolcano(FIXTURES.volcanoes, i.volcanoId);
-        out[i.id] = officialVolcanoLevel(v ? { lat: v.lat, lon: v.lon } : i, allWarnings);
+        out[i.id] = officialVolcanoLevel({ title: i.title, volcanoId: i.volcanoId, lat: v?.lat ?? i.lat, lon: v?.lon ?? i.lon }, allWarnings, nowMs);
       } catch {
         out[i.id] = null;
       }
     }
     return out;
-  }, [allWarnings]);
+  }, [allWarnings, nowMs]);
 
-  const alerts = useMemo(() => alertsPill(allWarnings), [allWarnings]);
+  const alerts = useMemo(() => alertsPill(allWarnings, nowMs), [allWarnings, nowMs]);
 
   /** Everything the situation report, the headline and the content sections are built from. */
   const situationInput = useMemo<SituationInput>(
@@ -533,8 +527,9 @@ export default function App() {
       ashWind,
       riverFlow,
       quakes,
+      nowMs,
     }),
-    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, ashWind, riverFlow, quakes],
+    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, ashWind, riverFlow, quakes, nowMs],
   );
   /** One live sentence that follows the scrubber; a snapshot never says "now". */
   const head = useMemo(() => situationHeadline(situationInput, { atISO: hazeHour.timeISO || null }), [situationInput, hazeHour.timeISO]);
@@ -763,25 +758,6 @@ export default function App() {
     settle(loadAshWind(), (r) => setAshWind(r.data), 'Ash-drift winds');
     settle(loadQuakes(), setQuakes, 'Earthquakes');
     settle(loadFloodModel(), setRiverFlow, 'River flow');
-    settle(loadPtwc(), setPtwc, 'PTWC');
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Official warnings: loaded once, live first with per-feed snapshot fallback; never throws.
-  useEffect(() => {
-    let alive = true;
-    loadOfficialWarnings()
-      .then((result) => {
-        if (!alive) return;
-        setWarningsResult(result);
-        setWarningsLoading(false);
-      })
-      .catch((err: unknown) => {
-        console.error('Official warnings could not be loaded:', err);
-        if (alive) setWarningsLoading(false);
-      });
     return () => {
       alive = false;
     };

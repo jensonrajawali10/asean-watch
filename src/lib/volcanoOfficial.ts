@@ -18,6 +18,7 @@
 // the watched volcano's own KRB map image as published on that list (map year noted).
 
 import type { OfficialWarning } from '../types';
+import { namesVolcano, officialLevelFor } from './warningsView';
 
 export interface OfficialVolcanoLink {
   label: string;
@@ -121,21 +122,21 @@ export const WATCHED_VOLCANO_PROVINCE: Readonly<Record<string, string>> = {
 const MAGMA_FEED_ID = 'magma-level-list';
 
 /**
- * The relayed MAGMA level record for a watched volcano, matched by GVP number in the record id, then by the
- * verbatim volcano name (e.g. "Anak Krakatau"). Newest first when several are present. Null when none: the UI
- * then says the level is unavailable and links MAGMA, never "no alert".
+ * The relayed MAGMA level record for a watched volcano: the shared rule (officialLevelFor in warningsView.ts)
+ * applied to the MAGMA records that name it, by GVP number in the record id or by the verbatim volcano name
+ * (e.g. "Anak Krakatau"); newest first when several are present. Only volcano-hazard official records count,
+ * so a flood agency's "Siaga 3" can never be returned. Expiry is judged on `nowMs` when given (pass the page
+ * clock, useNowMs); without it only the issuer's own ended flag counts. Null when none: the UI then says the
+ * level is unavailable and links MAGMA, never "no alert".
  */
 export function findMagmaLevel(
   warnings: readonly OfficialWarning[] | null | undefined,
   watch: { volcanoId: string | null; title: string },
+  nowMs?: number,
 ): OfficialWarning | null {
   if (!warnings || warnings.length === 0) return null;
-  const gvp = watch.volcanoId?.replace(/^gvp-/, '') ?? null;
-  const title = watch.title.trim().toLowerCase();
-  const magma = warnings.filter((w) => w.hazard === 'volcano' && w.id.startsWith(`${MAGMA_FEED_ID}:`));
-  const hits = magma.filter((w) => (gvp && w.id.split(':')[1] === gvp) || w.areas.some((a) => a.name.trim().toLowerCase() === title));
-  if (hits.length === 0) return null;
-  return [...hits].sort((a, b) => Date.parse(b.issuedAt ?? b.retrievedAt) - Date.parse(a.issuedAt ?? a.retrievedAt))[0];
+  const magma = warnings.filter((w) => w.id.startsWith(`${MAGMA_FEED_ID}:`) && namesVolcano(w, watch));
+  return officialLevelFor({ hazard: 'volcano', volcanoId: watch.volcanoId, title: watch.title }, magma, nowMs ?? Number.NEGATIVE_INFINITY);
 }
 
 /** One source line for the workspace (same shape as AnalystSection's SectionSource). */

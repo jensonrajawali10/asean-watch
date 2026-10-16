@@ -71,7 +71,7 @@ Offline, the app runs entirely from the bundled snapshots. When it is online, th
 | Command | What it does |
 |---|---|
 | `npm run refresh:data` | Downloads the four FIRMS 7-day South East Asia CSVs (about 26 MB in total), the USGS query and the three BMKG lists. It keeps rows near the watch areas and writes `data/real/*.json`. All or nothing: if any source fails, nothing is written. |
-| `npm run refresh:warnings` | Captures the official-warning feeds to `data/warnings-snapshot.json`. If a feed fails, its previous entry is kept. |
+| `npm run refresh:warnings` | Captures the official-warning feeds to `data/warnings-snapshot.json`. If a feed fails, its previous entry is kept. If every feed fails, nothing is written and the command exits with an error. |
 | `npm run refresh:nea` | Captures NEA wind, PSI and PM2.5 to `data/nea-snapshot.json`. All or nothing. |
 | `npm run refresh:fires` | Downloads the same four FIRMS CSVs for the whole region and writes `data/fires-snapshot.json`: the 0.25° fire-power grid, country and province rollups, and the top clusters. Run it daily so week-over-week comparisons build up. |
 | `npm run refresh:all` | Runs every refresh script in order: data, warnings, NEA, winds, air quality, fires, ash winds, quakes, sea level, PTWC and river flow. It stops at the first one that fails, so run the remaining ones yourself. Open-Meteo allows a limited number of calls per hour; if it answers HTTP 429, wait and retry. |

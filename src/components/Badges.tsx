@@ -2,8 +2,9 @@
 // Families (docs/DESIGN.md section 3): review state, data mode, rule treatment, official (reserved),
 // impact estimate. They differ in shape, case and wording, not only in colour.
 import type { ReactNode } from 'react';
-import type { DataMode, ReviewState } from '../types';
+import type { DataMode, OfficialWarning, ReviewState } from '../types';
 import { REVIEW_LABELS } from '../lib/reviewRules';
+import { endedLabel } from '../lib/warningsView';
 import { formatUtc, modeLabel, safeHttpUrl } from './format';
 
 export function StateBadge({
@@ -154,11 +155,22 @@ export function OfficialLevelChip({
   );
 }
 
-/** EXPIRED with the issuer's expiry time when one was given; ENDED when the issuer ended or cancelled it. */
-export function EndedChip({ at }: { at: string | null }) {
-  return at ? (
+/**
+ * ENDED when the issuer ended or cancelled the message before its expiry; EXPIRED with the issuer's
+ * expiry time only once that has passed on the nowMs clock (endedLabel). Nothing while it is active.
+ */
+export function EndedChip({
+  warning,
+  nowMs,
+}: {
+  warning: Pick<OfficialWarning, 'ended' | 'expiresAt' | 'retrievedAt'>;
+  nowMs: number;
+}) {
+  const label = endedLabel(warning, nowMs);
+  if (!label) return null;
+  return label.text === 'EXPIRED' ? (
     <span className="official-chip official-chip--ended">
-      EXPIRED <time dateTime={at}>{formatUtc(at)}</time>
+      EXPIRED <time dateTime={label.at}>{formatUtc(label.at)}</time>
     </span>
   ) : (
     <span className="official-chip official-chip--ended">ENDED</span>

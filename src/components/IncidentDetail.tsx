@@ -4,7 +4,9 @@
 import type { ReactNode } from 'react';
 import type { Incident, OfficialWarning, ReviewResult, SourceRef, Volcano } from '../types';
 import { RULE_SUMMARY, RULE_TEXT } from '../lib/reviewRules';
-import { CountedPill, ExternalLink, OfficialLevelChip, OfficialTag, StateBadge } from './Badges';
+import { officialLevelFor } from '../lib/warningsView';
+import { useNowMs } from '../lib/useNowMs';
+import { CountedPill, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag, StateBadge } from './Badges';
 import { categoryLabel, formatCoords, formatUtc, hazardLabel } from './format';
 
 export interface IncidentDetailProps {
@@ -18,7 +20,7 @@ export interface IncidentDetailProps {
   onSelect: (incidentId: string) => void;
   onClearSelection: () => void;
   onInspect: (observationId: string) => void;
-  /** Official warnings near this area (already filtered and sorted); the first active one is cross-referenced. */
+  /** Official warnings near this area (already filtered and sorted); the active one for this hazard is cross-referenced. */
   officialNear?: OfficialWarning[];
   onInspectWarning?: (warningId: string) => void;
   /** Optional context card (NEA Singapore); null renders nothing. */
@@ -90,7 +92,8 @@ function SelectedIncident({
   // explanation[0] restates the rule (RULE_SUMMARY); the rule is shown once, as RULE_TEXT.
   const derivation =
     review && review.explanation[0] === RULE_SUMMARY ? review.explanation.slice(1) : (review?.explanation ?? []);
-  const official = officialNear.find((w) => w.authority === 'official' && !w.ended) ?? null;
+  const nowMs = useNowMs();
+  const official = officialLevelFor(incident, officialNear, nowMs);
   const moreOfficial = officialNear.length - (official ? 1 : 0);
 
   return (
@@ -128,7 +131,8 @@ function SelectedIncident({
       {official && (
         <div className="official-xref" lang={undefined}>
           <p className="official-xref-head">
-            <OfficialTag issuer={official.issuer} authority="official" />
+            <OfficialTag issuer={official.issuer} authority="official" />{' '}
+            <ModeBadge mode={official.dataMode} time={official.retrievedAt} title="Data mode and retrieval time" />
           </p>
           <p className="official-xref-level">
             <OfficialLevelChip level={official.level} gloss={official.levelGloss} />

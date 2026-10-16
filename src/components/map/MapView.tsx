@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 import { AttributionControl, Map as MapLibreMap, NavigationControl, setWorkerUrl } from 'maplibre-gl';
-import type { IControl, LngLatBoundsLike, MapSourceDataEvent } from 'maplibre-gl';
+import type { IControl, LngLatBoundsLike, MapSourceDataEvent, RasterTileSource } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
@@ -74,6 +74,8 @@ import {
   windArrowStride,
 } from './mapGeometry';
 import type { Bounds, LonLat, MapHotspot, RegionCollection } from './mapGeometry';
+import { isExpired, warningMatchesGauge } from '../../lib/warningsView';
+import { useNowMs } from '../../lib/useNowMs';
 import './MapView.css';
 
 export type { MapHotspot } from './mapGeometry';
@@ -474,7 +476,8 @@ export default function MapView({
   /** Open chart popover (analyst layers): a tide gauge (code) or a river point (id), at a point in the map container. */
   const [chart, setChart] = useState<{ kind: 'tide' | 'river'; id: string; at: { x: number; y: number } } | null>(null);
   /** Wall clock once per mount: ash drift starts at the forecast hour at or before it. */
-  const [nowMs] = useState(() => Date.now());
+  // The shared page clock (ticks with the warnings refresh): expiry, "last 24 h" quakes, image times.
+  const nowMs = useNowMs();
   const [dark, setDark] = useState(() => resolveTheme(theme) === 'dark');
   const [narrow, setNarrow] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -507,6 +510,14 @@ export default function MapView({
   const anchorsRef = useRef<HTMLElement[]>([]);
   const officialRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const applyStyleRef = useRef<((dark: boolean) => void) | null>(null);
+  /**
+   * True from 'style.load' until the style is swapped (applyStyle, goOffline, retryStyle). Sources and
+   * layers can be added then. map.isStyleLoaded() is not usable for that: in MapLibre 6.14 it is false
+   * whenever any tiles are in flight, and still false inside 'style.load' while the sprite loads.
+   */
+  const styleReadyRef = useRef(false);
+  /** A GIBS sync is already queued for the next 'style.load'. */
+  const gibsDeferredRef = useRef(false);
   /** Retries the live basemap after the offline fallback (the online event or the Retry button). */
   const retryStyleRef = useRef<(() => void) | null>(null);
   const deckLayersRef = useRef<LayersList>([]);
@@ -533,6 +544,11 @@ export default function MapView({
   const selectedAreaId = selection?.kind === 'area' ? selection.id : null;
   const selectedWarningId = selection?.kind === 'warning' ? selection.id : null;
   const selectedCityId = selection?.kind === 'city' ? selection.id : null;
+  // A new selection flies the camera, so a tide or river chart pinned to a pixel would point at nothing.
+  const selectionKey = selection ? `${selection.kind}:${selection.id}` : '';
+  useEffect(() => {
+    setChart(null);
+  }, [selectionKey]);
   planRef.current = { airQuality, timeISO, selectedCityId, fireBadges: layers.fires ? (fireBadges ?? []) : [], citiesOn: layers.haze };
 
   const placed = useMemo(
@@ -553,11 +569,11 @@ export default function MapView({
     () =>
       (warnings ?? [])
         .filter((w) => w.location && Number.isFinite(w.location.lat) && Number.isFinite(w.location.lon))
-        .filter((w) => !w.ended || w.id === selectedWarningId)
+        .filter((w) => !isExpired(w, nowMs) || w.id === selectedWarningId)
         .filter((w) => !levelWarningIds.has(w.id) || w.id === selectedWarningId)
         .sort(compareWarningMarkers)
         .slice(0, MAX_WARNING_MARKERS),
-    [warnings, selectedWarningId, levelWarningIds],
+    [warnings, selectedWarningId, levelWarningIds, nowMs],
   );
 
   const gaugeMarkers = useMemo(() => {
@@ -623,7 +639,7 @@ export default function MapView({
   const ashShown = Boolean(ashDrift && layers.ash);
   const scenarioActive = Boolean(scenarioId && selectedIncident && scenarioId === selectedIncident.id);
   // Official BMKG InaTEWS tsunami warning areas (verbatim levels) at district centres (approximate).
-  const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings), [warnings]);
+  const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings, nowMs), [warnings, nowMs]);
   const tsunamiInForce = tsunamiPick.inForce !== null;
   const tsunamiWarning = tsunamiPick.inForce ?? (layers.tsunamiHistory ? tsunamiPick.latest : null);
   const tsunamiPlacement = useMemo(() => (tsunamiWarning ? placeTsunamiAreas(tsunamiWarning.areas, idnDistrictIndex()) : null), [tsunamiWarning]);
@@ -1141,18 +1157,24 @@ export default function MapView({
     const markers = Array.from(root.querySelectorAll<HTMLElement>('.mv-marker')).filter((el) => el.dataset.off !== '1');
     markers.sort((a, b) => Number(b.classList.contains('is-selected')) - Number(a.classList.contains('is-selected')));
     const pts = markers.map((el) => map.project([num(el.dataset.lon), num(el.dataset.lat)]));
+    // Every layout read happens before any write below. A tag's size does not depend on its side
+    // (max-content, nowrap), so measuring first costs one layout instead of one per marker.
+    const tagSizes = markers.map((el) => {
+      const tag = el.querySelector<HTMLElement>('.mv-tag');
+      return tag ? { tw: tag.offsetWidth, th: tag.offsetHeight } : null;
+    });
     const occupied: (Rect & { weight?: number })[] = pts.map((pt) => ({ x: pt.x - 18, y: pt.y - 18, w: 36, h: 36 }));
     const wmarkers = Array.from(root.querySelectorAll<HTMLElement>('.mv-wmarker')).filter((el) => el.dataset.off !== '1');
     for (const el of wmarkers) {
       const pt = map.project([num(el.dataset.lon), num(el.dataset.lat)]);
       occupied.push({ x: pt.x - 10, y: pt.y - 10, w: 20, h: 20 });
-      el.dataset.side = `${pt.x - frame.x > frame.w * 0.62 ? 'l' : 'r'}${pt.y > h * 0.62 ? 'u' : 'd'}`;
+      const side = `${pt.x - frame.x > frame.w * 0.62 ? 'l' : 'r'}${pt.y > h * 0.62 ? 'u' : 'd'}`;
+      if (el.dataset.side !== side) el.dataset.side = side;
     }
     markers.forEach((el, i) => {
-      const tag = el.querySelector<HTMLElement>('.mv-tag');
-      if (!tag) return;
-      const tw = tag.offsetWidth;
-      const th = tag.offsetHeight;
+      const size = tagSizes[i];
+      if (!size) return;
+      const { tw, th } = size;
       const gap = 20;
       let best: { pos: TagPos; rect: Rect; score: number } | null = null;
       for (const pos of TAG_POSITIONS) {
@@ -1335,7 +1357,18 @@ export default function MapView({
   const syncGibsRef = useRef<() => void>(() => {});
   syncGibsRef.current = () => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+    if (!map) return;
+    if (!styleReadyRef.current) {
+      // A basemap swap is in progress (addSource would throw): sync once the new style has loaded.
+      if (!gibsDeferredRef.current) {
+        gibsDeferredRef.current = true;
+        map.once('style.load', () => {
+          gibsDeferredRef.current = false;
+          syncGibsRef.current();
+        });
+      }
+      return;
+    }
     const want = gibsRef.current;
     for (const [spec, on] of [
       [gibsTrue, want.tc],
@@ -1344,8 +1377,12 @@ export default function MapView({
       const layerId = `${spec.id}-layer`;
       try {
         if (on) {
-          if (!map.getSource(spec.id)) {
+          const source = map.getSource<RasterTileSource>(spec.id);
+          if (!source) {
             map.addSource(spec.id, { type: 'raster', tiles: spec.tiles, tileSize: spec.tileSize, maxzoom: spec.maxzoom, attribution: spec.attribution });
+          } else if (source.tiles?.[0] !== spec.tiles[0]) {
+            // The clock moved on (a newer Himawari slot or UTC day): same layer, the caption's image time.
+            source.setTiles(spec.tiles);
           }
           if (!map.getLayer(layerId)) {
             const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
@@ -1365,9 +1402,12 @@ export default function MapView({
       map.moveLayer(`${gibsTrue.id}-layer`, `${gibsIr.id}-layer`);
     }
   };
+  // Re-sync on a toggle, the opacity, or a newer image time from the clock.
+  const gibsIrTiles = gibsIr.tiles[0];
+  const gibsTrueTiles = gibsTrue.tiles[0];
   useEffect(() => {
     if (ready) syncGibsRef.current();
-  }, [ready, layers.satIr, layers.satTrue, layers.satOpacity]);
+  }, [ready, layers.satIr, layers.satTrue, layers.satOpacity, gibsIrTiles, gibsTrueTiles]);
 
   // 3D buildings follow their layer toggle.
   useEffect(() => {
@@ -1403,12 +1443,11 @@ export default function MapView({
     }
     mapRef.current = map;
     if (import.meta.env.DEV) (window as unknown as { __aseanMap?: MapLibreMap }).__aseanMap = map;
-    map.scrollZoom.setWheelZoomRate(1 / 300);
     map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
     map.addControl(new AttributionControl({ compact: true, customAttribution: CREDITS }), 'bottom-right');
 
     let timer: number | undefined;
-    let styleLoaded = false;
+    styleReadyRef.current = false;
     let offlineMode = false;
     let tilesOk = false;
     let tileErrors = 0;
@@ -1422,17 +1461,17 @@ export default function MapView({
       offlineMode = true;
       clearTimer();
       setOffline(true);
-      styleLoaded = false;
+      styleReadyRef.current = false;
       map.setStyle(buildOfflineStyle(getRegion(), darkRef.current), { diff: false });
     };
     const arm = () => {
       clearTimer();
       timer = window.setTimeout(() => {
-        if (!styleLoaded) goOffline();
+        if (!styleReadyRef.current) goOffline();
       }, STYLE_TIMEOUT_MS);
     };
     const loadLive = (isDark: boolean) => {
-      styleLoaded = false;
+      styleReadyRef.current = false;
       tilesOk = false;
       tileErrors = 0;
       map.setStyle(basemapStyleFor(themeOf(isDark)), basemapStyleOptions(themeOf(isDark)));
@@ -1448,7 +1487,7 @@ export default function MapView({
     window.addEventListener('online', onOnline);
     applyStyleRef.current = (isDark: boolean) => {
       if (offlineMode) {
-        styleLoaded = false;
+        styleReadyRef.current = false;
         map.setStyle(buildOfflineStyle(getRegion(), isDark), { diff: false });
         return;
       }
@@ -1457,7 +1496,7 @@ export default function MapView({
     loadLive(darkRef.current);
 
     map.on('style.load', () => {
-      styleLoaded = true;
+      styleReadyRef.current = true;
       clearTimer();
       syncGibsRef.current();
       // The compact attribution starts collapsed at every width (the "i" button opens it).
@@ -1491,7 +1530,7 @@ export default function MapView({
     map.on('error', (e) => {
       // Handled here, so MapLibre does not log it: a failed style goes offline at once; tiles after 3 failures with none loaded.
       if (offlineMode) return;
-      if (!styleLoaded) {
+      if (!styleReadyRef.current) {
         goOffline();
         return;
       }
@@ -1543,7 +1582,42 @@ export default function MapView({
     map.on('load', startOverlays);
 
     map.on('move', positionOverlays);
+    map.on('movestart', (e) => {
+      // While the camera moves, the panels drop their backdrop blur (index.css): re-blurring an animating
+      // map every frame is the costliest part of a zoom on most GPUs.
+      document.documentElement.setAttribute('data-map-moving', '');
+      // A user pan or zoom: the tide and river chart popovers are pinned to a pixel, so close them.
+      if ((e as { originalEvent?: unknown }).originalEvent) setChart(null);
+    });
+    // The marker overlay sits beside MapLibre's canvas container, so a wheel or trackpad pinch over a pin,
+    // a label, a gauge or a fire badge never reached the map: zooming stalled wherever the map is busy.
+    // Hand those events to the canvas, where MapLibre's scroll-zoom handler picks them up.
+    const overlayEl = overlayRef.current;
+    const forwardWheel = (e: WheelEvent) => {
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      map.getCanvas().dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          deltaZ: e.deltaZ,
+          deltaMode: e.deltaMode,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    };
+    overlayEl?.addEventListener('wheel', forwardWheel, { passive: false });
     map.on('moveend', () => {
+      document.documentElement.removeAttribute('data-map-moving');
       positionOverlays();
       layoutTags();
       const z = map.getZoom();
@@ -1556,8 +1630,12 @@ export default function MapView({
     return () => {
       clearTimer();
       window.removeEventListener('online', onOnline);
+      overlayEl?.removeEventListener('wheel', forwardWheel);
+      document.documentElement.removeAttribute('data-map-moving');
       retryStyleRef.current = null;
       applyStyleRef.current = null;
+      styleReadyRef.current = false;
+      gibsDeferredRef.current = false;
       try {
         hazeRef.current?.destroy();
       } catch (err) {
@@ -1770,7 +1848,7 @@ export default function MapView({
     ? ''
     : tsunamiInForce
       ? `${tsunamiWarning.dataMode === 'live' ? 'Live' : 'Saved'} · issued ${tsunamiIssued}`
-      : `Past message · ${tsunamiIssued} · ${tsunamiWarning.ended ? 'ended' : 'not ended'}`;
+      : `Past message · ${tsunamiIssued} · ${isExpired(tsunamiWarning, nowMs) ? 'ended' : 'not ended'}`;
   const extrasOn = EXTRA_KEYS.filter((k) => layers[k]).length;
   const chipOn = (key: LayerKey) => (key === 'satIr' ? layers.satIr || layers.satTrue : layers[key]);
   const toggleChip = (key: LayerKey) => {
@@ -1818,7 +1896,7 @@ export default function MapView({
               const isSelected = w.id === selectedWarningId;
               const area = w.areaDescription.trim() || w.headline.trim();
               const label = official ? `Official warning: ${w.issuer} · ${w.level} · ${area}` : `Impact estimate (GDACS, not a warning): ${w.issuer} · ${w.level} · ${area}`;
-              const kind: OfficialKind = !official ? 'estimate' : w.ended ? 'ended' : 'official';
+              const kind: OfficialKind = !official ? 'estimate' : isExpired(w, nowMs) ? 'ended' : 'official';
               const loc = w.location as { lat: number; lon: number };
               return (
                 <button
@@ -1852,7 +1930,7 @@ export default function MapView({
             {gaugesDrawn.map((g, i) => {
               const reading = `${formatValue(g.value)} ${g.unit} (${g.datum})`;
               const label = `River gauge: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
-              const cited = warningMarkers.find((w) => w.id.includes(g.id));
+              const cited = warningMarkers.find((w) => warningMatchesGauge(w.id, g.id));
               const isSelected = cited !== undefined && cited.id === selectedWarningId;
               return (
                 <button
@@ -1885,7 +1963,7 @@ export default function MapView({
                 const level = a.area.level ?? 'No level given';
                 const instruction = bmkgLevelInstruction(tsunamiWarning, a.area.level);
                 const place = `${a.area.name}${a.area.province ? `, ${a.area.province}` : ''}`;
-                const kind: OfficialKind = tsunamiWarning.ended ? 'ended' : 'official';
+                const kind: OfficialKind = isExpired(tsunamiWarning, nowMs) ? 'ended' : 'official';
                 return (
                   <button
                     key={`ta-${a.area.name}-${i}`}

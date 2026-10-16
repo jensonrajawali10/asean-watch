@@ -6,8 +6,9 @@
 // 2. The last 24 h for five Indonesian gauges, kept at the real samples on each 10-minute mark.
 // Raw, unvalidated gauge data on each station's own datum; not a tsunami warning.
 // Fail-safe: if the station list fails nothing is written; a station whose readings fail keeps its
-// previous sample. No dependencies.
-import { readFile, writeFile } from 'node:fs/promises';
+// previous sample. Written atomically (temp file + rename). No dependencies.
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './lib/atomicWrite.mjs';
 
 const OUT = new URL('../data/sealevel-snapshot.json', import.meta.url);
 const BASE = 'https://www.ioc-sealevelmonitoring.org/service.php';
@@ -93,7 +94,7 @@ async function main() {
     stationList: { url: listUrl, retrievedAt: listRetrievedAt, raw: rows },
     samples,
   };
-  await writeFile(OUT, `${JSON.stringify(snapshot)}\n`, 'utf8');
+  await writeFileAtomic(OUT, `${JSON.stringify(snapshot)}\n`);
   console.log('refresh:sealevel: wrote data/sealevel-snapshot.json');
 }
 

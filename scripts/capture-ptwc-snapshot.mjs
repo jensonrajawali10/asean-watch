@@ -3,8 +3,9 @@
 // Fetches ONLY the fixed PTWC Atom feed and the CAP document it links on www.tsunami.gov (the same
 // two documents api/ptwc.ts proxies). The CAP XML-DSig <Signature> block is dropped to keep the file
 // small; every other byte is as received. The Atom feed holds only the latest product, so this is a
-// HISTORICAL example, never a current message. Fail-safe: on any failure nothing is written.
-import { writeFile } from 'node:fs/promises';
+// HISTORICAL example, never a current message. Fail-safe: on any failure nothing is written; the file
+// is written atomically (temp file + rename).
+import { writeFileAtomic } from './lib/atomicWrite.mjs';
 
 const OUT = new URL('../data/ptwc-snapshot.json', import.meta.url);
 const ATOM_URL = 'https://www.tsunami.gov/events/xml/PHEBAtom.xml';
@@ -46,7 +47,7 @@ async function main() {
     cap,
     retrievedAt,
   };
-  await writeFile(OUT, `${JSON.stringify(snapshot, null, 1)}\n`, 'utf8');
+  await writeFileAtomic(OUT, `${JSON.stringify(snapshot, null, 1)}\n`);
   console.log(`refresh:ptwc: wrote data/ptwc-snapshot.json (CAP: ${capUrl ?? 'none linked'})`);
 }
 

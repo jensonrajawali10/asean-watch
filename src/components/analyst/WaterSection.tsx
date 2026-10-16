@@ -8,6 +8,8 @@ import type { FloodModelResult } from '../../lib/floodModel';
 import { FLOOD_MODEL_NOTE } from '../../lib/floodModel';
 import { SEA_LEVEL_NOTE } from '../../lib/seaLevel';
 import { selectTsunamiAreaWarnings } from '../../lib/tsunamiAreas';
+import { isExpired } from '../../lib/warningsView';
+import { useNowMs } from '../../lib/useNowMs';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from '../Badges';
 import { formatUtc, formatValue } from '../format';
 import type { MapLayerState } from '../map/layerCatalog';
@@ -45,9 +47,12 @@ function riverRow(s: RiverDischargeSeries) {
 const fmtQ = (v: number | null) => (v === null ? '—' : Math.round(v).toLocaleString('en-US'));
 
 export default function WaterSection(p: WaterSectionProps) {
+  const nowMs = useNowMs();
   const ptwcWarning = p.ptwc.warnings[0] ?? null;
-  const tsunami = selectTsunamiAreaWarnings(p.warnings);
+  const ptwcEnded = ptwcWarning ? isExpired(ptwcWarning, nowMs) : false;
+  const tsunami = selectTsunamiAreaWarnings(p.warnings, nowMs);
   const bmkg = tsunami.inForce ?? tsunami.latest;
+  const bmkgEnded = bmkg ? isExpired(bmkg, nowMs) : false;
   const relayedGauges = p.gauges.filter((g) => g.situation !== null || gaugeAboveThreshold(g));
   const otherGauges = p.gauges.length - relayedGauges.length;
   const recentStations = p.tideStations.filter((s) => s.lastTimeISO && Date.now() - Date.parse(s.lastTimeISO) < 48 * 3600000).length;
@@ -77,14 +82,14 @@ export default function WaterSection(p: WaterSectionProps) {
 
       <AnalystSubhead>PTWC: latest product</AnalystSubhead>
       {ptwcWarning ? (
-        <div className={`ow-item ${ptwcWarning.ended ? 'ow-item--ended' : 'ow-item--official'}`}>
+        <div className={`ow-item ${ptwcEnded ? 'ow-item--ended' : 'ow-item--official'}`}>
           <div className="ow-eyebrow">
             <OfficialTag issuer={ptwcWarning.issuer} authority="official" />
             <ModeBadge mode={ptwcWarning.dataMode} time={ptwcWarning.dataMode === 'historical' ? ptwcWarning.retrievedAt : null} />
           </div>
           <div className="ow-level">
-            <OfficialLevelChip level={ptwcWarning.level} ended={ptwcWarning.ended} />
-            {ptwcWarning.ended && <EndedChip at={ptwcWarning.expiresAt} />}
+            <OfficialLevelChip level={ptwcWarning.level} ended={ptwcEnded} />
+            <EndedChip warning={ptwcWarning} nowMs={nowMs} />
           </div>
           <p className="ow-headline">{ptwcWarning.headline}</p>
           <p className="ow-meta">{ptwcWarning.issuedAt ? <>Issued {formatUtc(ptwcWarning.issuedAt)}</> : <>No issue time published</>}</p>
@@ -105,14 +110,14 @@ export default function WaterSection(p: WaterSectionProps) {
       <AnalystSubhead>BMKG InaTEWS: tsunami warning areas</AnalystSubhead>
       {bmkg ? (
         <>
-          <div className={`ow-item ${bmkg.ended ? 'ow-item--ended' : 'ow-item--official'}`}>
+          <div className={`ow-item ${bmkgEnded ? 'ow-item--ended' : 'ow-item--official'}`}>
             <div className="ow-eyebrow">
               <OfficialTag issuer={bmkg.issuer} authority="official" />
               <ModeBadge mode={bmkg.dataMode} time={bmkg.dataMode === 'historical' ? bmkg.retrievedAt : null} />
             </div>
             <div className="ow-level">
-              <OfficialLevelChip level={bmkg.level} gloss={bmkg.levelGloss} ended={bmkg.ended} />
-              {bmkg.ended && <EndedChip at={bmkg.expiresAt} />}
+              <OfficialLevelChip level={bmkg.level} gloss={bmkg.levelGloss} ended={bmkgEnded} />
+              <EndedChip warning={bmkg} nowMs={nowMs} />
             </div>
             <p className="ow-headline" lang="id">
               {bmkg.headline}

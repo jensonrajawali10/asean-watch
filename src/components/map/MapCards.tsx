@@ -8,6 +8,8 @@ import type { WindGrid } from '../../lib/windField';
 import type { AshWindData } from '../../lib/ashDrift';
 import type { EruptionScenario } from '../../lib/eruptionScenario';
 import { EndedChip, ExternalLink, OfficialLevelChip } from '../Badges';
+import { isExpired } from '../../lib/warningsView';
+import { useNowMs } from '../../lib/useNowMs';
 import { formatUtc } from '../format';
 import { MapCard } from '../ui/MapCard';
 import { FireIcon, WarningIcon } from '../shell/icons';
@@ -145,6 +147,8 @@ function LoadingCard({ title, what, onClose }: { title: string; what: string; on
 function WarningCard({ w, onClose, onInspect, onOpenWorkspace }: { w: OfficialWarning; onClose: () => void; onInspect: () => void; onOpenWorkspace: () => void }) {
   const estimate = w.authority === 'aggregator';
   const lang = w.language || undefined;
+  const nowMs = useNowMs();
+  const ended = isExpired(w, nowMs);
   return (
     <MapCard
       className="warning-card"
@@ -162,8 +166,8 @@ function WarningCard({ w, onClose, onInspect, onOpenWorkspace }: { w: OfficialWa
       }
     >
       <div className="warning-card__level">
-        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={w.ended} authority={w.authority} />
-        {w.ended && <EndedChip at={w.expiresAt} />}
+        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={ended} authority={w.authority} />
+        <EndedChip warning={w} nowMs={nowMs} />
       </div>
       <p className="warning-card__headline" lang={lang}>
         {w.headline.trim()}

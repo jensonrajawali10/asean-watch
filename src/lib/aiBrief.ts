@@ -231,8 +231,12 @@ export function sanitiseAiBriefText(text: string, opts: SanitiseOptions): string
     const l = label.trim();
     return isAllowed(url) ? (l && l !== url ? `${l} (${trimUrl(url)})` : trimUrl(url)) : l;
   });
-  // Reference-style link definitions "[ref]: url".
-  out = out.replace(/^[ \t]*\[[^\]\n]+\]:[ \t]*\S+.*$/gm, '');
+  // Reference-style link definitions "[ref]: https://...". Only lines whose target is a URL, and
+  // never a citation line such as `[W1]: BMKG ..., "<official instruction>"`, which can quote an
+  // official warning verbatim (a URL on such a line is still removed below, as a bare URL).
+  out = out.replace(/^[ \t]*\[([^\]\n]+)\]:[ \t]*<?https?:\/\/\S+.*$/gim, (line, label: string) =>
+    /^[EW]\d{1,3}$/.test(label.trim()) ? line : '',
+  );
   // Autolinks <url>.
   out = out.replace(/<(https?:\/\/[^>\s]+)>/g, (_m, url: string) => (isAllowed(url) ? trimUrl(url) : ''));
   // Bare URLs not in the brief.

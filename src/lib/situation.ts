@@ -32,6 +32,7 @@ import { REACH_KM, SINGAPORE, TRANSPORT_CAVEAT, computeTrajectories, sampleWind 
 import type { HotspotSource, Trajectory } from './transport';
 import type { FireRollup, FireSnapshot } from './fires';
 import { compareWarnings } from './warnings';
+import { endedLabel, isExpired } from './warningsView';
 import type { WindGrid } from './windField';
 
 // ---------------------------------------------------------------------------
@@ -188,7 +189,11 @@ export interface SituationInput {
   riverFlow?: { series: readonly RiverDischargeSeries[]; status?: ConnectorStatus | null } | null;
   /** App's quakes (QuakesResult fits). */
   quakes?: { events: readonly QuakeEvent[]; statuses: readonly ConnectorStatus[] } | null;
-  /** Wall-clock ms, only for "N h old" age notes. Omit for fully deterministic output. */
+  /**
+   * Wall-clock ms (App passes the shared page clock, useNowMs): "N h old" age notes, and whether an official
+   * message is still in force (its expiry against this clock, isExpired). Omit for fully deterministic
+   * output; messages are then judged as relayed (the issuer's ended flag at retrieval).
+   */
   nowMs?: number | null;
 }
 
@@ -1025,9 +1030,19 @@ export function feedFor(w: OfficialWarning, feeds: readonly WarningFeedStatus[])
   return (hint ? same.find((f) => hint.test(f.feedId)) : undefined) ?? same[0];
 }
 
-/** Official (not aggregator) messages that are not ended or expired as relayed. */
-export function activeOfficial(warnings: readonly OfficialWarning[] | null | undefined): OfficialWarning[] {
-  return (warnings ?? []).filter((w) => w.authority === 'official' && !w.ended).sort(compareWarnings);
+const hasClock = (nowMs: number | null | undefined): nowMs is number => typeof nowMs === 'number' && Number.isFinite(nowMs);
+
+/** No longer in force: on the clock when given (ended, or expiry passed), else as relayed (the ended flag). */
+function inactive(w: OfficialWarning, nowMs?: number | null): boolean {
+  return hasClock(nowMs) ? isExpired(w, nowMs) : w.ended;
+}
+
+/**
+ * Official (not aggregator) messages still in force: not ended by the issuer and, given a clock, not past
+ * their expiry on it; without a clock, not ended or expired as relayed.
+ */
+export function activeOfficial(warnings: readonly OfficialWarning[] | null | undefined, nowMs?: number | null): OfficialWarning[] {
+  return (warnings ?? []).filter((w) => w.authority === 'official' && !inactive(w, nowMs)).sort(compareWarnings);
 }
 
 /** "LIVE" or "HISTORICAL" as the relay mode of one message. */
@@ -1035,11 +1050,16 @@ export function warningModeText(w: OfficialWarning): string {
   return w.dataMode === 'live' ? 'LIVE' : 'HISTORICAL';
 }
 
-/** Verbatim one-liner: issuer, level (with the fixed gloss), headline, issue time and mode. */
-export function warningLine(w: OfficialWarning): string {
+/**
+ * Verbatim one-liner: issuer, level (with the fixed gloss), headline, issue time and mode, then ENDED or
+ * EXPIRED <expiry> (endedLabel) on the clock when given, else as relayed (judged at the retrieval time). A
+ * message the issuer ended before its expiry reads ENDED, never "EXPIRED <a time still ahead>".
+ */
+export function warningLine(w: OfficialWarning, nowMs?: number | null): string {
   const level = w.levelGloss ? `"${w.level}" [${w.levelGloss}]` : `"${w.level}"`;
   const when = w.issuedAt ? `issued ${utcStamp(w.issuedAt)}` : `no issue time published; retrieved ${utcStamp(w.retrievedAt)}`;
-  const status = w.ended ? (w.expiresAt ? `; EXPIRED ${utcStamp(w.expiresAt)}` : '; ENDED by the issuer') : '';
+  const ended = endedLabel(w, hasClock(nowMs) ? nowMs : Date.parse(w.retrievedAt));
+  const status = !ended ? '' : ended.text === 'EXPIRED' ? `; EXPIRED ${utcStamp(ended.at)}` : '; ENDED by the issuer';
   return `${w.issuer}: ${level}: "${w.headline}" (${when}; ${warningModeText(w)}${status})`;
 }
 
@@ -1383,7 +1403,7 @@ export function situationReport(input: SituationInput): SituationReport {
     });
   };
   const volcanoLevels = warnings
-    .filter((w) => w.hazard === 'volcano' && w.authority === 'official' && !w.ended)
+    .filter((w) => w.hazard === 'volcano' && w.authority === 'official' && !inactive(w, input.nowMs))
     .sort((a, b) => {
       const ma = a.issuer.includes('MAGMA') ? 0 : 1;
       const mb = b.issuer.includes('MAGMA') ? 0 : 1;
@@ -1485,8 +1505,11 @@ export function situationReport(input: SituationInput): SituationReport {
   }
 
   // --- Warnings ----------------------------------------------------------
-  const active = activeOfficial(warnings);
-  const endedCount = warnings.filter((w) => w.authority === 'official' && w.ended).length;
+  const active = activeOfficial(warnings, input.nowMs);
+  const endedCount = warnings.filter((w) => w.authority === 'official' && inactive(w, input.nowMs)).length;
+  const inForceMeaning = hasClock(input.nowMs)
+    ? `"In force" means not ended by the issuer and not past its expiry time on this page's clock`
+    : '"In force" means not ended or expired when retrieved';
   const aggregator = warnings.filter((w) => w.authority === 'aggregator');
   const hazards = [...new Set(active.map((w) => w.hazard))];
   const warningBlocks: ReportBlock[] = [];
@@ -1521,7 +1544,7 @@ export function situationReport(input: SituationInput): SituationReport {
   if (active.length > 0) {
     warningBlocks.push({
       kind: 'table',
-      caption: 'Official messages in force as relayed, by hazard. "In force" means not ended or expired when retrieved; check the issuer for the current status.',
+      caption: `Official messages in force as relayed, by hazard. ${inForceMeaning}; check the issuer for the current status.`,
       columns: ['Hazard', 'In force', 'Issuers', 'Newest issue time'],
       numeric: [false, true, false, false],
       rows: hazards.map((h) => {
@@ -1538,7 +1561,7 @@ export function situationReport(input: SituationInput): SituationReport {
       warningBlocks.push({
         kind: 'bullets',
         items: [
-          ...shown.map(warningLine),
+          ...shown.map((w) => warningLine(w, input.nowMs)),
           ...(list.length > shown.length ? [`… and ${list.length - shown.length} more ${hazardName(h).toLowerCase()} messages (full list in the Warnings section).`] : []),
         ],
         cites: [...new Set(shown.map(citeFeedFor))],
@@ -1549,7 +1572,7 @@ export function situationReport(input: SituationInput): SituationReport {
   if (endedCount > 0) {
     warningBlocks.push({
       kind: 'paragraph',
-      text: `${plural(endedCount, 'further official message was', 'further official messages were')} ended or expired when retrieved; they are listed in the Warnings section with their times.`,
+      text: `${plural(endedCount, 'further official message was', 'further official messages were')} ${hasClock(input.nowMs) ? 'ended or past their expiry time' : 'ended or expired when retrieved'}; they are listed in the Warnings section with their times.`,
       cites: [],
     });
   }
@@ -1648,7 +1671,7 @@ export function situationReport(input: SituationInput): SituationReport {
   if (ptwcMsg) {
     waterBlocks.push({
       kind: 'bullets',
-      items: [warningLine(ptwcMsg), 'PTWC Pacific messages are for national authorities; the public warning for each country comes from its national agency.'],
+      items: [warningLine(ptwcMsg, input.nowMs), 'PTWC Pacific messages are for national authorities; the public warning for each country comes from its national agency.'],
       cites: [citeFeedFor(ptwcMsg)],
       official: true,
     });

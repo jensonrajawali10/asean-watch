@@ -1,11 +1,14 @@
 // The official activity level to ring a volcano marker with (docs/UX_V3.md section 2): the issuer's own
-// level, verbatim, from the official warnings near the summit. Only the ring colour is ours, and it follows
-// the issuer's published scale (MAGMA Level I to IV, PHIVOLCS Alert Level 0 to 5). Pure, tested.
+// level, verbatim. Which record that is comes from the one shared rule, officialLevelFor
+// (src/lib/warningsView.ts), so the map ring, the volcano card and the review's cross-reference always
+// show the same message. Only the ring colour is ours, and it follows the issuer's published scale
+// (MAGMA Level I to IV, PHIVOLCS Alert Level 0 to 5). Pure, tested.
 import type { OfficialWarning } from '../../types';
-import { warningDistanceKm } from '../../lib/warnings';
+import { LEVEL_RADIUS_KM, officialLevelFor } from '../../lib/warningsView';
+import type { OfficialLevelWatch } from '../../lib/warningsView';
 
-/** Official volcano messages further than this from the summit are not about it. */
-export const LEVEL_RADIUS_KM = 60;
+/** Official volcano messages that do not name the volcano count only within this distance of it. */
+export { LEVEL_RADIUS_KM };
 
 export interface OfficialVolcanoLevel {
   /** Verbatim level, e.g. "Level III (Siaga)". */
@@ -17,6 +20,8 @@ export interface OfficialVolcanoLevel {
   warningId: string;
   issuedAt: string | null;
   dataMode: 'live' | 'historical';
+  /** When the record was retrieved (a recorded MAGMA level is HISTORICAL as of this time). */
+  retrievedAt: string;
 }
 
 const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5 };
@@ -30,23 +35,9 @@ export function parseLevelNumber(level: string): number | null {
   return null;
 }
 
-/**
- * The active official volcano message nearest the summit (ties: newest). Aggregator items never count.
- */
-export function officialVolcanoLevel(
-  volcano: { lat: number; lon: number },
-  warnings: readonly OfficialWarning[],
-  radiusKm: number = LEVEL_RADIUS_KM,
-): OfficialVolcanoLevel | null {
-  let best: { w: OfficialWarning; km: number } | null = null;
-  for (const w of warnings) {
-    if (w.authority !== 'official' || w.hazard !== 'volcano' || w.ended) continue;
-    const km = warningDistanceKm(w, volcano.lat, volcano.lon);
-    if (km === null || km > radiusKm) continue;
-    if (!best || km < best.km - 1e-6 || (Math.abs(km - best.km) <= 1e-6 && issued(w) > issued(best.w))) best = { w, km };
-  }
-  if (!best) return null;
-  const w = best.w;
+/** The ring and card view of an official level record; null passes through. */
+export function toOfficialVolcanoLevel(w: OfficialWarning | null): OfficialVolcanoLevel | null {
+  if (!w) return null;
   return {
     level: w.level,
     issuer: w.issuer,
@@ -55,10 +46,19 @@ export function officialVolcanoLevel(
     warningId: w.id,
     issuedAt: w.issuedAt,
     dataMode: w.dataMode,
+    retrievedAt: w.retrievedAt,
   };
 }
 
-function issued(w: OfficialWarning): number {
-  const t = Date.parse(w.issuedAt ?? '');
-  return Number.isFinite(t) ? t : Number.NEGATIVE_INFINITY;
+/**
+ * The official level of a watched volcano (officialLevelFor): the active record naming it, else the
+ * nearest active official volcano message within LEVEL_RADIUS_KM that names no other volcano. Expiry is
+ * judged on the nowMs clock. Aggregator items never count.
+ */
+export function officialVolcanoLevel(
+  watch: Omit<OfficialLevelWatch, 'hazard'>,
+  warnings: readonly OfficialWarning[],
+  nowMs: number,
+): OfficialVolcanoLevel | null {
+  return toOfficialVolcanoLevel(officialLevelFor({ ...watch, hazard: 'volcano' }, warnings, nowMs));
 }

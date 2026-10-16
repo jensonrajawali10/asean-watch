@@ -47,7 +47,7 @@ USGS identifies four principal types of satellite observation for volcanoes: def
 | Refresh | `npm run refresh:data`, or `npm run refresh:all` for every snapshot. Rebuild afterwards. |
 
 - **Collection vs rule.** The refresh keeps hotspots within 10 km and earthquakes within 50 km, then the watch rules apply the tighter 5 km and 30 km radii.
-- **All or nothing.** `refresh:data` and `refresh:nea` write nothing unless every source succeeds. `refresh:warnings` keeps the previous entry for any feed that fails.
+- **All or nothing.** `refresh:data` and `refresh:nea` write nothing unless every source succeeds. `refresh:warnings` keeps the previous entry for any feed that fails, and writes nothing (exit code 1) if every feed fails. Every capture script writes through a temporary file and a rename, so an interrupted run never leaves a half-written snapshot.
 - **Times.** `observedAt` is the provider's own observation time, converted to UTC. `ingestedAt` is the Last-Modified time of the file or response the record came from (when the provider last wrote it), falling back to the retrieval time. Both are shown separately.
 - **Identifiers.** Record ids come from the provider's event id, or from watch, source, time and coordinates. No granule, scene or orbit identifier is invented. `sourceUrl` points to the product page or the event's own page.
 

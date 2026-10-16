@@ -1455,11 +1455,12 @@ export async function loadOfficialWarnings(opts?: {
   }
 }
 
-/** Every feed parsed from the bundled snapshot only (no network), for offline-first rendering. */
-export function loadWarningsSnapshot(): OfficialWarningsResult {
-  const outcomes = SPECS.map((spec) =>
-    spec.fetchRaw ? fromSnapshot(spec, null, BUNDLED_WARNINGS_SNAPSHOT) : fromBundled(spec, BUNDLED_WARNINGS_SNAPSHOT),
-  );
+/**
+ * Every feed parsed from the bundled snapshot only (no network), for offline-first rendering. Tests pass a
+ * frozen snapshot so a data refresh never changes their cases.
+ */
+export function loadWarningsSnapshot(source: WarningsSnapshot = BUNDLED_WARNINGS_SNAPSHOT): OfficialWarningsResult {
+  const outcomes = SPECS.map((spec) => (spec.fetchRaw ? fromSnapshot(spec, null, source) : fromBundled(spec, source)));
   return {
     warnings: outcomes.flatMap((o) => o.result.warnings).sort(compareWarnings),
     feeds: outcomes.map((o) => o.status),

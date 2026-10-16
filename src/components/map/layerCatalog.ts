@@ -178,8 +178,8 @@ export const LAYER_CATALOG: readonly LayerDef[] = [
   },
   {
     key: 'quakes',
-    label: 'Earthquakes M4.5+ (USGS and BMKG, 7 days)',
-    explanation: 'USGS as filled discs, BMKG as rings, sized by magnitude and coloured by depth (amber under 70 km, teal 70 to 300 km, violet deeper). Not a tsunami warning.',
+    label: 'Earthquakes (USGS M4.5+ for 7 days, and BMKG latest lists)',
+    explanation: 'USGS as filled discs, BMKG as rings, sized by magnitude and coloured by depth (amber under 70 km, teal 70 to 300 km, violet deeper). The BMKG lists include smaller and older events. Brighter marks are from the last 24 h; when the feeds are unreachable the saved snapshot is shown and the Sources section says so. Not a tsunami warning.',
     kind: 'measured',
     group: 'Earth',
     advanced: true,

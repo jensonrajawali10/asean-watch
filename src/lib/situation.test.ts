@@ -351,14 +351,34 @@ describe('warnings helpers', () => {
     expect(warningLine(w)).toBe(
       'BMKG InaTEWS: "SIAGA" [Level 2 of 3]: "Peringatan Dini Tsunami di Contoh | *uji*" (issued 2026-10-14 05:00 UTC; LIVE)',
     );
-    expect(warningLine(warning({ ended: true, expiresAt: '2026-10-14T06:00:00Z', dataMode: 'historical' }))).toContain(
-      'HISTORICAL; EXPIRED 2026-10-14 06:00 UTC',
+    // Expired at retrieval (05:10): EXPIRED with the issuer's expiry time.
+    expect(warningLine(warning({ ended: true, expiresAt: '2026-10-14T05:00:00Z', dataMode: 'historical' }))).toContain(
+      'HISTORICAL; EXPIRED 2026-10-14 05:00 UTC',
     );
+    // Ended by the issuer while its 06:00 expiry was still ahead: ENDED, never "EXPIRED <a later time>" (night M4).
+    const cancelled = warning({ ended: true, expiresAt: '2026-10-14T06:00:00Z', dataMode: 'historical' });
+    expect(warningLine(cancelled)).toContain('HISTORICAL; ENDED by the issuer');
+    expect(warningLine(cancelled, Date.parse('2026-10-15T00:00:00Z'))).toContain('HISTORICAL; ENDED by the issuer');
+    // Not ended as relayed, but past its expiry on the page clock: EXPIRED.
+    const dated = warning({ expiresAt: '2026-10-14T06:00:00Z' });
+    expect(warningLine(dated)).not.toMatch(/EXPIRED|ENDED/);
+    expect(warningLine(dated, Date.parse('2026-10-14T07:00:00Z'))).toContain('LIVE; EXPIRED 2026-10-14 06:00 UTC');
   });
 
   it('counts only official messages that have not ended', () => {
     const list = [warning({ id: 'a' }), warning({ id: 'b', ended: true }), warning({ id: 'c', authority: 'aggregator', issuer: 'GDACS' })];
     expect(activeOfficial(list).map((w) => w.id)).toEqual(['a']);
+  });
+
+  it('given the page clock, also drops messages whose expiry has passed (night M4)', () => {
+    const list = [warning({ id: 'a' }), warning({ id: 'd', expiresAt: '2026-10-14T06:00:00Z' })];
+    expect(activeOfficial(list).map((w) => w.id)).toEqual(['a', 'd']);
+    expect(activeOfficial(list, Date.parse('2026-10-14T05:30:00Z')).map((w) => w.id)).toEqual(['a', 'd']);
+    expect(activeOfficial(list, Date.parse('2026-10-14T07:00:00Z')).map((w) => w.id)).toEqual(['a']);
+    const r = situationReport({ airQuality: null, warnings: list, warningFeeds: [], nowMs: Date.parse('2026-10-14T07:00:00Z') });
+    const warnings = r.sections.find((x) => x.id === 'warnings');
+    expect(warnings?.figures[0].value).toBe('1');
+    expect(JSON.stringify(warnings)).toContain('1 further official message was ended or past their expiry time');
   });
 
   it('matches a message to the right feed when the issuer has two', () => {

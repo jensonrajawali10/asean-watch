@@ -17,6 +17,8 @@ import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
+import { emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
+import { useNowMs } from '../lib/useNowMs';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -37,15 +39,12 @@ function warningPoint(w: OfficialWarning): { lat: number; lon: number } | null {
 /**
  * The gauge behind a flood warning, or null.
  * 1. By id: the adapters build the warning id as "<gauge id>:<observedAt>" (ThaiWater, DSDA), so the
- *    gauge id must equal the warning id or be a ':'-delimited prefix or segment of it.
+ *    gauge id must equal the warning id or be its ':'-delimited prefix (warningMatchesGauge).
  * 2. Else by place: the nearest gauge from the same issuer within 1 km of the warning's point.
  */
 export function gaugeForWarning(w: OfficialWarning, gauges: GaugeReading[]): GaugeReading | null {
   if (w.hazard !== 'flood' || gauges.length === 0) return null;
-  const byId = gauges.find((g) => {
-    if (!g.id || g.id.endsWith(':')) return false;
-    return w.id === g.id || w.id.startsWith(`${g.id}:`) || w.id.includes(`:${g.id}:`);
-  });
+  const byId = gauges.find((g) => warningMatchesGauge(w.id, g.id));
   if (byId) return byId;
   const point = warningPoint(w);
   if (!point) return null;
@@ -133,6 +132,7 @@ export default function OfficialWarningsPanel({
   onShowAll,
 }: OfficialWarningsPanelProps) {
   const listRef = useRef<HTMLUListElement>(null);
+  const nowMs = useNowMs();
   const n = warnings.length;
   // Long APAC-wide lists start capped (readable, and not hundreds of tab stops); "Show all" expands them.
   const [showAll, setShowAll] = useState(false);
@@ -162,9 +162,7 @@ export default function OfficialWarningsPanel({
 
       <div className="ow-scroll">
         {n === 0 ? (
-          <p className="ow-empty">
-            {loading ? 'Loading official feeds…' : 'No official warnings retrieved from the feeds below. This is not an all-clear.'}
-          </p>
+          <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>
         ) : (
           <ul className="ow-list" ref={listRef}>
             {shown.map((w) => (
@@ -174,6 +172,7 @@ export default function OfficialWarningsPanel({
                 gauge={gaugeForWarning(w, gauges)}
                 selected={w.id === selectedWarningId}
                 onInspect={onInspect}
+                nowMs={nowMs}
               />
             ))}
           </ul>
@@ -200,6 +199,7 @@ export default function OfficialWarningsPanel({
                   gauge={gaugeForWarning(w, gauges)}
                   selected={w.id === selectedWarningId}
                   onInspect={onInspect}
+                  nowMs={nowMs}
                 />
               ))}
             </ul>
@@ -217,14 +217,18 @@ function WarningItem({
   gauge,
   selected,
   onInspect,
+  nowMs,
 }: {
   w: OfficialWarning;
   gauge: GaugeReading | null;
   selected: boolean;
   onInspect: (warningId: string) => void;
+  /** Clock for the expiry check (isExpired). */
+  nowMs: number;
 }) {
   const lang = w.language || undefined;
-  const variant = w.ended ? 'ow-item--ended' : w.authority === 'aggregator' ? 'ow-item--estimate' : 'ow-item--official';
+  const expired = isExpired(w, nowMs);
+  const variant = expired ? 'ow-item--ended' : w.authority === 'aggregator' ? 'ow-item--estimate' : 'ow-item--official';
   const headline = w.headline.trim();
   const area = w.areaDescription.trim();
   const instruction = w.instruction?.trim() ?? '';
@@ -238,12 +242,12 @@ function WarningItem({
     >
       <div className="ow-eyebrow">
         <OfficialTag issuer={w.issuer} authority={w.authority} />
-        <ModeBadge mode={w.dataMode} time={w.dataMode === 'historical' ? w.retrievedAt : null} title="Data mode and retrieval time" />
+        <ModeBadge mode={w.dataMode} time={w.retrievedAt} title="Data mode and retrieval time" />
       </div>
 
       <div className="ow-level">
-        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={w.ended} authority={w.authority} />
-        {w.ended && <EndedChip at={w.expiresAt} />}
+        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={expired} authority={w.authority} />
+        <EndedChip warning={w} nowMs={nowMs} />
       </div>
 
       <p className="ow-headline" lang={lang} title={headline}>
@@ -261,7 +265,7 @@ function WarningItem({
             No issue time published · retrieved <Time at={w.retrievedAt} />
           </>
         )}
-        {!w.ended &&
+        {!expired &&
           (w.expiresAt ? (
             <>
               {' · '}Expires <Time at={w.expiresAt} />
@@ -396,7 +400,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningInspectorProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const nowMs = useNowMs();
   const lang = w?.language || undefined;
+  const ended = w ? endedLabel(w, nowMs) : null;
   const thresholds = gauge ? gaugeThresholdText(gauge) : null;
 
   return (
@@ -406,7 +412,8 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
           <header className="drawer-head">
             <div className="drawer-head-text">
               <p className="eyebrow">
-                <OfficialTag issuer={w.issuer} authority={w.authority} /> · <ModeBadge mode={w.dataMode} />
+                <OfficialTag issuer={w.issuer} authority={w.authority} /> ·{' '}
+                <ModeBadge mode={w.dataMode} time={w.retrievedAt} title="Data mode and retrieval time" />
               </p>
               <h2 id="warning-title" className="ow-verbatim" lang={lang}>
                 {w.headline.trim()}
@@ -428,8 +435,8 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
 
               <Field label="Level">
                 <span className="ow-level">
-                  <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={w.ended} authority={w.authority} />
-                  {w.ended && <EndedChip at={w.expiresAt} />}
+                  <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={ended !== null} authority={w.authority} />
+                  <EndedChip warning={w} nowMs={nowMs} />
                 </span>
               </Field>
 
@@ -491,10 +498,12 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
                 )}
               </Field>
 
-              {w.ended ? (
-                <Field label="Ended">
-                  {w.expiresAt ? <Time at={w.expiresAt} /> : 'Ended by the issuer; no time given'}
+              {ended?.text === 'EXPIRED' ? (
+                <Field label="Expired">
+                  <Time at={ended.at} />
                 </Field>
+              ) : ended ? (
+                <Field label="Ended">Ended by the issuer; no time given</Field>
               ) : (
                 <Field label="Expires">{w.expiresAt ? <Time at={w.expiresAt} /> : 'No expiry given'}</Field>
               )}

@@ -14,7 +14,8 @@
 // controls, and below any overlay MapView adds as a control), so haze never tints MapView's markers.
 // Performance: the particle loop is capped at 30 fps, stops when the tab is hidden, the map is
 // off-screen or no grid is in view, draws shorter trails at low zoom, and an adaptive budget sheds
-// particles step-wise when frames run long (restoring slowly when there is headroom).
+// particles step-wise when frames run long (restoring slowly when there is headroom). During a pan or
+// zoom the step and layer rebuilds pause (the trails stay drawn, following the camera).
 // TODO(map-v2): merge into one shared deck.gl overlay with MapView (one canvas, one redraw per frame).
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { BitmapLayer, IconLayer, LineLayer, PathLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
@@ -186,6 +187,8 @@ export class HazeLayerController {
   private segFlip = 0;
   private raf = 0;
   private lastT = 0;
+  /** True between the map's movestart and moveend: the particle step and layer rebuilds pause. */
+  private cameraMoving = false;
   private hidden = typeof document !== 'undefined' ? document.hidden : false;
   private onScreen = true;
   private readonly motionQuery = prefersReducedMotion();
@@ -209,6 +212,8 @@ export class HazeLayerController {
     else parent.appendChild(el);
     this.container = el;
 
+    map.on('movestart', this.onMoveStart);
+    map.on('moveend', this.onMoveEnd);
     map.on('moveend', this.onViewChange);
     map.on('resize', this.onViewChange);
     document.addEventListener('visibilitychange', this.onVisibility);
@@ -246,6 +251,8 @@ export class HazeLayerController {
     this.destroyed = true;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.map.off('movestart', this.onMoveStart);
+    this.map.off('moveend', this.onMoveEnd);
     this.map.off('moveend', this.onViewChange);
     this.map.off('resize', this.onViewChange);
     document.removeEventListener('visibilitychange', this.onVisibility);
@@ -292,6 +299,23 @@ export class HazeLayerController {
     this.viewSeq += 1;
     this.syncLoop();
     if (!this.raf) this.render();
+  };
+
+  /**
+   * A pan or zoom pauses the particle step and the layer rebuilds. During a gesture the overlay still redraws
+   * every map frame (deck follows the camera), so the trails stay on the map, pinned to their places; what
+   * stops is the per-frame simulation and buffer upload that competed with the map for each frame. The
+   * adaptive particle budget also stops sampling, so a zoom's own frame times never cut the particle count.
+   */
+  private readonly onMoveStart = (): void => {
+    this.cameraMoving = true;
+  };
+
+  private readonly onMoveEnd = (): void => {
+    this.cameraMoving = false;
+    // Restart the clocks so the first step after the gesture is not one long jump.
+    this.lastT = 0;
+    this.lastRawT = 0;
   };
 
   private readonly onVisibility = (): void => {
@@ -344,6 +368,10 @@ export class HazeLayerController {
   private readonly frame = (t: number): void => {
     this.raf = 0;
     if (!this.animating()) return;
+    if (this.cameraMoving) {
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
     const moving = this.particlesOn() && this.slice !== null && this.box !== null;
     // Raw rAF interval feeds the adaptive budget; it sees real jank, not our 30 fps cap.
     if (moving && this.lastRawT && this.box) {

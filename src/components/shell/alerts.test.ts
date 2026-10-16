@@ -47,4 +47,16 @@ describe('alertsPill', () => {
     expect(isUrgentWarning(warning({ headline: 'Residents should evacuate the 5 km zone' }))).toBe(true);
     expect(isUrgentWarning(warning({}))).toBe(false);
   });
+
+  it('judges expiry on the page clock when given one', () => {
+    const tsunami = warning({ hazard: 'tsunami', level: 'Warning', product: 'Warning', expiresAt: '2026-10-14T00:00:00Z' });
+    const before = Date.parse('2026-10-13T12:00:00Z');
+    const after = Date.parse('2026-10-14T06:00:00Z');
+    expect(alertsPill([tsunami], before)).toEqual({ count: 1, urgent: true, label: '1 official alert' });
+    // Past its expiry: no longer counted, and the pill is not red, although the issuer's ended flag is false.
+    expect(alertsPill([tsunami], after)).toEqual({ count: 0, urgent: false, label: '0 official alerts' });
+    expect(isUrgentWarning(tsunami, after)).toBe(false);
+    // Without a clock: judged as relayed.
+    expect(alertsPill([tsunami]).count).toBe(1);
+  });
 });

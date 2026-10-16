@@ -17,6 +17,7 @@
 //   "Kota Tidore Kepulauan") also matches, but only when no exact name does.
 // - Two or more equally good candidates: not placed ("ambiguous"). No candidate: not placed.
 import type { OfficialWarning, OfficialWarningArea } from '../types';
+import { isExpired } from './warningsView';
 import centroidsJson from '../../data/idn-adm2-centroids.json';
 
 export interface DistrictCentre {
@@ -214,12 +215,17 @@ const issuedMs = (w: OfficialWarning) => {
 
 /**
  * The BMKG InaTEWS message whose areas the map shows: `inForce` is the latest message with areas that
- * BMKG has not ended; `latest` is the latest message with areas whatever its state (for the History switch).
+ * BMKG has not ended (and, given nowMs, whose expiry has not passed: isExpired); `latest` is the latest
+ * message with areas whatever its state (for the History switch).
  */
-export function selectTsunamiAreaWarnings(warnings: readonly OfficialWarning[] | null | undefined): {
+export function selectTsunamiAreaWarnings(
+  warnings: readonly OfficialWarning[] | null | undefined,
+  nowMs?: number,
+): {
   inForce: OfficialWarning | null;
   latest: OfficialWarning | null;
 } {
   const list = (warnings ?? []).filter(isBmkgTsunami).sort((a, b) => issuedMs(b) - issuedMs(a));
-  return { inForce: list.find((w) => !w.ended) ?? null, latest: list[0] ?? null };
+  const active = (w: OfficialWarning) => (nowMs === undefined ? !w.ended : !isExpired(w, nowMs));
+  return { inForce: list.find(active) ?? null, latest: list[0] ?? null };
 }

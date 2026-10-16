@@ -16,11 +16,15 @@
 //
 // Writes data/real/firms.json, data/real/quakes.json, data/real/meta.json and the scenarioWindow of
 // every watch in data/watches.json. All or nothing: if any download or parse fails, nothing is
-// written, the previous snapshot stays in place, and the script exits with code 1.
+// written, the previous snapshot stays in place, and the script exits with code 1. The four files are
+// written through scripts/lib/atomicWrite.mjs (temp files, backups, renames): if a rename fails
+// part-way, the files already replaced are restored from their backups, and the script says so, or
+// says exactly which backups to restore by hand if that also fails.
 
-import { readFile, rename, rm, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { AtomicWriteError, writeAllOrNothing } from './lib/atomicWrite.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WATCHES_PATH = path.join(ROOT, 'data', 'watches.json');
@@ -501,22 +505,6 @@ function sortRows(rows, keyFn) {
   });
 }
 
-async function writeAllOrNothing(files) {
-  await mkdir(OUT_DIR, { recursive: true });
-  const temps = [];
-  try {
-    for (const [target, content] of files) {
-      const tmp = `${target}.tmp`;
-      await writeFile(tmp, content, 'utf8');
-      temps.push([tmp, target]);
-    }
-  } catch (err) {
-    await Promise.all(temps.map(([tmp]) => rm(tmp, { force: true })));
-    throw err;
-  }
-  for (const [tmp, target] of temps) await rename(tmp, target);
-}
-
 // ---------------------------------------------------------------------------
 
 async function main() {
@@ -582,9 +570,11 @@ async function main() {
   if (snapshotBytes > SIZE_BUDGET_BYTES) {
     throw new Error(`snapshot would be ${Math.round(snapshotBytes / 1024)} KB, over the ${SIZE_BUDGET_BYTES / 1024} KB budget; nothing written`);
   }
-  await writeAllOrNothing(files);
+  await mkdir(OUT_DIR, { recursive: true });
+  const { leftover } = await writeAllOrNothing(files);
 
   console.log(`Wrote data/real/ (${Math.round(snapshotBytes / 1024)} KB) and the scenarioWindow in data/watches.json.`);
+  for (const f of leftover) console.warn(`  note: could not remove the backup ${path.relative(ROOT, f)}; it is safe to delete.`);
   for (const s of sources) {
     console.log(`  ${s.id.padEnd(22)} read ${String(s.rowsRead).padStart(6)}  kept ${String(s.rowsKept).padStart(4)}  last-modified ${s.lastModified ?? 'n/a'}`);
   }
@@ -594,6 +584,15 @@ async function main() {
 
 main().catch((err) => {
   console.error(`refresh-data failed: ${err instanceof Error ? err.message : String(err)}`);
-  console.error('Nothing was written; the previous snapshot in data/real/ is unchanged.');
+  const state = err instanceof AtomicWriteError ? err.state : 'unchanged';
+  if (state === 'restore-failed') {
+    console.error('PARTLY WRITTEN: data/real/ and data/watches.json now mix old and new files. Restore by hand:');
+    for (const { backup, target } of err.kept) console.error(`  rename ${path.relative(ROOT, backup)} to ${path.relative(ROOT, target)}`);
+    console.error('Then run npm run refresh:data again.');
+  } else if (state === 'restored') {
+    console.error('The files replaced before the failure were restored; the previous snapshot in data/real/ and data/watches.json is unchanged.');
+  } else {
+    console.error('Nothing was written; the previous snapshot in data/real/ and data/watches.json is unchanged.');
+  }
   process.exit(1);
 });

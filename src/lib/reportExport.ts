@@ -8,6 +8,7 @@
 // (Markdown escapes only change how characters are written, not what they say).
 import type { OfficialWarning } from '../types';
 import { compareWarnings } from './warnings';
+import { endedLabel } from './warningsView';
 import { HAZE_FUTURE_H, SITUATION_DISCLAIMER, pmText, utcStamp, warningModeText, whoMultipleText } from './situation';
 import type { CityHazeTable, Citation, ReportBlock, ReportFigure, ReportSection, ReportSectionId, SituationReport } from './situation';
 import { groupSources } from './sourceCatalogue';
@@ -270,8 +271,13 @@ function fullWarningsBlocks(warnings: readonly OfficialWarning[]): DocBlock[] {
   const sorted = [...warnings].sort(compareWarnings);
   const official = sorted.filter((w) => w.authority === 'official');
   const aggregator = sorted.filter((w) => w.authority === 'aggregator');
-  const status = (w: OfficialWarning) =>
-    w.ended ? (w.expiresAt ? `EXPIRED ${utcStamp(w.expiresAt)}` : 'ENDED by the issuer') : w.expiresAt ? `in force as relayed; expires ${utcStamp(w.expiresAt)}` : 'in force as relayed';
+  // As relayed (judged at retrieval): a message the issuer ended before its expiry reads ENDED, never
+  // "EXPIRED <a time still ahead>" (endedLabel).
+  const status = (w: OfficialWarning) => {
+    const ended = endedLabel(w, Date.parse(w.retrievedAt));
+    if (ended) return ended.text === 'EXPIRED' ? `EXPIRED ${utcStamp(ended.at)}` : 'ENDED by the issuer';
+    return w.expiresAt ? `in force as relayed; expires ${utcStamp(w.expiresAt)}` : 'in force as relayed';
+  };
   const rows = (list: readonly OfficialWarning[]) =>
     list.map((w) => [
       w.issuer,

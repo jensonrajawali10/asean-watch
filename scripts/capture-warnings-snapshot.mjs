@@ -5,12 +5,15 @@
 // bundle small, with every kept row untouched: ThaiWater keeps gauges at situation level >= 4 plus all of
 // Phra Nakhon Si Ayutthaya province, and GDACS keeps events inside the Asia-Pacific box used by warnings.ts.
 // A feed that fails keeps its previous snapshot entry, so a good capture is never replaced by a bad one.
+// If every feed fails, nothing is written and the script exits with code 1 (so refresh:all stops).
+// The file is written atomically (temp file + rename).
 // MAGMA Indonesia: the public level list (HTML, no token) is parsed by src/lib/magmaLevels.ts (imported
 // directly; Node 24 strips the types). Only facts are stored: each Level III/IV volcano and each watched
 // volcano (Merapi, Semeru, Anak Krakatau, Sinabung) with its verbatim level, plus Smithsonian GVP
 // coordinates joined by name. If the page cannot be fetched or parsed, the previous MAGMA records are kept.
 // Owned by the logic builder. No dependencies.
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './lib/atomicWrite.mjs';
 import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from '../src/lib/magmaLevels.ts';
 
 const OUT = new URL('../data/warnings-snapshot.json', import.meta.url);
@@ -159,11 +162,13 @@ async function main() {
   }
   const capturedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const feeds = {};
+  let fresh = 0;
   for (const [id, run] of Object.entries(FEEDS)) {
     const retrievedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     try {
       const { urls, raw } = await run(previous.feeds?.[id]);
       feeds[id] = { retrievedAt, urls, raw, error: null };
+      fresh += 1;
       const size = JSON.stringify(raw).length;
       console.log(`ok    ${id.padEnd(14)} ${String(size).padStart(8)} chars  ${urls.join(' ')}`);
     } catch (err) {
@@ -173,6 +178,12 @@ async function main() {
       console.log(`FAIL  ${id.padEnd(14)} ${message}${kept && kept.raw ? ' (kept previous snapshot entry)' : ''}`);
     }
   }
+  const total = Object.keys(FEEDS).length;
+  if (fresh === 0) {
+    console.error(`Every feed failed (${total} of ${total}); data/warnings-snapshot.json left unchanged.`);
+    process.exitCode = 1;
+    return;
+  }
   const snapshot = {
     capturedAt,
     note:
@@ -180,8 +191,9 @@ async function main() {
       'original times; never as current. Relayed verbatim; follow each issuer.',
     feeds,
   };
-  await writeFile(OUT, `${JSON.stringify(snapshot)}\n`, 'utf8');
-  console.log(`Wrote data/warnings-snapshot.json (capturedAt ${capturedAt}).`);
+  await writeFileAtomic(OUT, `${JSON.stringify(snapshot)}\n`);
+  const failedNote = fresh < total ? `; ${total - fresh} failed, each keeping its previous entry where there was one` : '';
+  console.log(`Wrote data/warnings-snapshot.json (capturedAt ${capturedAt}; ${fresh} of ${total} feeds fresh${failedNote}).`);
 }
 
 main().catch((err) => {

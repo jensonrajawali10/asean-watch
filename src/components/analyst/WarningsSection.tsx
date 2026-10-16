@@ -7,6 +7,7 @@ import type { GaugeReading } from '../../lib/warnings';
 import OfficialWarningsPanel from '../OfficialWarnings';
 import ErrorBoundary from '../ErrorBoundary';
 import { activeOfficial, isUrgentWarning } from '../shell/alerts';
+import { useNowMs } from '../../lib/useNowMs';
 import { AnalystSection, KeyFigure } from './AnalystSection';
 import type { SectionSource } from './AnalystSection';
 
@@ -35,8 +36,9 @@ function sourcesFromFeeds(feeds: WarningFeedStatus[]): SectionSource[] {
 }
 
 export default function WarningsSection(p: WarningsSectionProps) {
-  const active = activeOfficial(p.allWarnings);
-  const urgent = active.filter(isUrgentWarning).length;
+  const nowMs = useNowMs();
+  const active = activeOfficial(p.allWarnings, nowMs);
+  const urgent = active.filter((w) => isUrgentWarning(w, nowMs)).length;
   const estimates = p.allWarnings.filter((w) => w.authority === 'aggregator').length;
   const live = p.feeds.filter((f) => f.status === 'live').length;
   const unavailable = p.feeds.filter((f) => f.status === 'unavailable');
@@ -48,7 +50,7 @@ export default function WarningsSection(p: WarningsSectionProps) {
       sources={sourcesFromFeeds(p.feeds)}
     >
       <div className="an-figures">
-        <KeyFigure label="Active official messages" value={String(active.length)} note="not ended by the issuer" />
+        <KeyFigure label="Active official messages" value={String(active.length)} note="not ended by the issuer or past expiry" />
         <KeyFigure label="Tsunami or evacuation-level" value={String(urgent)} note={urgent > 0 ? 'in force now' : 'none in force'} />
         <KeyFigure label="Impact estimates (GDACS)" value={String(estimates)} note="aggregator, not warnings" />
         <KeyFigure
