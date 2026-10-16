@@ -29,7 +29,7 @@ import type { WindGrid, WindSlice } from '../../lib/windField';
 import { AdaptiveBudget, FrameLimiter, intersectBox, ParticleSystem, rasterisePm25, streakArrows, trailForZoom } from './hazeRender';
 import type { ParticleBox } from './hazeRender';
 import { cityBandStyle, getMapPalette } from './mapPalette';
-import { cityRadiusPx, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
+import { cityMarkerRadius, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
 
 export type { AirQualityData };
 
@@ -60,6 +60,11 @@ export interface HazeLayerInput {
   neaHaze?: HazeReading | null;
   /** Highlight this city (e.g. while its popover is open). */
   selectedCityId?: string | null;
+  /**
+   * City labels decided by the map's shared collision plan (city id to text); cities not listed get none.
+   * Without it the controller places its own labels.
+   */
+  labels?: ReadonlyMap<string, string> | null;
 }
 
 const GRID_BOX: ParticleBox = {
@@ -430,14 +435,17 @@ export class HazeLayerController {
     }
     const zoomed = this.map.getZoom() >= LABEL_ZOOM;
     const nea = i.neaHaze ?? null;
-    const key = [i.airQuality.retrievedAt, i.timeISO, i.dark, zoomed, this.viewSeq, this.hoveredId, i.selectedCityId, nea?.observedAt, nea?.dataMode].join('|');
+    const zoom = this.map.getZoom();
+    const planKey = i.labels ? [...i.labels].map(([k, v]) => `${k}=${v}`).join(',') : '';
+    const key = [i.airQuality.retrievedAt, i.timeISO, i.dark, zoomed, this.viewSeq, this.hoveredId, i.selectedCityId, nea?.observedAt, nea?.dataMode, planKey].join('|');
     if (key === this.cityKey) return;
     this.cityKey = key;
     const dark = i.dark;
     const pal = paletteOf(i);
     const data = this.cityData();
     // HazeView-style circles: radius grows with the square root of PM2.5 (6 to 26 px), a little larger in focus.
-    const radius = (d: HazeCity) => cityRadiusPx(d.pm25) * (d.kind === 'fire-area' ? 0.85 : 1) + (d.id === i.selectedCityId || d.id === this.hoveredId ? 2 : 0);
+    // A little smaller at the regional zoom, so dense clusters read (cityMarkers.cityZoomScale).
+    const radius = (d: HazeCity) => cityMarkerRadius(d.pm25, zoom, d.kind, d.id === i.selectedCityId || d.id === this.hoveredId);
     const worst = worstId(data);
     const worstCity = worst ? (data.find((d) => d.id === worst) ?? null) : null;
     const bandRgb = (d: HazeCity): Rgb => {
@@ -459,15 +467,24 @@ export class HazeLayerController {
     };
     this.worst = worstCity ? { id: worstCity.id, lon: worstCity.lon, lat: worstCity.lat, r: radius(worstCity), rgb: bandRgb(worstCity) } : null;
     // Every circle carries its value; names are added where they fit (worst first, no overlaps).
-    const { width: vw, height: vh } = this.map.getContainer().getBoundingClientRect();
-    const placed = placeCityLabels(
-      data.map((d) => {
-        const pt = this.map.project([d.lon, d.lat]);
-        return { id: d.id, x: pt.x, y: pt.y, r: radius(d), name: shortCityName(d.name), value: valueText(d.pm25), priority: Number.isFinite(d.pm25) ? d.pm25 : -1, force: focus(d) };
-      }),
-      { charPx: 7.2, heightPx: 16, gapPx: 6, viewport: { w: vw, h: vh } },
-    );
-    const labelOf = new Map(placed.map((l) => [l.id, l]));
+    let labelOf: Map<string, { text: string; kind: 'full' | 'value' }>;
+    if (i.labels) {
+      // The map's shared plan (pins, volcano names, worst cities, fire badges, other cities); a hovered city
+      // always gets its full label.
+      labelOf = new Map([...i.labels].map(([id, text]) => [id, { text, kind: text.includes('  ') ? ('full' as const) : ('value' as const) }]));
+      const hovered = this.hoveredId ? data.find((d) => d.id === this.hoveredId) : null;
+      if (hovered) labelOf.set(hovered.id, { text: `${shortCityName(hovered.name)}  ${valueText(hovered.pm25)}`, kind: 'full' });
+    } else {
+      const { width: vw, height: vh } = this.map.getContainer().getBoundingClientRect();
+      const placed = placeCityLabels(
+        data.map((d) => {
+          const pt = this.map.project([d.lon, d.lat]);
+          return { id: d.id, x: pt.x, y: pt.y, r: radius(d), name: shortCityName(d.name), value: valueText(d.pm25), priority: Number.isFinite(d.pm25) ? d.pm25 : -1, force: focus(d) };
+        }),
+        { charPx: 7.2, heightPx: 16, gapPx: 6, viewport: { w: vw, h: vh } },
+      );
+      labelOf = new Map(placed.map((l) => [l.id, l]));
+    }
     const labelled = data.filter((d) => labelOf.has(d.id));
     const showLabel = (d: HazeCity) => zoomed || focus(d) || labelOf.get(d.id)?.kind === 'full';
     const sg = data.find((d) => d.id === SINGAPORE_ID);

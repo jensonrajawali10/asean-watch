@@ -3,9 +3,10 @@
 // 9 km) at each watched volcano's Smithsonian GVP summit point, from Open-Meteo (CC BY 4.0). Used by
 // src/lib/ashDrift.ts for the illustrative ash-drift lines when the live request fails.
 // Variables (verified 2026-10-14): wind_speed_{700,500,300}hPa, wind_direction_{700,500,300}hPa (FROM, °), m/s.
-// Request: the Forecast API (forecast_days=3, UTC). If it refuses (e.g. its hourly rate limit), the same
-// variables for the same days come from Open-Meteo's Historical Forecast API, which archives the same
-// models' forecasts; the endpoint used is recorded in `source` and `requestUrl`.
+// Request: the Forecast API (past_days=1, forecast_days=3, UTC: yesterday 00 UTC to today + 72 h, so a 48 h
+// eruption scenario started any time today fits, and an older "now" still has wind). If it refuses (e.g. its
+// hourly rate limit), the same variables for the same days come from Open-Meteo's Historical Forecast API,
+// which archives the same models' forecasts; the endpoint used is recorded in `source` and `requestUrl`.
 // Fail safe: any download, shape or value problem writes nothing and keeps the previous file (exit 1).
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +16,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = path.join(ROOT, 'data', 'ash-wind-snapshot.json');
 const LEVELS = ['700', '500', '300'];
 const VARS = LEVELS.flatMap((l) => [`wind_speed_${l}hPa`, `wind_direction_${l}hPa`]);
+const PAST_DAYS = 1;
 const DAYS = 3;
 
 async function volcanoes() {
@@ -45,10 +47,10 @@ async function main() {
   const vs = await volcanoes();
   const loc = `latitude=${vs.map((v) => v.lat).join(',')}&longitude=${vs.map((v) => v.lon).join(',')}`;
   const common = `hourly=${VARS.join(',')}&wind_speed_unit=ms&timezone=GMT`;
-  const forecastUrl = `https://api.open-meteo.com/v1/forecast?${loc}&${common}&forecast_days=${DAYS}`;
+  const forecastUrl = `https://api.open-meteo.com/v1/forecast?${loc}&${common}&past_days=${PAST_DAYS}&forecast_days=${DAYS}`;
   const archiveUrl =
     `https://historical-forecast-api.open-meteo.com/v1/forecast?${loc}&${common}` +
-    `&start_date=${day(startedMs)}&end_date=${day(startedMs + (DAYS - 1) * 86400000)}`;
+    `&start_date=${day(startedMs - PAST_DAYS * 86400000)}&end_date=${day(startedMs + (DAYS - 1) * 86400000)}`;
   let json;
   let source = 'Open-Meteo Forecast API';
   let requestUrl = forecastUrl;
@@ -90,7 +92,8 @@ async function main() {
   const out = {
     about:
       'MODELLED hourly wind at 700, 500 and 300 hPa at each watched volcano summit (Smithsonian GVP point), m/s, direction FROM in degrees. ' +
-      'Captured by scripts/capture-ash-wind-snapshot.mjs for the illustrative ash-drift lines. Not an ash advisory or hazard zone.',
+      'Captured by scripts/capture-ash-wind-snapshot.mjs for the illustrative ash-drift lines and the "If it erupted now" ash scenario ' +
+      '(src/lib/eruptionScenario.ts, a MODELLED SCENARIO). Not an ash advisory, a prediction or a hazard zone.',
     source,
     sourceUrl: 'https://open-meteo.com/en/docs',
     requestUrl,

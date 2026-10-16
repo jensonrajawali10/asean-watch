@@ -55,6 +55,9 @@ import type { LayerKey, MapLayerState } from './components/map/layerCatalog';
 import { officialVolcanoLevel } from './components/map/volcanoLevels';
 import type { OfficialVolcanoLevel } from './components/map/volcanoLevels';
 import MapCards from './components/map/MapCards';
+import { buildEruptionScenario } from './lib/eruptionScenario';
+import { buildPlumeLayers } from './components/map/plumeLayers';
+import EruptionScenarioPanel from './components/analyst/EruptionScenarioPanel';
 import VolcanoesSection from './components/analyst/VolcanoesSection';
 import WarningsSection from './components/analyst/WarningsSection';
 import WaterSection from './components/analyst/WaterSection';
@@ -74,6 +77,8 @@ import { buildFireLayers } from './components/map/fireLayers';
 import type { FirePick } from './components/map/fireLayers';
 import { firePoint, fireSelectionId, resolveFirePick } from './components/map/fireSelection';
 import type { MapLayerContext } from './components/map/MapView';
+import { REGIONAL_ZOOM } from './components/map/labelPlan';
+import { regionalBadges } from './lib/fires';
 import './App.css';
 import './components/shell/shell.css';
 
@@ -175,6 +180,15 @@ const FIRES_SUMMARY = (() => {
   } catch (err) {
     console.error('Fire summary could not be derived:', err);
     return null;
+  }
+})();
+
+/** Province, state and country fire badges for the regional zoom (largest first). */
+const FIRE_BADGES = (() => {
+  try {
+    return FIRE_SNAP ? regionalBadges(FIRE_SNAP, '24h', 8) : [];
+  } catch {
+    return [];
   }
 })();
 
@@ -633,6 +647,26 @@ export default function App() {
     [openSection],
   );
 
+  /** The scrubber's anchor step: "now" for a live model run, the capture hour for a snapshot. */
+  const [mountMs] = useState(() => Date.now());
+  const anchorMs = useMemo(() => {
+    const t = Date.parse(hazeHour.steps.times[hazeHour.steps.nowIndex] ?? '');
+    return Number.isFinite(t) ? t : mountMs;
+  }, [hazeHour.steps, mountMs]);
+  /** "If it erupted now" for the selected volcano: one scenario shared by the plume, the card and the panel. */
+  const scenario = useMemo(
+    () =>
+      incident?.hazard === 'volcano' && ashWind
+        ? buildEruptionScenario(ashWind, incident.volcanoId, anchorMs, { hours: 48, name: PLACE_NAMES[incident.id] ?? incident.title })
+        : null,
+    [incident, ashWind, anchorMs],
+  );
+  const plumeLayers = useCallback(
+    (timeMs: number, ctx: MapLayerContext) =>
+      buildPlumeLayers(scenario, timeMs, { theme: ctx.theme, visible: true, showTrail: true, showFootprint: true, showPlaces: true }),
+    [scenario],
+  );
+
   /** "Play ash scenario": the plume follows the one timeline, so the scrubber goes back to now and plays. */
   const playScenario = useCallback(
     (watchId: string) => {
@@ -641,11 +675,14 @@ export default function App() {
         hazeHour.setPlaying(false);
         return;
       }
+      setSelection({ kind: 'area', id: watchId });
       setScenarioId(watchId);
       setLayers((prev) => (prev.watch ? prev : { ...prev, watch: true }));
       hazeHour.setPlaying(true, hazeHour.steps.nowIndex);
+      // On a phone the workspace sheet covers the map: close it so the plume is seen.
+      if (window.matchMedia?.('(max-width: 767px)').matches) setWs(null);
     },
-    [scenarioId, hazeHour],
+    [scenarioId, hazeHour, setSelection],
   );
 
   // A scenario belongs to the volcano it was started on.
@@ -785,6 +822,12 @@ export default function App() {
         zoom: ctx.zoom,
         visible: layers.fires,
         selectedClusterId,
+        // Calm at the regional view: the glow only (squares from zoom 4.5 in both themes). Region badges at the
+        // regional zoom are MapView's (one collision plan with pins, volcano names and city labels); the
+        // fires module draws the cluster badges from zoom 5.2.
+        cellsMinZoom: 4.5,
+        showBadges: ctx.zoom >= REGIONAL_ZOOM,
+        maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
     [layers.fires, selectedClusterId, selectFire],
@@ -884,6 +927,18 @@ export default function App() {
           }}
           attribution={attribution}
           dataAsOf={DATA_AS_OF}
+          scenarioPanel={
+            <EruptionScenarioPanel
+              watches={FIXTURES.watches ?? []}
+              ashWind={ashWind}
+              nowMs={anchorMs}
+              warnings={allWarnings}
+              selectedWatchId={incident?.id ?? null}
+              onSelectWatch={selectArea}
+              onPlayScenario={playScenario}
+              withMethods
+            />
+          }
         />
       );
       break;
@@ -956,11 +1011,12 @@ export default function App() {
       wind925={wind925}
       neaHaze={nea?.haze ?? null}
       incidents={INCIDENTS}
-      volcanoes={FIXTURES.volcanoes}
       placeNames={PLACE_NAMES}
       levels={levels}
       ashWind={ashWind}
       scenarioId={scenarioId}
+      scenario={scenario}
+      anchorMs={anchorMs}
       onPlayScenario={playScenario}
       warnings={allWarnings}
       onInspectWarning={openWarning}
@@ -985,6 +1041,8 @@ export default function App() {
     transport,
     hotspots: WATCH_HOTSPOTS,
     extraLayers: fireLayers,
+    fireBadges: FIRE_BADGES,
+    onSelectFireBadge: (badge) => selectFire({ kind: 'fire-region', badge }),
     flyRequest,
     focusPoint: firePick ? firePoint(firePick) : null,
     windGrid: wind925,
@@ -992,6 +1050,8 @@ export default function App() {
     hazeHour,
     ashWind,
     scenarioId,
+    scenarioLayers: scenario ? plumeLayers : null,
+    scenarioInfo: scenario ? { startMs: scenario.startMs, bounds: scenario.bounds } : null,
     quakes,
     riverFlow: riverFlow.series,
   };

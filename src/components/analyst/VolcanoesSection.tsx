@@ -58,6 +58,8 @@ export interface VolcanoesSectionProps {
   };
   attribution?: ReactNode;
   dataAsOf: string | null;
+  /** "If it erupted now" for every watched volcano (the eruption module's panel). */
+  scenarioPanel?: ReactNode;
 }
 
 const SOURCES: SectionSource[] = [
@@ -161,6 +163,13 @@ export default function VolcanoesSection(p: VolcanoesSectionProps) {
             onDownload={p.brief.onDownload}
             dayIndex={p.brief.dayIndex}
           />
+        </>
+      )}
+
+      {p.scenarioPanel && (
+        <>
+          <AnalystSubhead>If it erupted now (modelled scenario)</AnalystSubhead>
+          {p.scenarioPanel}
         </>
       )}
 

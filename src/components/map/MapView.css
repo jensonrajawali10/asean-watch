@@ -820,3 +820,45 @@
     transition: none;
   }
 }
+
+/* Fire region badges at the regional zoom, placed by the shared label plan (labelPlan.ts); the plan's
+   offset from the point is an inline translate. */
+.mv-fbadge {
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  height: 20px;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel-glass);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.mv-fbadge:hover {
+  border-color: var(--text);
+}
+
+.mv-fbadge:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.mv-fbadge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-check-border);
+}

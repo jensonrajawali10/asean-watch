@@ -93,6 +93,17 @@ export function placeCityLabels(cands: readonly LabelCandidate[], opts: { charPx
   return out;
 }
 
+/** Circles shrink a little at the regional zoom, so dense clusters (Sumatra, Java, Kalimantan) stay readable. */
+export function cityZoomScale(zoom: number): number {
+  if (!Number.isFinite(zoom)) return 1;
+  return zoom < 4.5 ? 0.7 : zoom < 6 ? 0.85 : 1;
+}
+
+/** The drawn circle radius: by value, zoom, kind and focus (selected or hovered). */
+export function cityMarkerRadius(pm25: number, zoom: number, kind: 'city' | 'fire-area' = 'city', focused = false): number {
+  return cityRadiusPx(pm25) * cityZoomScale(zoom) * (kind === 'fire-area' ? 0.85 : 1) + (focused ? 2 : 0);
+}
+
 /** Pulse ring around the worst city at time t (ms): grows from the circle out by `spreadPx` and fades. */
 export function pulseRing(radiusPx: number, tMs: number, periodMs = 2400, spreadPx = 24): { radius: number; alpha: number } {
   const phase = (((tMs % periodMs) + periodMs) % periodMs) / periodMs;

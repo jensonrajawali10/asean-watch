@@ -8,6 +8,9 @@
 // Simplification (stated in the map caption): the drift uses the time-varying forecast wind AT THE
 // SUMMIT for the whole path, i.e. it does not sample the wind where the ash has moved to. Forward steps of
 // 30 minutes for 24 hours, wind interpolated linearly in time (u and v), ticks at 3, 6, 12 and 24 h.
+// The series cover yesterday 00 UTC to 72 h after today 00 UTC (past_days=1, forecast_days=3), which also
+// feeds the 48 h "If it erupted now" puff scenario in eruptionScenario.ts. Older snapshots with 72 h are still
+// read as they are.
 //
 // loadAshWind(): live Open-Meteo first (timeout, in-flight dedupe, memory cache, 429 backoff), then the
 // bundled snapshot data/ash-wind-snapshot.json (dataMode "historical"). Never throws.
@@ -26,6 +29,12 @@ export const DRIFT_STEP_MIN = 30;
 export const DRIFT_HOURS = 24;
 export const DRIFT_TICK_HOURS: readonly number[] = [3, 6, 12, 24];
 export const ASH_WIND_ATTRIBUTION = 'Weather data by Open-Meteo.com (CC BY 4.0), pressure-level winds, best-match global weather model.';
+/**
+ * Request window: yesterday (so a scenario anchored on an older snapshot "now", such as the haze scrubber's,
+ * still has wind) through two more days (so a 48 h eruption scenario started today fits). 96 hours.
+ */
+export const ASH_PAST_DAYS = 1;
+export const ASH_FORECAST_DAYS = 3;
 export const ASH_CACHE_TTL_MS = 30 * 60 * 1000;
 export const ASH_BACKOFF_MS = 5 * 60 * 1000;
 
@@ -97,7 +106,8 @@ export function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: numbe
   return (deg(Math.atan2(y, x)) + 360) % 360;
 }
 
-function destination(lat: number, lon: number, bearing: number, km: number): { lat: number; lon: number } {
+/** The point `km` along the great circle from (lat, lon) at initial `bearing` (degrees clockwise from north). */
+export function destination(lat: number, lon: number, bearing: number, km: number): { lat: number; lon: number } {
   const d = km / R_KM;
   const b = rad(bearing);
   const p1 = rad(lat);
@@ -226,7 +236,7 @@ export function buildAshWindUrl(points: readonly Point[]): string {
   const vars = LEVEL_KEYS.flatMap((l) => [`wind_speed_${l}hPa`, `wind_direction_${l}hPa`]).join(',');
   return (
     `${OPEN_METEO_FORECAST_URL}?latitude=${points.map((p) => p.lat).join(',')}&longitude=${points.map((p) => p.lon).join(',')}` +
-    `&hourly=${vars}&wind_speed_unit=ms&forecast_days=3&timezone=GMT`
+    `&hourly=${vars}&wind_speed_unit=ms&past_days=${ASH_PAST_DAYS}&forecast_days=${ASH_FORECAST_DAYS}&timezone=GMT`
   );
 }
 

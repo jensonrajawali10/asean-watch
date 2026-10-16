@@ -50,6 +50,33 @@ describe('rasterisePm25', () => {
   const lons = [100, 101, 102];
   const slice = new Float32Array([200, 200, 200, 200, 200, 200, 200, 200, 200]);
 
+  it('fades every outer cell to near-transparent with a ragged, rounded, repeatable edge', () => {
+    const bigLats = Array.from({ length: 15 }, (_, k) => -6 + k);
+    const bigLons = Array.from({ length: 26 }, (_, k) => 95 + k);
+    const full = new Float32Array(bigLats.length * bigLons.length).fill(300);
+    const r = rasterisePm25(full, bigLats, bigLons, 'light');
+    const a = (row: number, col: number) => r.data[(row * r.width + col) * 4 + 3];
+    const inner = smokeRgba(300, 'light')[3];
+    // The outermost ring is close to transparent all the way round (no hard rectangle).
+    for (let c = 0; c < r.width; c += 1) {
+      expect(a(0, c)).toBeLessThanOrEqual(inner * 0.02);
+      expect(a(r.height - 1, c)).toBeLessThanOrEqual(inner * 0.02);
+    }
+    for (let row = 0; row < r.height; row += 1) {
+      expect(a(row, 0)).toBeLessThanOrEqual(inner * 0.02);
+      expect(a(row, r.width - 1)).toBeLessThanOrEqual(inner * 0.02);
+    }
+    expect(a(Math.floor(r.height / 2), Math.floor(r.width / 2))).toBe(inner);
+    // Ragged: one pixel row in from the band, the fade differs along the edge.
+    const band = Array.from({ length: r.width }, (_, c) => a(12, c)).slice(30, r.width - 30);
+    expect(Math.max(...band) - Math.min(...band)).toBeGreaterThan(inner * 0.1);
+    // Rounded: a corner is fainter than the middle of either side at the same inset.
+    expect(a(8, 8)).toBeLessThan(a(8, Math.floor(r.width / 2)));
+    expect(a(8, 8)).toBeLessThan(a(Math.floor(r.height / 2), 8));
+    // Repeatable (the scrubber cross-fades between hours without the edge moving).
+    expect(rasterisePm25(full, bigLats, bigLons, 'light').data).toEqual(r.data);
+  });
+
   it('covers the grid bounds and feathers the outer edge to transparent', () => {
     const r = rasterisePm25(slice, lats, lons, false, { pxPerDeg: 10, featherDeg: 0.5 });
     expect(r.bounds).toEqual([100, 0, 102, 2]);
