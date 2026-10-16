@@ -50,6 +50,11 @@ import { BASEMAP_BUILDING_SOURCES, basemapStyleFor, basemapStyleOptions, buildin
 import { LAYER_CATALOG, MAP_CHIPS } from './layerCatalog';
 import type { LayerKey, MapLayerState } from './layerCatalog';
 import type { OfficialVolcanoLevel } from './volcanoLevels';
+import { REGIONAL_ZOOM, planRegionalLabels } from './labelPlan';
+import type { Box, PlanBadge, PlanCity } from './labelPlan';
+import { cityMarkerRadius, shortCityName, valueText } from './cityMarkers';
+import { placePm25At } from '../../lib/airQuality';
+import type { FireBadge } from '../../lib/fires';
 import type { MapSelection } from '../shell/workspace';
 import ErrorBoundary from '../ErrorBoundary';
 import { FireIcon, HazeIcon, LayersIcon, VolcanoIcon, WarningIcon } from '../shell/icons';
@@ -137,12 +142,17 @@ export interface MapViewProps {
   ashWind?: AshWindData | null;
   /** Volcano watch id whose "If it erupted now" scenario plays; null when none. */
   scenarioId?: string | null;
-  /** The eruption module's plume layers for a time (ms); replaces the interim plume when given. */
+  /** The eruption module's plume layers for a time (ms), drawn while the scenario plays. */
   scenarioLayers?: ((timeMs: number, ctx: MapLayerContext) => LayersList) | null;
+  /** The scenario's start (ms) and its [west, south, east, north] extent (to frame it when it starts). */
+  scenarioInfo?: { startMs: number; bounds: [number, number, number, number] } | null;
   /** Extra deck.gl layers from teammates' modules (e.g. the fire heat grid), rebuilt when ctx changes. */
   extraLayers?: ((ctx: MapLayerContext) => LayersList) | null;
   quakes?: QuakesResult | null;
   riverFlow?: RiverDischargeSeries[] | null;
+  /** Fire region badges for the regional zoom (largest first); the shared label plan picks which show. */
+  fireBadges?: readonly FireBadge[] | null;
+  onSelectFireBadge?: (badge: FireBadge) => void;
   /** Where to look when the selection is a fire (a cluster, cell or region centre). */
   focusPoint?: { lat: number; lon: number } | null;
   /** A one-off camera request (a workspace "Fly to"); a new seq flies again. */
@@ -197,8 +207,6 @@ const FALLBACK_APAC: Bounds = [
 const POINT_ZOOM = { min: 5.6, max: 8 };
 /** Zoom a volcano is shown at when selected: its region, not its crater. */
 const VOLCANO_ZOOM = { min: 6.8, max: 8.5 };
-/** The interim scenario plume length (hours after the assumed start). */
-const SCENARIO_HOURS = 24;
 
 const ARROW_ICON = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path d="M4 26.5h34V14l24 18-24 18V37.5H4z" fill="#fff"/></svg>',
@@ -428,28 +436,6 @@ function resolveTheme(theme: 'dark' | 'light' | undefined): 'dark' | 'light' {
   }
 }
 
-/** Part of a drift track up to `ms`, with the interpolated head; null before the start. */
-function trackUpTo(track: DriftTrack, ms: number): { path: LonLat[]; head: LonLat } | null {
-  const pts = track.points;
-  if (pts.length < 2) return null;
-  const t0 = Date.parse(pts[0].time);
-  if (!(ms > t0)) return null;
-  const path: LonLat[] = [];
-  for (let k = 0; k < pts.length; k += 1) {
-    const t = Date.parse(pts[k].time);
-    if (t <= ms) {
-      path.push([pts[k].lon, pts[k].lat]);
-      continue;
-    }
-    const prev = pts[k - 1];
-    const tp = Date.parse(prev.time);
-    const f = (ms - tp) / Math.max(1, t - tp);
-    path.push([prev.lon + (pts[k].lon - prev.lon) * f, prev.lat + (pts[k].lat - prev.lat) * f]);
-    break;
-  }
-  return path.length >= 2 ? { path, head: path[path.length - 1] } : null;
-}
-
 // ---------------------------------------------------------------------------------------------
 
 export default function MapView({
@@ -476,11 +462,14 @@ export default function MapView({
   ashWind = null,
   scenarioId = null,
   scenarioLayers = null,
+  scenarioInfo = null,
   extraLayers = null,
   quakes = null,
   riverFlow = null,
   focusPoint = null,
   flyRequest = null,
+  fireBadges = null,
+  onSelectFireBadge,
 }: MapViewProps) {
   /** Open chart popover (analyst layers): a tide gauge (code) or a river point (id), at a point in the map container. */
   const [chart, setChart] = useState<{ kind: 'tide' | 'river'; id: string; at: { x: number; y: number } } | null>(null);
@@ -495,6 +484,9 @@ export default function MapView({
   const [zoomBucket, setZoomBucket] = useState(4);
   /** Roving tabindex for the official/gauge markers: index of the one tab stop. */
   const [officialActive, setOfficialActive] = useState(0);
+  /** The shared label plan's results: city labels (for the haze controller) and the fire badges shown. */
+  const [cityLabels, setCityLabels] = useState<{ key: string; map: Map<string, string> } | null>(null);
+  const [badgePlan, setBadgePlan] = useState<{ id: string; dx: number; dy: number }[]>([]);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const mapElRef = useRef<HTMLDivElement>(null);
@@ -525,6 +517,14 @@ export default function MapView({
   onSelectRef.current = onSelect;
 
   const pal = getMapPalette(dark ? 'dark' : 'light');
+  /** What the label plan reads (layoutTags is stable and runs on moveend, so it reads through a ref). */
+  const planRef = useRef<{ airQuality: AirQualityData | null; timeISO: string; selectedCityId: string | null; fireBadges: readonly FireBadge[]; citiesOn: boolean }>({
+    airQuality: null,
+    timeISO: '',
+    selectedCityId: null,
+    fireBadges: [],
+    citiesOn: true,
+  });
   const themeName: 'dark' | 'light' = dark ? 'dark' : 'light';
   const timeISO = hazeHour?.timeISO ?? '';
 
@@ -533,6 +533,7 @@ export default function MapView({
   const selectedAreaId = selection?.kind === 'area' ? selection.id : null;
   const selectedWarningId = selection?.kind === 'warning' ? selection.id : null;
   const selectedCityId = selection?.kind === 'city' ? selection.id : null;
+  planRef.current = { airQuality, timeISO, selectedCityId, fireBadges: layers.fires ? (fireBadges ?? []) : [], citiesOn: layers.haze };
 
   const placed = useMemo(
     () =>
@@ -620,14 +621,7 @@ export default function MapView({
   }, [ashWind, selectedIncident]);
   const ashDrift = useMemo(() => (ashSeries ? ashDriftTracks(ashSeries, nowMs) : null), [ashSeries, nowMs]);
   const ashShown = Boolean(ashDrift && layers.ash);
-  const anchorISO = hazeHour ? (hazeHour.steps.times[hazeHour.steps.nowIndex] ?? '') : '';
   const scenarioActive = Boolean(scenarioId && selectedIncident && scenarioId === selectedIncident.id);
-  const scenarioDrift = useMemo(() => {
-    if (!scenarioActive || !ashSeries) return null;
-    const anchor = Date.parse(anchorISO);
-    return ashDriftTracks(ashSeries, Number.isFinite(anchor) ? anchor : nowMs);
-  }, [scenarioActive, ashSeries, anchorISO, nowMs]);
-
   // Official BMKG InaTEWS tsunami warning areas (verbatim levels) at district centres (approximate).
   const tsunamiPick = useMemo(() => selectTsunamiAreaWarnings(warnings), [warnings]);
   const tsunamiInForce = tsunamiPick.inForce !== null;
@@ -1015,68 +1009,29 @@ export default function MapView({
 
   const buildScenario = useCallback(
     (ms: number): LayersList => {
-      if (!scenarioActive) return NO_LAYERS;
-      if (scenarioLayers) {
-        try {
-          return scenarioLayers(ms, layerCtx);
-        } catch (err) {
-          console.error('Scenario layers could not be built:', err);
-          return NO_LAYERS;
-        }
+      if (!scenarioActive || !scenarioLayers || !selectedIncident) return NO_LAYERS;
+      let layers: LayersList;
+      try {
+        layers = scenarioLayers(ms, layerCtx);
+      } catch (err) {
+        console.error('Scenario layers could not be built:', err);
+        return NO_LAYERS;
       }
-      if (!scenarioDrift || !selectedIncident) return NO_LAYERS;
+      // The plume is never a prediction: the vent carries a MODELLED SCENARIO label with the hours run.
       const p = getMapPalette(dark ? 'dark' : 'light');
-      const start = Date.parse(scenarioDrift.startISO);
-      const end = start + SCENARIO_HOURS * 3_600_000;
-      const t = Math.min(ms, end);
-      const parts = scenarioDrift.tracks.flatMap((track) => {
-        const part = trackUpTo(track, t);
-        return part ? [{ level: track.level, ...part }] : [];
-      });
-      const hours = Math.max(0, (t - start) / 3_600_000);
+      const start = scenarioInfo?.startMs ?? Number.NaN;
+      const hours = Number.isFinite(start) ? Math.max(0, Math.round((ms - start) / 3_600_000)) : null;
       const label = [
         {
           at: [selectedIncident.lon, selectedIncident.lat] as LonLat,
-          text: ms < start ? 'MODELLED SCENARIO · before the assumed start' : `MODELLED SCENARIO · +${Math.round(hours)} h after an assumed eruption`,
+          text:
+            hours === null || ms < start
+              ? 'MODELLED SCENARIO · press play to run it'
+              : `MODELLED SCENARIO · ${hours} h after an assumed eruption`,
         },
       ];
-      const glow = p.ash.plumeEdge;
-      const core = p.ash.plumeCore;
       return [
-        new PathLayer<(typeof parts)[number]>({
-          id: 'mv-scenario-body',
-          data: parts,
-          getPath: (d) => d.path,
-          getColor: glow,
-          getWidth: (d) => (d.level === '300' ? 26 : d.level === '500' ? 20 : 14),
-          widthUnits: 'pixels',
-          jointRounded: true,
-          capRounded: true,
-          parameters: dark ? ADDITIVE : undefined,
-        }),
-        new PathLayer<(typeof parts)[number]>({
-          id: 'mv-scenario-core',
-          data: parts,
-          getPath: (d) => d.path,
-          getColor: (d) => [...p.ash.lines[d.level], 235],
-          getWidth: (d) => ASH_WIDTH[d.level],
-          widthUnits: 'pixels',
-          jointRounded: true,
-          capRounded: true,
-        }),
-        new ScatterplotLayer<(typeof parts)[number]>({
-          id: 'mv-scenario-heads',
-          data: parts,
-          getPosition: (d) => d.head,
-          radiusUnits: 'pixels',
-          getRadius: (d) => (d.level === '300' ? 13 : d.level === '500' ? 11 : 9),
-          filled: true,
-          getFillColor: core,
-          stroked: true,
-          getLineColor: (d) => [...p.ash.lines[d.level], 255],
-          lineWidthUnits: 'pixels',
-          getLineWidth: 1.5,
-        }),
+        ...layers,
         new TextLayer<(typeof label)[number]>({
           id: 'mv-scenario-label',
           data: label,
@@ -1085,7 +1040,7 @@ export default function MapView({
           getSize: 12,
           sizeUnits: 'pixels',
           getColor: p.label.text,
-          getPixelOffset: [0, 26],
+          getPixelOffset: [0, 24],
           getTextAnchor: 'middle',
           getAlignmentBaseline: 'top',
           fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
@@ -1096,7 +1051,7 @@ export default function MapView({
         }),
       ];
     },
-    [scenarioActive, scenarioLayers, scenarioDrift, selectedIncident, dark, layerCtx],
+    [scenarioActive, scenarioLayers, scenarioInfo, selectedIncident, dark, layerCtx],
   );
 
   const scenarioMsRef = useRef<number>(Number.NaN);
@@ -1141,8 +1096,9 @@ export default function MapView({
       onCityClick: handleCityClick,
       neaHaze: layers.nea ? (nea?.haze ?? null) : null,
       selectedCityId,
+      labels: cityLabels?.map ?? null,
     }),
-    [windGrid, airQuality, hazeTimeShown, dark, layers.particles, layers.haze, layers.nea, handleCityClick, nea, selectedCityId],
+    [windGrid, airQuality, hazeTimeShown, dark, layers.particles, layers.haze, layers.nea, handleCityClick, nea, selectedCityId, cityLabels],
   );
   useEffect(() => {
     hazeInputRef.current = hazeInput;
@@ -1215,6 +1171,44 @@ export default function MapView({
         occupied.push(best.rect);
       }
     });
+
+    // One collision plan for the rest (labelPlan.ts): pins and volcano names are fixed obstacles; then the
+    // worst cities' labels, the fire region badges (regional zoom only), then the other cities' labels.
+    const plan = planRef.current;
+    const zoom = map.getZoom();
+    const aq = plan.airQuality;
+    const cities: PlanCity[] =
+      plan.citiesOn && aq && plan.timeISO
+        ? aq.places.map((pl) => {
+            const v = placePm25At(aq, pl, plan.timeISO);
+            const pt = map.project([pl.lon, pl.lat]);
+            const focused = pl.id === plan.selectedCityId;
+            return { id: pl.id, x: pt.x, y: pt.y, r: cityMarkerRadius(v, zoom, pl.kind, focused), name: shortCityName(pl.name), value: valueText(v), pm25: v, force: focused };
+          })
+        : [];
+    const badges: PlanBadge[] =
+      zoom < REGIONAL_ZOOM
+        ? plan.fireBadges.map((b) => {
+            const pt = map.project([b.lon, b.lat]);
+            return { id: b.id, x: pt.x, y: pt.y, text: b.text, priority: b.count };
+          })
+        : [];
+    const toBox = (r: Rect): Box => ({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h });
+    const obstacles: Box[] = [
+      ...occupied.map(toBox),
+      // The chrome around the visible map (top bar, dock, drawer, card).
+      { x0: 0, y0: 0, x1: w, y1: pad.top },
+      { x0: 0, y0: h - pad.bottom, x1: w, y1: h },
+      { x0: 0, y0: 0, x1: pad.left, y1: h },
+      { x0: w - pad.right, y0: 0, x1: w, y1: h },
+    ];
+    const result = planRegionalLabels(cities, badges, { obstacles, topCities: 5, maxBadges: zoom < 4.2 ? 3 : 5, viewport: { w, h } });
+    const labelKey = [...result.cities].map(([k, v]) => `${k}=${v}`).join('|');
+    setCityLabels((prev) => (prev && prev.key === labelKey ? prev : { key: labelKey, map: result.cities }));
+    const badgeOffsets = result.badges.map((b) => ({ id: b.id, dx: Math.round(b.dx), dy: Math.round(b.dy) }));
+    const badgeKey = badgeOffsets.map((b) => `${b.id}:${b.dx},${b.dy}`).join('|');
+    setBadgePlan((prev) => (prev.map((b) => `${b.id}:${b.dx},${b.dy}`).join('|') === badgeKey ? prev : badgeOffsets));
+
     // Keep the official group reachable by Tab: its one tab stop must be on screen.
     const stop = officialTabRef.current;
     const stopEl = stop >= 0 ? officialRefs.current[stop] : null;
@@ -1327,12 +1321,15 @@ export default function MapView({
 
   // Starting a scenario frames the whole 24 h drift, so the plume grows in view.
   useEffect(() => {
-    if (!ready || !scenarioActive || !scenarioDrift || !selectedIncident) return;
-    const pts: LonLat[] = [[selectedIncident.lon, selectedIncident.lat], ...scenarioDrift.tracks.flatMap((t) => t.points.map((pt) => [pt.lon, pt.lat] as LonLat))];
-    fitPoints(pts);
+    const b = scenarioInfo?.bounds;
+    if (!ready || !scenarioActive || !b) return;
+    fitPoints([
+      [b[0], b[1]],
+      [b[2], b[3]],
+    ]);
     // Only when a scenario starts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, scenarioActive, scenarioDrift !== null]);
+  }, [ready, scenarioActive, scenarioInfo !== null]);
 
   /** NASA GIBS rasters under the deck overlays and the basemap labels; idempotent, safe before style load. */
   const syncGibsRef = useRef<() => void>(() => {});
@@ -1505,7 +1502,12 @@ export default function MapView({
       }
     });
 
-    map.on('load', () => {
+    // The overlays start as soon as the first style is in (not on 'load', which waits for every tile and
+    // font: up to 10 s on a slow link). Markers, haze and particles then draw while the basemap streams in.
+    let overlaysStarted = false;
+    const startOverlays = () => {
+      if (overlaysStarted) return;
+      overlaysStarted = true;
       const overlay = new MapboxOverlay({
         interleaved: false,
         layers: [...deckLayersRef.current, ...scenarioDeckRef.current],
@@ -1536,7 +1538,9 @@ export default function MapView({
         console.error('Haze layer could not start:', err);
       }
       setReady(true);
-    });
+    };
+    map.on('style.load', startOverlays);
+    map.on('load', startOverlays);
 
     map.on('move', positionOverlays);
     map.on('moveend', () => {
@@ -1609,6 +1613,10 @@ export default function MapView({
     tsunamiWarning,
     riverShown,
     levels,
+    timeISO,
+    airQuality,
+    fireBadges,
+    badgePlan,
     syncPadding,
     positionOverlays,
     layoutTags,
@@ -1964,6 +1972,27 @@ export default function MapView({
             </span>
           </button>
         ))}
+
+        {layers.fires &&
+          badgePlan.map(({ id, dx, dy }) => {
+            const b = fireBadges?.find((x) => x.id === id);
+            if (!b) return null;
+            return (
+              <button
+                key={`fb-${id}`}
+                type="button"
+                className="mv-fbadge"
+                data-lon={b.lon}
+                data-lat={b.lat}
+                style={{ translate: `${dx}px ${dy}px` }}
+                aria-label={`${b.text} in the last 24 hours (NASA FIRMS satellite detections, not confirmed fires)`}
+                onClick={() => onSelectFireBadge?.(b)}
+              >
+                <span className="mv-fbadge__dot" aria-hidden="true" />
+                {b.text}
+              </button>
+            );
+          })}
 
         {layers.watch &&
           placed.map(({ incident, name }) => {

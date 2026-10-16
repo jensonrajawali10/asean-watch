@@ -347,20 +347,23 @@ const DARK: MapPalette = {
     halo: rgba(DARK_HALO, 255),
     cluster: { bg: [14, 18, 22, 235], text: [243, 234, 216, 255], border: [255, 156, 52, 255] },
   },
-  // The fire agent's dark FRP grid (fireLayers.ts), additive: ember to white-hot.
+  // The fire agent's retuned dark FRP grid (FIRE_COLORS.dark in fireLayers.ts, after its render test),
+  // additive: ember to white-hot. Stops follow the real spread of daily FRP per 0.25° cell (snapshot
+  // 2026-10-15: median ~15 MW, 90th percentile ~250 MW, 97th ~850 MW, max ~20,000 MW), so most cells
+  // stay red to orange and dense areas no longer wash out to white.
   fireGrid: {
     ramp: [
-      [1, [120, 22, 12]],
-      [20, [196, 44, 18]],
-      [120, [240, 96, 28]],
-      [600, [255, 162, 52]],
-      [2500, [255, 214, 110]],
-      [8000, [255, 246, 204]],
+      [1, [110, 20, 12]],
+      [30, [186, 40, 18]],
+      [150, [232, 88, 28]],
+      [800, [255, 148, 44]],
+      [3000, [255, 204, 98]],
+      [12000, [255, 240, 192]],
     ],
-    glow24h: 200,
-    cell24h: 235,
-    glowOlder: 120,
-    cellOlder: 150,
+    glow24h: 150,
+    cell24h: 200,
+    glowOlder: 80,
+    cellOlder: 120,
     recency: [1, 0.62, 0.5, 0.42, 0.35, 0.29, 0.24],
     highlight: [255, 244, 214, 200],
     selected: [255, 236, 190, 255],

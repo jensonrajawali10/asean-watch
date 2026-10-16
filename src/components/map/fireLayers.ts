@@ -329,6 +329,9 @@ function badgeData(s: FireSnapshot, zoom: number, regionalZoom: number, max: num
  * The fire layers for the current snapshot, theme and zoom. Pure apart from a per-snapshot decode cache
  * and the lazily drawn glow sprite. Returns [] when hidden or when there is no snapshot.
  */
+/** Above this zoom the grid squares are replaced by glow plus dots. */
+export const CELLS_MAX_ZOOM = 6.8;
+
 export function buildFireLayers(opts: FireLayerOptions): Layer[] {
   const s = opts.snapshot;
   if (!s || opts.visible === false) return [];
@@ -336,7 +339,10 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
   const pal = FIRE_COLORS[theme];
   const parameters = pal.blend === 'additive' ? ADDITIVE : NORMAL;
   const zoom = Number.isFinite(opts.zoom) ? opts.zoom : 4;
-  const showCells = zoom >= (opts.cellsMinZoom ?? (theme === 'light' ? 0 : 4.5));
+  // Close in, a 0.25° square (about 28 km) reads as a solid block over towns and roads, so above
+  // CELLS_MAX_ZOOM the squares give way to the soft glow plus a small pickable dot per cell.
+  const showCells = zoom >= (opts.cellsMinZoom ?? (theme === 'light' ? 0 : 4.5)) && zoom < CELLS_MAX_ZOOM;
+  const showDots = zoom >= CELLS_MAX_ZOOM;
   const { recent, older } = cellsFor(s);
   const sprite = glowSprite();
   const layers: Layer[] = [];
@@ -351,6 +357,9 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
   const onHover = opts.onHover ? (info: PickingInfo) => opts.onHover?.(firePickFromInfo(info), info) : undefined;
 
   const glowFade = glowZoomFactor(zoom);
+  // Squares fade as the user zooms in, so a 0.25° cell never reads as a solid block over towns and roads:
+  // full strength at the regional view, about a third by zoom 8.
+  const cellFade = zoom <= 5.5 ? 1 : Math.max(0.32, 1 - (zoom - 5.5) * 0.28);
   const glowLayer = (id: string, data: FireCell[], alpha: (c: FireCell) => number, minPx: number, days: number) =>
     sprite
       ? new IconLayer<FireCell>({
@@ -393,26 +402,45 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
           // GridCellLayer places the cell by its south-west corner (offset [1, 1]).
           getPosition: (c) => [c.west, c.south],
           cellSize: cellDeg * M_PER_DEG,
-          coverage: 0.9,
-          getFillColor: (c) => fireColor(c.frp / days, theme, alpha(c)),
+          coverage: zoom >= 6.5 ? 0.8 : 0.9,
+          getFillColor: (c) => fireColor(c.frp / days, theme, alpha(c) * cellFade),
           parameters,
           pickable: true,
           autoHighlight: true,
           highlightColor: pal.highlight,
           onClick,
           onHover,
-          updateTriggers: { getFillColor: [theme, recentLayer] },
+          updateTriggers: { getFillColor: [theme, recentLayer, cellFade] },
         }),
     );
+
+  const dotLayer = (id: string, data: FireCell[], alpha: (c: FireCell) => number, days: number) =>
+    new ScatterplotLayer<FireCell>({
+      id,
+      data,
+      getPosition: (c) => [c.lon, c.lat],
+      radiusUnits: 'pixels',
+      getRadius: (c) => Math.min(7, 2.5 + Math.log10(1 + c.frp / days)),
+      getFillColor: (c) => fireColor(c.frp / days, theme, alpha(c)),
+      parameters,
+      pickable: true,
+      autoHighlight: true,
+      highlightColor: pal.highlight,
+      onClick,
+      onHover,
+      updateTriggers: { getFillColor: [theme] },
+    });
 
   if (opts.window !== '24h' && older.length) {
     const fade = (c: FireCell) => pal.recency[Math.min(c.latestPeriod, pal.recency.length - 1)];
     layers.push(glowLayer('fires-glow-older', older, (c) => pal.glowOlder * glowFade * fade(c), 3, OLDER_DAYS));
     if (showCells) layers.push(...cellLayers('fires-cells-older', older, (c) => pal.cellOlder * fade(c), false, OLDER_DAYS));
+    if (showDots) layers.push(dotLayer('fires-cells-older-dots', older, (c) => pal.cellOlder * fade(c), OLDER_DAYS));
   }
   if (recent.length) {
     layers.push(glowLayer('fires-glow-24h', recent, () => pal.glow24h * glowFade, 6, 1));
     if (showCells) layers.push(...cellLayers('fires-cells-24h', recent, () => pal.cell24h, true, 1));
+    if (showDots) layers.push(dotLayer('fires-cells-24h-dots', recent, () => pal.cell24h, 1));
   }
 
   const selected = opts.selectedClusterId ? [...s.clusters24h, ...s.clusters7d].find((c) => c.id === opts.selectedClusterId) : undefined;

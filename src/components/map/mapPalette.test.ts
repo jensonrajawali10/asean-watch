@@ -82,6 +82,11 @@ describe('dark palette keeps the colours the map drew before', () => {
     expect(dark.quake.shallow).toEqual([242, 176, 64]);
     expect(dark.ash.lines['700']).toEqual([247, 239, 222]);
   });
+
+  it('fire grid matches the fire agent’s retuned dark values (fireLayers FIRE_COLORS.dark)', () => {
+    expect(dark.fireGrid.ramp.map(([v]) => v)).toEqual([1, 30, 150, 800, 3000, 12000]);
+    expect(dark.fireGrid).toMatchObject({ glow24h: 150, cell24h: 200, glowOlder: 80, cellOlder: 120, blend: 'additive' });
+  });
 });
 
 describe('light palette (designed for a light basemap, not inverted)', () => {

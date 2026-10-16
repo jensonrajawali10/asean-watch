@@ -168,12 +168,12 @@ export default function VolcanoCard({
             <p className="vcard-scn__dir">{scenario.summary.directionShort}.</p>
             {scenario.summary.nearest.length > 0 ? (
               <ol className="vcard-places" aria-label="First listed towns the modelled ash would reach">
-                {scenario.summary.nearest.map((a) => (
-                  <li key={a.place.id}>
+                {scenario.summary.nearest.slice(0, 2).map((a) => (
+                  <li key={a.place.id} title={`Ash at ${levelWords(a.level)}`}>
                     <span className="vcard-places__name">{a.place.name}</span>
-                    <span className="vcard-places__when">{hoursShort(a.hours)}</span>
-                    <span className="vcard-places__note">
-                      ash at {levelWords(a.level)} · {localTimeLabel(a.time, scenarioPlaceRef(a.place), { day: a.hours >= 12, utc: false })}
+                    <span className="vcard-places__when">
+                      {hoursShort(a.hours)}
+                      <span className="vcard-places__note"> · {localTimeLabel(a.time, scenarioPlaceRef(a.place), { day: a.hours >= 12, utc: false })}</span>
                     </span>
                   </li>
                 ))}
@@ -184,8 +184,8 @@ export default function VolcanoCard({
               </p>
             )}
             <p className="vcard-scn__assume">
-              Assumes an eruption from {localTimeLabel(scenario.startISO, volcanoRef, { day: false })} lasting {scenario.emissionHours} h, with
-              ash at about 3, 5.5 and 9 km carried by the forecast winds. Not a prediction, a dispersion model or a VAAC advisory.
+              Assumes an eruption from {localTimeLabel(scenario.startISO, volcanoRef, { day: false })} lasting {scenario.emissionHours} h. Not a prediction, a
+              dispersion model or a VAAC advisory.
             </p>
           </>
         ) : (
@@ -193,12 +193,9 @@ export default function VolcanoCard({
         )}
       </section>
       <p className="vcard-line">
-        Rings on the map show distance only; the agency&apos;s hazard map is the authority:{' '}
-        <ExternalLink href={links.hazardMap.url}>{links.hazardMap.label}</ExternalLink>
-        {links.hazardMap.note ? <span className="vcard-line__note"> ({links.hazardMap.note.toLowerCase()})</span> : null}.
-      </p>
-      <p className="vcard-line">
-        Ash in the air: <ExternalLink href={VAAC_DARWIN.url}>VAAC Darwin advisories</ExternalLink>.
+        Rings show distance only; the agency&apos;s hazard map is the authority:{' '}
+        <ExternalLink href={links.hazardMap.url}>{links.hazardMap.label}</ExternalLink>. Ash in the air:{' '}
+        <ExternalLink href={VAAC_DARWIN.url}>VAAC Darwin advisories</ExternalLink>.
       </p>
     </MapCard>
   );

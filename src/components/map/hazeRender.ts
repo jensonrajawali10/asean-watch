@@ -29,10 +29,25 @@ export interface HazeRaster {
   bounds: [number, number, number, number];
 }
 
+/** Smooth deterministic wobble in 0..1 along an edge coordinate (degrees): a ragged, smoke-like edge. */
+function edgeWobble(t: number): number {
+  return 0.5 + 0.25 * Math.sin(t * 1.7 + 0.3) + 0.15 * Math.sin(t * 4.1 + 1.9) + 0.1 * Math.sin(t * 9.3 + 4.2);
+}
+
+/** Smootherstep of d / w, clamped to 0..1 (zero slope at both ends, so no visible fade boundary). */
+function edgeFade(d: number, w: number): number {
+  if (!(w > 0)) return 1;
+  const x = Math.max(0, Math.min(1, d / w));
+  return x * x * x * (x * (x * 6 - 15) + 10);
+}
+
 /**
  * Rasterise a PM2.5 slice (row-major on ascending lats/lons) into RGBA. Rows are evenly spaced in
- * Web Mercator y so a BitmapLayer quad is exact. The outer `featherDeg` fades to transparent so the
- * grid box never shows a hard edge.
+ * Web Mercator y so a BitmapLayer quad is exact. The outer cells fade to transparent inside the grid
+ * (no haze is drawn beyond the model's data), so the grid box never shows a hard edge: each side fades
+ * over `featherDeg` (0.6–1.4× along the edge, a fixed wobble, so the edge reads as smoke rather than a
+ * ruler line), and the four side fades multiply, which rounds the corners. Deterministic: the same edge
+ * every hour, so the scrubber's cross-fade never flickers.
  */
 export function rasterisePm25(
   slice: ArrayLike<number>,
@@ -42,7 +57,7 @@ export function rasterisePm25(
   opts: { pxPerDeg?: number; featherDeg?: number } = {},
 ): HazeRaster {
   const pxPerDeg = opts.pxPerDeg ?? 10;
-  const feather = opts.featherDeg ?? 1.5;
+  const feather = opts.featherDeg ?? 2;
   const west = lons[0];
   const east = lons[lons.length - 1];
   const south = lats[0];
@@ -54,18 +69,25 @@ export function rasterisePm25(
   const yS = mercY(south);
   for (let r = 0; r < height; r += 1) {
     const lat = invMercY(yN + ((r + 0.5) / height) * (yS - yN));
-    const edgeLat = Math.min(lat - south, north - lat);
+    // West and east fades vary along latitude; their widths are the same for the whole row.
+    const wWest = feather * (0.6 + 0.8 * edgeWobble(lat + 11));
+    const wEast = feather * (0.6 + 0.8 * edgeWobble(lat + 23));
     for (let c = 0; c < width; c += 1) {
       const lon = west + ((c + 0.5) / width) * (east - west);
       const v = sampleRegular(slice, lats, lons, lat, lon);
       const [cr, cg, cb, ca] = smokeRgba(v, theme);
-      const edge = Math.min(edgeLat, lon - west, east - lon);
-      const fade = feather > 0 ? Math.max(0, Math.min(1, edge / feather)) : 1;
+      const fade =
+        feather > 0
+          ? edgeFade(lat - south, feather * (0.6 + 0.8 * edgeWobble(lon))) *
+            edgeFade(north - lat, feather * (0.6 + 0.8 * edgeWobble(lon + 37))) *
+            edgeFade(lon - west, wWest) *
+            edgeFade(east - lon, wEast)
+          : 1;
       const o = (r * width + c) * 4;
       data[o] = cr;
       data[o + 1] = cg;
       data[o + 2] = cb;
-      data[o + 3] = Math.round(ca * fade * fade * (3 - 2 * fade)); // smoothstep edge fade
+      data[o + 3] = Math.round(ca * fade);
     }
   }
   return { width, height, data, bounds: [west, south, east, north] };
