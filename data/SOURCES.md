@@ -132,3 +132,17 @@ The same texts are stored per source in `data/real/meta.json` (`attribution`, `l
 | `data/idn-adm2-centroids.json` | 519 Indonesian regency and city centre points (area-weighted centroid of the largest polygon), used to place BMKG InaTEWS `<wzarea>` districts at approximate positions (`src/lib/tsunamiAreas.ts`). | geoBoundaries gbOpen IDN ADM2 (2020), https://www.geoboundaries.org/api/current/gbOpen/IDN/ADM2/, from Badan Pusat Statistik (BPS), World Food Programme and OCHA ROAP. Licence: Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO). Attribution: "District centres derived from geoBoundaries (Runfola et al. 2020, www.geoboundaries.org), IDN ADM2 from BPS, WFP, OCHA ROAP; CC BY 3.0 IGO." | `npm run build:idn-centroids` |
 
 Tsunami warning areas and observed heights are BMKG InaTEWS (`last30tsunamievent.xml`), relayed verbatim; see `data/warnings-snapshot.json`.
+
+## Fires, eruption scenario and analyst workspace (added 2026-10-15)
+
+| File | What | Source and licence | Refresh |
+|---|---|---|---|
+| `data/fires-snapshot.json` | MEASURED. Whole-region NASA FIRMS active-fire detections over 7 days, kept only when confident (VIIRS nominal or high; MODIS confidence of 50 or more). Each UTC day is aggregated into a 0.25° grid of detection count, summed and maximum fire radiative power (MW) and a sensor mask. The file also holds country and province rollups, the top clusters for 24 h and 7 days, and a daily history that each refresh carries forward, so week-over-week needs a daily refresh. Periods start at the latest time every sensor has data, not at the retrieval time. FRP is a proxy for fire intensity, not emissions; for emissions see Copernicus CAMS Fire Emissions Watch (GFAS). | The same four FIRMS 7-day South East Asia CSVs as `data/real/firms.json`, with the same FIRMS acknowledgement (see Attribution). | `npm run refresh:fires` (part of `refresh:all`) |
+| `data/fire-admin-lookup.json` | The province or state of each district centre, plus first-level unit centres, used to name fire clusters and rollups. Only `scripts/refresh-fires.mjs` reads it; it is not bundled. Names are approximate, taken from the nearest district or province centre; the 2022 Papua split is applied by regency name. | geoBoundaries gbOpen: IDN ADM2 (CC BY 3.0 IGO); IDN ADM1 (2017; OpenStreetMap, Wambacher; **ODbL 1.0, © OpenStreetMap contributors**); MYS ADM2 and ADM1 (CC BY 3.0); and ADM1 for the other ASEAN members and Papua New Guinea. Each unit's licence is stored in the file's `sources`. | `npm run build:fire-admin` |
+| `data/ash-wind-snapshot.json` | Now 96 h (yesterday plus three days), so the "If it erupted now" scenario (`src/lib/eruptionScenario.ts`) can run 48 h from the scrubber's "now". It is a MODELLED SCENARIO: hourly puffs at about 3, 5.5 and 9 km carried by the summit winds, with an illustrative spread rate (Heffter 1965). It is not a dispersion model and not a VAAC advisory. Town coordinates come from GeoNames, with ids in the code. | Open-Meteo, CC BY 4.0 | `npm run refresh:ashwind` |
+
+Linked, not relayed:
+- **ASEAN Specialised Meteorological Centre (ASMC).** Its regional haze alert levels and hotspot maps are linked only. It has no keyless machine-readable feed, and its terms require written permission from the Meteorological Service Singapore to republish.
+- **NUS CRISP satellite imagery.** Linked only.
+- **VAAC Darwin and VAAC Tokyo ash advisories.** Linked only; neither has a simple public feed.
+- **MAGMA hazard maps (KRB).** Linked only.

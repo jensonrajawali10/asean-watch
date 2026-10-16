@@ -1,8 +1,40 @@
 # ASEAN Watch
 
-ASEAN Watch is an Asia-Pacific environmental surveillance prototype that uses real public data only. It does two separate jobs on one map. First, it watches five places in Indonesia (the Merapi, Semeru, Anak Krakatau and Sinabung volcanoes, and the Riau peatlands) using NASA FIRMS satellite hotspots and USGS and BMKG earthquake reports. It replays the last seven days one UTC day at a time and shows, record by record, why each watch area is in its current workflow state. Second, it relays official tsunami, earthquake, volcano and flood warnings word for word from the agencies with authority, so people know a potential evacuation may be coming and whose instructions to follow. It never issues a warning of its own. Everything on screen can be exported as a plain-text brief.
+ASEAN Watch is an Asia-Pacific environmental surveillance map built on real public data only. It answers three questions at a glance:
+- where the haze is, and where it is coming from;
+- where the smoke goes over the next 48 hours;
+- what a volcano eruption would mean for the region and its winds.
 
-> **Not an official warning service.** This is a hackathon prototype. It does not issue warnings, alert levels or evacuation advice, and it does not predict eruptions, fires or floods. Official warnings are copied verbatim from the issuing agency with a link to it: **follow that agency's instructions**. If a feed is unavailable or lists nothing, that is **never an all-clear**; check the issuer directly. Satellite and earthquake data come from a snapshot that can be hours or days old, and the header shows its time. The workflow states (Monitoring, Check observation, Review needed) come from illustrative rules and are not official alert levels.
+It also relays official tsunami, earthquake, volcano and flood warnings word for word from the agencies with authority, so people know whose instructions to follow. It never issues a warning of its own.
+
+The app has two modes on one map:
+- **Map**, for anyone. The full-screen map shows:
+  - modelled PM2.5 haze as a glowing cloud;
+  - city circles sized and coloured by PM2.5;
+  - wind particles at the smoke-transport level;
+  - NASA FIRMS fires as a fire-power heat glow;
+  - volcanoes ringed in their official alert level;
+  - official warning pins.
+
+  One scrubber plays −24 h to +48 h. Clicking a city, fire, volcano or warning opens a small card: three facts and one plain sentence. A volcano card offers **Play ash scenario**, which animates where ash would drift on the forecast winds if it erupted now. This is a modelled scenario, not a prediction.
+- **Analyst workspace**, opened from the side taskbar. It is dense on purpose, for people writing reports:
+  - a situation report;
+  - a city-by-city haze table;
+  - fires by country, province and cluster, in the style of Copernicus Fire Emissions Watch;
+  - the seven-day volcano evidence replay with its watch rules;
+  - the full official-warnings list;
+  - water and tsunami data;
+  - a report composer (Markdown or text);
+  - sources and methods;
+  - every map layer, each with a plain explanation.
+
+  Every figure cites its source and time.
+
+> **Not an official warning service.** This is a prototype.
+> - **Official warnings** are copied verbatim from the issuing agency with a link to it: **follow that agency's instructions**. If a feed is unavailable or lists nothing, that is **never an all-clear**; check the issuer directly.
+> - **Model output** (CAMS haze, winds, the ash scenario) is labelled MODELLED. Satellite fire detections are labelled MEASURED.
+> - **Snapshots** can be hours old; each shows its time.
+> - **Workflow states** (Monitoring, Check observation, Review needed) come from illustrative rules. They are not official alert levels.
 
 **Live site:** https://asean-watch.vercel.app
 
@@ -10,7 +42,7 @@ ASEAN Watch is an Asia-Pacific environmental surveillance prototype that uses re
 
 [![ASEAN Watch demo video](docs/media/demo-poster.png)](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4)
 
-[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4) (1920×1080, 23 MB) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
+[Watch or download the MP4](https://github.com/jensonrajawali10/asean-watch/releases/download/demo-2026-10-13/asean-watch-demo-30s.mp4) · [release notes](https://github.com/jensonrajawali10/asean-watch/releases/tag/demo-2026-10-13)
 
 ## Quick start
 
@@ -24,7 +56,7 @@ npm run dev              # development server; Vite prints the local URL
 Refresh the data (needs internet):
 
 ```bash
-npm run refresh:all      # FIRMS hotspots, USGS and BMKG quakes, official-warning and NEA snapshots
+npm run refresh:all      # every snapshot: FIRMS fires, quakes, warnings, NEA, winds, CAMS haze, tides, rivers
 ```
 
 Build for presenting or offline use:
@@ -41,7 +73,8 @@ Offline, the app runs entirely from the bundled snapshots. When it is online, th
 | `npm run refresh:data` | Downloads the four FIRMS 7-day South East Asia CSVs (about 26 MB in total), the USGS query and the three BMKG lists. It keeps rows near the watch areas and writes `data/real/*.json`. All or nothing: if any source fails, nothing is written. |
 | `npm run refresh:warnings` | Captures the official-warning feeds to `data/warnings-snapshot.json`. If a feed fails, its previous entry is kept. |
 | `npm run refresh:nea` | Captures NEA wind, PSI and PM2.5 to `data/nea-snapshot.json`. All or nothing. |
-| `npm run refresh:all` | Runs the three scripts above in order. It stops at the first one that fails, so run the remaining ones yourself. |
+| `npm run refresh:fires` | Downloads the same four FIRMS CSVs for the whole region and writes `data/fires-snapshot.json`: the 0.25° fire-power grid, country and province rollups, and the top clusters. Run it daily so week-over-week comparisons build up. |
+| `npm run refresh:all` | Runs every refresh script in order: data, warnings, NEA, winds, air quality, fires, ash winds, quakes, sea level, PTWC and river flow. It stops at the first one that fails, so run the remaining ones yourself. Open-Meteo allows a limited number of calls per hour; if it answers HTTP 429, wait and retry. |
 | `npm test` | Unit tests for validation, watch rules, review states, warnings parsing, NEA, and the brief |
 | `npm run typecheck` | TypeScript project check |
 | `npm run build:region` | Regenerates `data/region.geojson` from Natural Earth via the installed `world-atlas` package |
@@ -50,13 +83,16 @@ The MAGMA Indonesia volcano levels are bundled records copied on 13 October 2026
 
 ## Demo flow
 
-1. **Overview.** The map shows the five watch areas with their workflow states, plus the official-warnings panel for the Asia-Pacific region. The header gives the snapshot time.
-2. **Select Merapi and step through the week.** Next step reveals one real UTC day at a time, and the evidence accumulates. Play runs the remaining days; Reset returns to day 1.
-3. **Why this state?** Shows the stated watch rules and why each record was or was not counted. The record inspector shows a record's source, observation time, ingestion time and quality note.
-4. **Official and context layers.** The official MAGMA level for Merapi sits beside our state, in a separate style. Riau shows NEA Singapore wind and haze as context. The official-warnings panel relays issuer messages verbatim, for example a ThaiWater gauge on the Chao Phraya at "overflowing bank".
-5. **Brief.** Generate brief, then Download .txt saves the brief for the current watch area and day.
+1. **Map.** The headline gives the worst haze now and the direction the low-level wind is carrying smoke. Press play: haze, particles and city circles move through the next 48 hours.
+2. **Click a city** (for example Singapore or Palangka Raya). The card gives modelled PM2.5, its multiple of the WHO 24-hour guideline, the 48 h peak, and the national agency to check.
+3. **Click Merapi**, then **Play ash scenario**. A modelled plume grows along the forecast summit winds, and the card lists the first towns it would reach, with times. It is labelled MODELLED SCENARIO and links the agency hazard map and VAAC Darwin.
+4. **Open the workspace** from the taskbar:
+   - **Fires:** hotspots and fire power by country and province, and the top clusters, with "Fly to";
+   - **Volcanoes:** the seven-day evidence replay, "Why this state?" and the scenario table per height;
+   - **Warnings:** the full verbatim official list.
+5. **Report.** Choose sections and download Markdown or text. Every figure carries its citation.
 
-The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
+The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). The UX rules are in [docs/UX_V3.md](docs/UX_V3.md).
 
 ## What the app shows
 
@@ -70,14 +106,20 @@ The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 | Volcano levels | PVMBG via MAGMA Indonesia (Merapi, Semeru, Anak Krakatau, Sinabung at Level III) | HISTORICAL, recorded 2026-10-13 06:52 UTC | Relayed verbatim beside the watch, linked to MAGMA |
 | Impact estimates | GDACS | LIVE or HISTORICAL | Aggregator; labelled as an estimate, not a warning |
 | Wind and haze | NEA Singapore via data.gov.sg | LIVE or HISTORICAL SNAPSHOT | Context only; shown for Riau (within 600 km of Singapore) |
-| Volcanic gas, deformation, ash | none open and keyless | Not shown | Each volcano links to MOUNTS instead |
-| Modelled weather or air quality | none | Not used | |
+| Fire power grid, rollups, clusters | NASA FIRMS whole region (VIIRS and MODIS), 0.25° grid | MEASURED, snapshot | Map heat glow and badges; workspace Fires section. FRP is a proxy for intensity, not emissions |
+| Haze (PM2.5) | CAMS global forecast via Open-Meteo, about 45 km | MODELLED | Haze cloud, city circles, scrubber, headline; context, never evidence |
+| Wind | Open-Meteo 10 m and 925 hPa | MODELLED | Particles, smoke paths toward Singapore (illustrative) |
+| Ash scenario | Open-Meteo 700, 500 and 300 hPa summit winds | MODELLED SCENARIO | "If it erupted now": hourly puffs along the forecast winds; not a prediction, a dispersion model or a VAAC advisory |
+| Satellite imagery | NASA GIBS: Himawari-9 infrared, VIIRS true colour | Imagery | Context layers |
+| Tides, rivers, quakes, PTWC | IOC Sea Level, GloFAS via Open-Meteo, USGS, BMKG, PTWC | LIVE, MODELLED or OFFICIAL as labelled | Water and tsunami section and map layers |
+| Volcanic gas and deformation | none open and keyless | Not shown | Each volcano links to MOUNTS instead |
+| Regional haze alert levels | ASMC | Linked only | No usable feed; its terms forbid republishing |
 
-**Current result.** In the snapshot retrieved 2026-10-13 07:26 UTC (7 to 13 October), every watch area reads **Check observation** on every day, from thermal evidence alone (records accumulate across the week, so an early hotspot keeps counting). No USGS or BMKG earthquake fell within range of any watch area, and there is no open SO2 feed, so no second evidence category exists and no watch area reaches Review needed. Nothing is staged. A refresh can change this result.
+**The watch-area replay** (workspace Volcanoes section) states its own result for the bundled snapshot. A refresh can change it; nothing is staged.
 
 ## Architecture
 
-There is no database. The site is static; one optional Vercel function (`api/ai-brief.ts`) calls the Claude API for the grounded summary, with the key kept server-side. Data flow:
+There is no database. The site is static, with two Vercel functions. `api/ai-brief.ts` calls the Claude API for the grounded summary, keeping the key server-side. `api/ptwc.ts` proxies PTWC's feed. The UI is a full-screen MapLibre and deck.gl map (`src/components/map/`), a taskbar and workspace drawer (`src/components/shell/`) and the workspace sections (`src/components/analyst/`). Data flow:
 
 ```
 refresh scripts → data/real/*.json, data/watches.json (snapshot, bundled at build)

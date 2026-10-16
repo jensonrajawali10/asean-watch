@@ -3,6 +3,7 @@ import type { OfficialWarning, WarningFeedStatus } from '../types';
 import { loadAqSnapshot } from './airQuality';
 import { loadAshWindSnapshot } from './ashDrift';
 import { loadFixtures } from './fixtures';
+import realMeta from '../../data/real/meta.json';
 import { loadFloodModelSnapshot } from './floodModel';
 import { loadNeaSnapshot } from './nea';
 import { loadPtwcSnapshot } from './ptwc';
@@ -221,6 +222,6 @@ describe('buildSourceCatalogue', () => {
   it('lists each FIRMS sensor file with its own times', () => {
     const firms = cat.filter((e) => e.id.startsWith('firms:'));
     expect(firms.length).toBe(4);
-    expect(firms.every((e) => e.retrievedAt === '2026-10-13T07:26:44Z' && e.modeNote?.startsWith('File last modified'))).toBe(true);
+    expect(firms.every((e) => e.retrievedAt === realMeta.retrievedAt && e.modeNote?.startsWith('File last modified'))).toBe(true);
   });
 });

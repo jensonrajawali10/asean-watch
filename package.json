@@ -15,7 +15,7 @@
     "refresh:data": "node scripts/refresh-data.mjs",
     "refresh:warnings": "node scripts/capture-warnings-snapshot.mjs",
     "refresh:nea": "node scripts/capture-nea-snapshot.mjs",
-    "refresh:all": "npm run refresh:data && npm run refresh:warnings && npm run refresh:nea && npm run refresh:wind && npm run refresh:wind925 && npm run refresh:aq && npm run refresh:fires",
+    "refresh:all": "npm run refresh:data && npm run refresh:warnings && npm run refresh:nea && npm run refresh:wind && npm run refresh:wind925 && npm run refresh:aq && npm run refresh:fires && npm run refresh:ashwind && npm run refresh:quakes && npm run refresh:sealevel && npm run refresh:ptwc && npm run refresh:flood",
     "refresh:fires": "node scripts/refresh-fires.mjs",
     "build:fire-admin": "node scripts/build-fire-admin.mjs",
     "refresh:wind": "node scripts/capture-wind-snapshot.mjs",
