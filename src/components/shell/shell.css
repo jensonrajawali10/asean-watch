@@ -434,10 +434,10 @@
   line-height: 1.2;
 }
 
-.ws-drawer__title:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 4px;
-  border-radius: 2px;
+/* The heading takes programmatic focus when the drawer opens (so screen readers announce the section). It is
+   not interactive, so it draws no focus ring; the next Tab lands on the first real control. */
+.ws-drawer__title:focus {
+  outline: none;
 }
 
 .ws-drawer__subtitle {
