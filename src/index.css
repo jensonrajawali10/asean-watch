@@ -342,3 +342,10 @@ code {
     scroll-behavior: auto !important;
   }
 }
+
+/* While the map camera moves (MapView sets the attribute on movestart, clears it on moveend), floating panels
+   skip their backdrop blur: re-blurring an animating map every frame is the costliest part of a zoom on most
+   GPUs. The panels are about 86% opaque, so the change is barely visible and returns as soon as the map stops. */
+:root[data-map-moving] {
+  --panel-filter: none;
+}

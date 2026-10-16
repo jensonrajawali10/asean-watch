@@ -1157,18 +1157,24 @@ export default function MapView({
     const markers = Array.from(root.querySelectorAll<HTMLElement>('.mv-marker')).filter((el) => el.dataset.off !== '1');
     markers.sort((a, b) => Number(b.classList.contains('is-selected')) - Number(a.classList.contains('is-selected')));
     const pts = markers.map((el) => map.project([num(el.dataset.lon), num(el.dataset.lat)]));
+    // Every layout read happens before any write below. A tag's size does not depend on its side
+    // (max-content, nowrap), so measuring first costs one layout instead of one per marker.
+    const tagSizes = markers.map((el) => {
+      const tag = el.querySelector<HTMLElement>('.mv-tag');
+      return tag ? { tw: tag.offsetWidth, th: tag.offsetHeight } : null;
+    });
     const occupied: (Rect & { weight?: number })[] = pts.map((pt) => ({ x: pt.x - 18, y: pt.y - 18, w: 36, h: 36 }));
     const wmarkers = Array.from(root.querySelectorAll<HTMLElement>('.mv-wmarker')).filter((el) => el.dataset.off !== '1');
     for (const el of wmarkers) {
       const pt = map.project([num(el.dataset.lon), num(el.dataset.lat)]);
       occupied.push({ x: pt.x - 10, y: pt.y - 10, w: 20, h: 20 });
-      el.dataset.side = `${pt.x - frame.x > frame.w * 0.62 ? 'l' : 'r'}${pt.y > h * 0.62 ? 'u' : 'd'}`;
+      const side = `${pt.x - frame.x > frame.w * 0.62 ? 'l' : 'r'}${pt.y > h * 0.62 ? 'u' : 'd'}`;
+      if (el.dataset.side !== side) el.dataset.side = side;
     }
     markers.forEach((el, i) => {
-      const tag = el.querySelector<HTMLElement>('.mv-tag');
-      if (!tag) return;
-      const tw = tag.offsetWidth;
-      const th = tag.offsetHeight;
+      const size = tagSizes[i];
+      if (!size) return;
+      const { tw, th } = size;
       const gap = 20;
       let best: { pos: TagPos; rect: Rect; score: number } | null = null;
       for (const pos of TAG_POSITIONS) {
@@ -1437,7 +1443,6 @@ export default function MapView({
     }
     mapRef.current = map;
     if (import.meta.env.DEV) (window as unknown as { __aseanMap?: MapLibreMap }).__aseanMap = map;
-    map.scrollZoom.setWheelZoomRate(1 / 300);
     map.addControl(new NavigationControl({ visualizePitch: true }), 'top-right');
     map.addControl(new AttributionControl({ compact: true, customAttribution: CREDITS }), 'bottom-right');
 
@@ -1578,10 +1583,41 @@ export default function MapView({
 
     map.on('move', positionOverlays);
     map.on('movestart', (e) => {
+      // While the camera moves, the panels drop their backdrop blur (index.css): re-blurring an animating
+      // map every frame is the costliest part of a zoom on most GPUs.
+      document.documentElement.setAttribute('data-map-moving', '');
       // A user pan or zoom: the tide and river chart popovers are pinned to a pixel, so close them.
       if ((e as { originalEvent?: unknown }).originalEvent) setChart(null);
     });
+    // The marker overlay sits beside MapLibre's canvas container, so a wheel or trackpad pinch over a pin,
+    // a label, a gauge or a fire badge never reached the map: zooming stalled wherever the map is busy.
+    // Hand those events to the canvas, where MapLibre's scroll-zoom handler picks them up.
+    const overlayEl = overlayRef.current;
+    const forwardWheel = (e: WheelEvent) => {
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      map.getCanvas().dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaX: e.deltaX,
+          deltaY: e.deltaY,
+          deltaZ: e.deltaZ,
+          deltaMode: e.deltaMode,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    };
+    overlayEl?.addEventListener('wheel', forwardWheel, { passive: false });
     map.on('moveend', () => {
+      document.documentElement.removeAttribute('data-map-moving');
       positionOverlays();
       layoutTags();
       const z = map.getZoom();
@@ -1594,6 +1630,8 @@ export default function MapView({
     return () => {
       clearTimer();
       window.removeEventListener('online', onOnline);
+      overlayEl?.removeEventListener('wheel', forwardWheel);
+      document.documentElement.removeAttribute('data-map-moving');
       retryStyleRef.current = null;
       applyStyleRef.current = null;
       styleReadyRef.current = false;
