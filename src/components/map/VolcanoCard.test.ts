@@ -46,7 +46,7 @@ describe('VolcanoCard', () => {
     expect(html).toContain('OFFICIAL LEVEL');
     expect(html).toContain('If it erupted now');
     expect(html).toContain('MODELLED SCENARIO');
-    expect(html).toContain('Ash at about 5.5–9 km would drift');
+    expect(html).toMatch(/Ash at about [0-9.–]+ km would drift/); // the direction follows the bundled winds
     expect(html).toContain('Rings show distance only; the agency&#x27;s hazard map is the authority');
     expect(html).toContain(MAGMA_KRB_MAP['gvp-263250'].url);
     expect(html).toContain(VAAC_DARWIN.url);

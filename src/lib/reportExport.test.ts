@@ -184,7 +184,10 @@ describe('toPlainText', () => {
 
 describe('reportFilename', () => {
   it('names the file after the model hour', () => {
-    expect(reportFilename(report, 'md')).toBe('asean-watch-situation_20261014-0600.md');
+    // The bundled air-quality snapshot sets the model hour, so derive the expected stamp from it.
+    const stamp = (report.anchorISO ?? '').replace(/[-:]/g, '').replace('T', '-').slice(0, 13);
+    expect(stamp).toMatch(/^\d{8}-\d{4}$/);
+    expect(reportFilename(report, 'md')).toBe(`asean-watch-situation_${stamp}.md`);
     expect(reportFilename({ anchorISO: null }, 'txt')).toBe('asean-watch-situation_undated.txt');
     expect(reportFilename({ anchorISO: null }, 'txt', { generatedAt: '2026-10-15T08:30:00Z' })).toBe('asean-watch-situation_20261015-0830.txt');
   });
