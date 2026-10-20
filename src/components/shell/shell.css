@@ -869,3 +869,47 @@
     display: none;
   }
 }
+
+/* Rail hints: one plain line beside each icon on hover and keyboard focus (desktop rail only). */
+.taskbar__hint {
+  display: none;
+}
+
+@media (min-width: 768px) and (hover: hover), (min-width: 768px) and (pointer: fine) {
+  .taskbar__btn {
+    position: relative;
+  }
+
+  .taskbar__hint {
+    position: absolute;
+    z-index: 60;
+    top: 50%;
+    left: calc(100% + 8px);
+    width: max-content;
+    max-width: 240px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .taskbar__hint strong {
+    display: block;
+    color: var(--text);
+    font-weight: 650;
+  }
+
+  .taskbar__btn:hover .taskbar__hint,
+  .taskbar__btn:focus-visible .taskbar__hint {
+    display: block;
+  }
+}

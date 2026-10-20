@@ -4,15 +4,16 @@
 //   #incident=watch-merapi         legacy link: selects Merapi (map mode)
 
 export const SECTIONS = [
-  { id: 'situation', label: 'Situation', title: 'Situation', hint: 'Situation report and key figures' },
-  { id: 'haze', label: 'Haze', title: 'Haze & air', hint: 'City table, measured Singapore readings, smoke transport' },
-  { id: 'fires', label: 'Fires', title: 'Fires', hint: 'Hotspots and fire radiative power by region' },
-  { id: 'volcanoes', label: 'Volcanoes', title: 'Volcanoes', hint: 'Watch areas, evidence replay, official levels' },
-  { id: 'warnings', label: 'Warnings', title: 'Official warnings', hint: 'Every official message, verbatim, with feed status' },
-  { id: 'water', label: 'Water', title: 'Water & tsunami', hint: 'Tide gauges, river flow, PTWC, BMKG tsunami areas, flood gauges' },
-  { id: 'report', label: 'Report', title: 'Report', hint: 'Compose and download a brief' },
-  { id: 'sources', label: 'Sources', title: 'Sources & methods', hint: 'Every feed, licence, retrieval time and limitation' },
-  { id: 'layers', label: 'Layers', title: 'Layers', hint: 'Every map layer, with an explanation' },
+  // `hint`: one plain line for first-time visitors (shown beside the rail icon on hover and focus).
+  { id: 'situation', label: 'Situation', title: 'Situation', hint: 'A short summary of what is happening now' },
+  { id: 'haze', label: 'Haze', title: 'Haze & air', hint: 'Smoke levels by city, and where the smoke is heading' },
+  { id: 'fires', label: 'Fires', title: 'Fires', hint: 'Fires seen by satellites, by country and province' },
+  { id: 'volcanoes', label: 'Volcanoes', title: 'Volcanoes', hint: 'Watched volcanoes and their official alert levels' },
+  { id: 'warnings', label: 'Warnings', title: 'Official warnings', hint: 'Every alert from national agencies, word for word' },
+  { id: 'water', label: 'Water', title: 'Water & tsunami', hint: 'Tsunami messages, flood gauges, tides and river flow' },
+  { id: 'report', label: 'Report', title: 'Report', hint: 'Make and download a written brief' },
+  { id: 'sources', label: 'Sources', title: 'Sources & methods', hint: 'Where every number comes from, and its limits' },
+  { id: 'layers', label: 'Layers', title: 'Layers', hint: 'Turn map layers on and off, with what each shows' },
 ] as const;
 
 export type SectionId = (typeof SECTIONS)[number]['id'];
