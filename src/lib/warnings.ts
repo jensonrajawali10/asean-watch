@@ -45,6 +45,10 @@ export interface GaugeReading {
   datum: string;
   /** Issuer's own situation or status text, verbatim; null when none. */
   situation: string | null;
+  /** Issuer's numeric situation level (ThaiWater situation_level 1-5); absent or null when none. */
+  situationLevel?: number | null;
+  /** Our plain-English gloss of the level, from a fixed reviewed table (never the issuer's words); null when none. */
+  situationGloss?: string | null;
   /** Issuer's thresholds in the same unit and datum as `value`. */
   thresholds?: Record<string, number> | null;
   sourceUrl: string;
@@ -917,6 +921,7 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
   }
   const gauges: GaugeReading[] = [];
   const warnings: OfficialWarning[] = [];
+  let withoutText = 0;
   for (const r of rows) {
     if (!isRecord(r) || !isRecord(r.station)) continue;
     const st = r.station;
@@ -931,6 +936,7 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
     const name = [code, str(names.en) ?? str(names.th)].filter((x): x is string => x !== null && x !== '').join(' ');
     const level = num(r.situation_level);
     const situation = level !== null ? (situationText.get(level) ?? null) : null;
+    const situationGloss = level !== null ? (THAIWATER_GLOSS[level] ?? null) : null;
     const datum = msl !== null ? 'MSL' : 'local gauge datum';
     const thresholds: Record<string, number> = {};
     for (const [k, field] of [['minBank', 'min_bank'], ['leftBank', 'left_bank'], ['rightBank', 'right_bank'], ['criticalLevelMsl', 'critical_level_msl']] as const) {
@@ -948,12 +954,18 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
       unit: 'm',
       datum,
       situation,
+      situationLevel: level,
+      situationGloss,
       thresholds: Object.keys(thresholds).length > 0 ? thresholds : null,
       sourceUrl: feed.url,
       dataMode: meta.dataMode,
       retrievedAt: meta.retrievedAt,
     });
-    if (level === null || level < THAIWATER_RELAY_MIN_LEVEL || !situation) continue;
+    if (level === null || level < THAIWATER_RELAY_MIN_LEVEL) continue;
+    // ThaiWater's situation text comes from its `scale` table. If that table is missing or changed, the
+    // gauge is still relayed (never dropped silently) under its numeric level, and the note says so.
+    if (!situation) withoutText += 1;
+    const levelLabel = situation ?? `ThaiWater situation_level ${level}`;
     // diff_wl_bank is an unsigned amount; the direction is only in ThaiWater's own text:
     // "ล้นตลิ่ง" (overflowing the bank) or "ต่ำกว่าตลิ่ง" (below the bank). Relay both verbatim.
     const diff = str(r.diff_wl_bank);
@@ -976,13 +988,13 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
         authority: 'official',
         hazard: 'flood',
         product: `ThaiWater water level situation${agency ? ` (${agency} gauge)` : ''}`,
-        level: situation,
-        levelGloss: THAIWATER_GLOSS[level] ?? null,
+        level: levelLabel,
+        levelGloss: situationGloss,
         headline:
           `${name}: water level ${value} m ${datum}, ${bankText}, discharge ` +
           `${discharge !== null ? `${discharge} m³/s` : 'not reported'} (ThaiWater ${str(r.waterlevel_datetime) ?? ''} ICT)`,
         areaDescription: [nameOf(geo.amphoe_name), nameOf(geo.province_name), basin].filter((x): x is string => x !== null).join(', '),
-        areas: [{ name, level: situation, lat: loc.lat, lon: loc.lon }],
+        areas: [{ name, level: levelLabel, lat: loc.lat, lon: loc.lon }],
         location: loc,
         issuedAt: observedAt,
         expiresAt: null,
@@ -996,7 +1008,11 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
   return {
     warnings,
     gauges,
-    note: `${gauges.length} ThaiWater gauges read; ${warnings.length} at situation level ${THAIWATER_RELAY_MIN_LEVEL} or above relayed.`,
+    note:
+      `${gauges.length} ThaiWater gauges read; ${warnings.length} at situation level ${THAIWATER_RELAY_MIN_LEVEL} or above relayed.` +
+      (withoutText > 0
+        ? ` ${withoutText} of them without ThaiWater's situation text (its scale table was missing from the response): check ThaiWater directly.`
+        : ''),
   };
 }
 

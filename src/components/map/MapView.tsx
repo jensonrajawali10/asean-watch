@@ -581,7 +581,7 @@ export default function MapView({
     return (gauges ?? [])
       .filter((g) => Number.isFinite(g.lat) && Number.isFinite(g.lon) && Number.isFinite(g.value))
       .map((gauge) => ({ gauge, excess: gaugeExcess(gauge) }))
-      .filter((m) => (m.excess !== null ? m.excess >= 0 : m.gauge.situation !== null))
+      .filter((m) => (m.excess !== null ? m.excess >= 0 : m.gauge.situation !== null || m.gauge.situationLevel != null))
       .sort((a, b) => (b.excess ?? Number.NEGATIVE_INFINITY) - (a.excess ?? Number.NEGATIVE_INFINITY) || 0)
       .slice(0, MAX_GAUGE_MARKERS)
       .map((m) => m.gauge);
@@ -1929,7 +1929,9 @@ export default function MapView({
             })}
             {gaugesDrawn.map((g, i) => {
               const reading = `${formatValue(g.value)} ${g.unit} (${g.datum})`;
-              const label = `River gauge: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''} · ${g.issuer}`;
+              const label =
+                `River gauge: ${g.name} · ${reading}${g.situation ? ` · ${g.situation}` : ''}` +
+                `${g.situationGloss ? ` (our gloss: ${g.situationGloss})` : ''} · ${g.issuer}`;
               const cited = warningMarkers.find((w) => warningMatchesGauge(w.id, g.id));
               const isSelected = cited !== undefined && cited.id === selectedWarningId;
               return (
@@ -1953,6 +1955,7 @@ export default function MapView({
                       {g.name} · {reading}
                     </span>
                     {g.situation && <span lang={issuerLang(g.issuer)}>{g.situation}</span>}
+                    {g.situationGloss && <span className="mv-wcallout-meta">Our gloss: {g.situationGloss}</span>}
                   </span>
                 </button>
               );

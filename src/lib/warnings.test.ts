@@ -1235,3 +1235,51 @@ describe('JMA tsunami: newest forecast per event', () => {
     expect(snap.warnings.some((w) => w.id.startsWith('jma-tsunami:'))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ThaiWater gauge labels (QC finding L2), on the bundled snapshot
+
+describe('ThaiWater situation labels', () => {
+  const RAW_TW = BUNDLED_WARNINGS_SNAPSHOT.feeds.thaiwater.raw as Record<string, unknown>;
+  const META_TW: ParseMeta = { dataMode: 'historical', retrievedAt: BUNDLED_WARNINGS_SNAPSHOT.feeds.thaiwater.retrievedAt as string };
+  const withScale = parseThaiWater(RAW_TW, META_TW);
+  const { scale: _scale, ...noScaleRaw } = RAW_TW;
+  const withoutScale = parseThaiWater(noScaleRaw, META_TW);
+
+  it('the snapshot has gauges at level 5 or above (so the case is real)', () => {
+    expect(withScale.warnings.length).toBeGreaterThan(0);
+    expect(withScale.note).not.toContain('scale table');
+  });
+
+  it('without the scale table, level-5 gauges are still relayed, labelled by their numeric level, and the note says so', () => {
+    expect(withoutScale.warnings.map((w) => w.id)).toEqual(withScale.warnings.map((w) => w.id));
+    for (const w of withoutScale.warnings) {
+      expect(w.level).toMatch(/^ThaiWater situation_level \d$/);
+      expect(w.levelGloss).toMatch(/ThaiWater situation level \d of 5/);
+    }
+    expect(withoutScale.note).toContain(`${withoutScale.warnings.length} of them without ThaiWater's situation text`);
+    expect(withoutScale.note).toContain('check ThaiWater directly');
+  });
+
+  it("with the scale table the level is ThaiWater's own text, verbatim", () => {
+    const rows = (RAW_TW.scale as { data: { scale: { trans: string; situation: string }[] } }).data.scale;
+    const texts = new Set(rows.map((r) => r.situation.trim()));
+    for (const w of withScale.warnings) expect(texts.has(w.level)).toBe(true);
+  });
+
+  it('every gauge carries its numeric level and our fixed gloss beside the verbatim text', () => {
+    const rows = ((RAW_TW.waterlevel_data as { data: { situation_level: unknown }[] }).data ?? []).length;
+    expect(withScale.gauges.length).toBeGreaterThan(0);
+    expect(withScale.gauges.length).toBeLessThanOrEqual(rows);
+    for (const g of withScale.gauges) {
+      if (g.situationLevel === null || g.situationLevel === undefined) {
+        expect(g.situationGloss).toBeNull();
+        continue;
+      }
+      expect(g.situationGloss).toContain(`ThaiWater situation level ${g.situationLevel} of 5`);
+      expect(g.situationGloss).not.toBe(g.situation);
+    }
+    expect(withoutScale.gauges.map((g) => g.situationGloss)).toEqual(withScale.gauges.map((g) => g.situationGloss));
+    expect(withoutScale.gauges.every((g) => g.situation === null)).toBe(true);
+  });
+});
