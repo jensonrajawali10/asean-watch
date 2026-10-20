@@ -3,7 +3,8 @@
 
 .app {
   --taskbar-w: 56px;
-  --drawer-w: min(540px, calc(100vw - var(--taskbar-w)));
+  /* Leaves the map (and the headline card) at least 320 px beside the drawer on mid-size screens. */
+  --drawer-w: min(540px, max(360px, calc(100vw - var(--taskbar-w) - 320px)));
   --topbar-h: 72px;
   position: relative;
   height: 100vh;
@@ -175,6 +176,18 @@
 /* With the drawer open the top bar starts right of it; the headline box gives way to the right cluster. */
 .app[data-drawer='open'] .topbar {
   left: calc(var(--taskbar-w) + var(--drawer-w));
+  /* Little room beside the drawer: the buttons wrap under the headline instead of squeezing it into a
+     one-word column. */
+  flex-wrap: wrap;
+}
+
+.app[data-drawer='open'] .topbar__left {
+  flex: 1 1 260px;
+  max-width: none;
+}
+
+.app[data-drawer='open'] .topbar__right {
+  margin-left: auto;
 }
 
 .app[data-drawer='open'] .brand-about {
@@ -841,6 +854,18 @@
 /* One navigation: the icon rail. The drawer's own row of section tabs duplicates it on wide screens. */
 @media (min-width: 768px) {
   .ws-tabs {
+    display: none;
+  }
+}
+
+/* Beside an open drawer on mid-size screens the map strip is narrow: the map key would cover the top bar,
+   and the alerts pill shows its number only (its title still says what it counts). */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .app[data-drawer='open'] .mv-key {
+    display: none;
+  }
+
+  .app[data-drawer='open'] .alerts-pill__text {
     display: none;
   }
 }
