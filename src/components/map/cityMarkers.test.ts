@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cityRadiusPx, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
+import { cityDrawOrder, cityRadiusPx, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
 
 describe('cityRadiusPx', () => {
   it('grows with the square root of PM2.5 between 6 and 26 px', () => {
@@ -66,5 +66,24 @@ describe('pulseRing', () => {
     expect(mid.radius).toBeGreaterThan(start.radius);
     expect(mid.alpha).toBeLessThan(start.alpha);
     expect(pulseRing(10, 2400)).toEqual(start);
+  });
+});
+
+describe('cityDrawOrder', () => {
+  const pts: Record<string, { x: number; y: number; r: number }> = {
+    'palangka-raya': { x: 100, y: 100, r: 20 },
+    'pulang-pisau': { x: 110, y: 112, r: 18 },
+    ketapang: { x: 300, y: 100, r: 15 },
+  };
+  const items = [
+    { id: 'palangka-raya', kind: 'city' as const },
+    { id: 'pulang-pisau', kind: 'fire-area' as const },
+    { id: 'ketapang', kind: 'fire-area' as const },
+  ];
+  it('at the regional zoom, hides a fire-area circle over a city and draws cities last', () => {
+    expect(cityDrawOrder(items, (d) => pts[d.id], true).map((d) => d.id)).toEqual(['ketapang', 'palangka-raya']);
+  });
+  it('zoomed in, keeps every circle with cities on top', () => {
+    expect(cityDrawOrder(items, (d) => pts[d.id], false).map((d) => d.id)).toEqual(['pulang-pisau', 'ketapang', 'palangka-raya']);
   });
 });

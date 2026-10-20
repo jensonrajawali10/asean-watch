@@ -30,7 +30,7 @@ import type { WindGrid, WindSlice } from '../../lib/windField';
 import { AdaptiveBudget, FrameLimiter, intersectBox, ParticleSystem, rasterisePm25, streakArrows, trailForZoom } from './hazeRender';
 import type { ParticleBox } from './hazeRender';
 import { cityBandStyle, getMapPalette } from './mapPalette';
-import { cityMarkerRadius, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
+import { CITY_LABEL_ZOOM, cityDrawOrder, cityMarkerRadius, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
 
 export type { AirQualityData };
 
@@ -88,7 +88,7 @@ const TRAIL = 6;
 /** Screen pixels per second per m/s of wind. */
 const PX_PER_S_PER_MS = 6;
 /** MapLibre zoom from which every city label shows. */
-const LABEL_ZOOM = 6;
+const LABEL_ZOOM = CITY_LABEL_ZOOM;
 const SINGAPORE_ID = 'singapore';
 /**
  * Particle segments are uploaded as Float32 (lon, lat) offsets from this origin (LNGLAT_OFFSETS) in
@@ -470,10 +470,19 @@ export class HazeLayerController {
     this.cityKey = key;
     const dark = i.dark;
     const pal = paletteOf(i);
-    const data = this.cityData();
     // HazeView-style circles: radius grows with the square root of PM2.5 (6 to 26 px), a little larger in focus.
     // A little smaller at the regional zoom, so dense clusters read (cityMarkers.cityZoomScale).
     const radius = (d: HazeCity) => cityMarkerRadius(d.pm25, zoom, d.kind, d.id === i.selectedCityId || d.id === this.hoveredId);
+    // Cities on top; at the regional zoom a fire-area circle that overlaps a city's is left out, so a click on
+    // "Palangka Raya 407" opens Palangka Raya, not the fire-area town drawn over it (cityDrawOrder).
+    const data = cityDrawOrder(
+      this.cityData(),
+      (d) => {
+        const pt = this.map.project([d.lon, d.lat]);
+        return { x: pt.x, y: pt.y, r: radius(d) };
+      },
+      !zoomed,
+    );
     const worst = worstId(data);
     const worstCity = worst ? (data.find((d) => d.id === worst) ?? null) : null;
     const bandRgb = (d: HazeCity): Rgb => {

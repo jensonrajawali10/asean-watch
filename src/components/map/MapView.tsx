@@ -51,7 +51,7 @@ import type { LayerKey, MapLayerState } from './layerCatalog';
 import type { OfficialVolcanoLevel } from './volcanoLevels';
 import { REGIONAL_ZOOM, planRegionalLabels } from './labelPlan';
 import type { Box, PlanBadge, PlanCity } from './labelPlan';
-import { cityMarkerRadius, shortCityName, valueText } from './cityMarkers';
+import { CITY_LABEL_ZOOM, cityDrawOrder, cityMarkerRadius, shortCityName, valueText } from './cityMarkers';
 import { placePm25At } from '../../lib/airQuality';
 import type { FireBadge } from '../../lib/fires';
 import type { MapSelection } from '../shell/workspace';
@@ -1199,12 +1199,16 @@ export default function MapView({
     const aq = plan.airQuality;
     const cities: PlanCity[] =
       plan.citiesOn && aq && plan.timeISO
-        ? aq.places.map((pl) => {
-            const v = placePm25At(aq, pl, plan.timeISO);
-            const pt = map.project([pl.lon, pl.lat]);
-            const focused = pl.id === plan.selectedCityId;
-            return { id: pl.id, x: pt.x, y: pt.y, r: cityMarkerRadius(v, zoom, pl.kind, focused), name: shortCityName(pl.name), value: valueText(v), pm25: v, force: focused };
-          })
+        ? cityDrawOrder(
+            aq.places.map((pl) => {
+              const v = placePm25At(aq, pl, plan.timeISO);
+              const pt = map.project([pl.lon, pl.lat]);
+              const focused = pl.id === plan.selectedCityId;
+              return { id: pl.id, kind: pl.kind, x: pt.x, y: pt.y, r: cityMarkerRadius(v, zoom, pl.kind, focused), name: shortCityName(pl.name), value: valueText(v), pm25: v, force: focused };
+            }),
+            (c) => c,
+            zoom < CITY_LABEL_ZOOM,
+          )
         : [];
     const badges: PlanBadge[] =
       zoom < REGIONAL_ZOOM
