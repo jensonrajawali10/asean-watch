@@ -8,7 +8,7 @@ import type { WindGrid } from '../../lib/windField';
 import type { AshWindData } from '../../lib/ashDrift';
 import type { EruptionScenario } from '../../lib/eruptionScenario';
 import { EndedChip, ExternalLink, OfficialLevelChip } from '../Badges';
-import { isExpired } from '../../lib/warningsView';
+import { belowTopOfScale, isExpired } from '../../lib/warningsView';
 import { useNowMs } from '../../lib/useNowMs';
 import { formatUtc } from '../format';
 import { MapCard } from '../ui/MapCard';
@@ -178,7 +178,7 @@ function WarningCard({ w, onClose, onInspect, onOpenWorkspace }: { w: OfficialWa
       }
     >
       <div className="warning-card__level">
-        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={ended} authority={w.authority} />
+        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={ended} authority={w.authority} lower={!ended && !estimate && belowTopOfScale(w)} />
         <EndedChip warning={w} nowMs={nowMs} />
       </div>
       <p className="warning-card__headline" lang={lang}>

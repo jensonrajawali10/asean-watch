@@ -125,3 +125,34 @@ export function emptyWarningsText(opts: { loading: boolean; nearName: string | n
   if (opts.nearName) return `None within ${opts.nearKm ?? NEAR_KM} km of ${opts.nearName} in the feeds below. This is not an all-clear.`;
   return 'No official warnings retrieved from the feeds below. This is not an all-clear.';
 }
+
+/**
+ * Where a message's level sits on its issuer's own scale, when the scale is known: rank 1 = least severe,
+ * rank `of` = most severe. Read from the verbatim level, never re-scored:
+ * - Jakarta DSDA "Siaga 1".."Siaga 4" (Siaga 1 is the MOST severe, so Siaga 3 is rank 2 of 4);
+ * - MAGMA Indonesia "Level I".."Level IV";
+ * - ThaiWater situation level 1..5 (our fixed gloss carries "level N of 5").
+ * Null for every other message: it keeps the full official styling.
+ */
+export function officialScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGloss'>): { rank: number; of: number } | null {
+  if (w.id.startsWith('dsda-jakarta:')) {
+    const k = /Siaga\s*([1-4])/i.exec(w.level)?.[1];
+    return k ? { rank: 5 - Number(k), of: 4 } : null;
+  }
+  if (w.id.startsWith('magma-level-list:')) {
+    const roman = /Level\s+(IV|III|II|I)\b/.exec(w.level)?.[1];
+    const n = roman ? ({ I: 1, II: 2, III: 3, IV: 4 } as Record<string, number>)[roman] : undefined;
+    return n ? { rank: n, of: 4 } : null;
+  }
+  if (w.id.startsWith('thaiwater:')) {
+    const m = /level\s+([1-5])\s+of\s+5/i.exec(w.levelGloss ?? '') ?? /situation_level\s+([1-5])/i.exec(w.level);
+    return m ? { rank: Number(m[1]), of: 5 } : null;
+  }
+  return null;
+}
+
+/** True when a message is below the top of its issuer's scale: shown on a plain surface, not as an emergency. */
+export function belowTopOfScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGloss'>): boolean {
+  const s = officialScale(w);
+  return s !== null && s.rank < s.of;
+}

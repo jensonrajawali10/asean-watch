@@ -11,7 +11,7 @@ import type { PtwcPayload } from './ptwc';
 import warningsFixture from './__fixtures__/warnings-snapshot-2026-10-13.json';
 import ptwcFixture from './__fixtures__/ptwc-snapshot-2026-10-13.json';
 import { loadFixtures } from './fixtures';
-import { NEAR_KM, emptyWarningsText, endedLabel, isExpired, mergeWarnings, officialLevelFor, warningMatchesGauge } from './warningsView';
+import { NEAR_KM, belowTopOfScale, emptyWarningsText, endedLabel, isExpired, mergeWarnings, officialLevelFor, officialScale, warningMatchesGauge } from './warningsView';
 import { findMagmaLevel } from './volcanoOfficial';
 import { officialVolcanoLevel } from '../components/map/volcanoLevels';
 
@@ -296,5 +296,27 @@ describe('emptyWarningsText (L7)', () => {
       'No official warnings retrieved from the feeds below. This is not an all-clear.',
     );
     expect(emptyWarningsText({ loading: true, nearName: 'Riau' })).toBe('Loading official feeds…');
+  });
+});
+
+describe('officialScale: style by the issuer\'s own scale', () => {
+  const snap = loadWarningsSnapshot(warningsFixture as unknown as WarningsSnapshot);
+  it('DSDA Siaga k is rank 5-k of 4 (Siaga 1 most severe); only Siaga 1 is the top', () => {
+    const dsda = snap.warnings.filter((w) => w.id.startsWith('dsda-jakarta:'));
+    expect(dsda.length).toBeGreaterThan(0);
+    for (const w of dsda) {
+      const k = Number(/Siaga\s*([1-4])/i.exec(w.level)?.[1]);
+      expect(officialScale(w)).toEqual({ rank: 5 - k, of: 4 });
+      expect(belowTopOfScale(w)).toBe(k !== 1);
+    }
+    expect(officialScale({ id: 'dsda-jakarta:x', level: 'Status : Siaga 3', levelGloss: null })).toEqual({ rank: 2, of: 4 });
+  });
+  it('MAGMA Level III is 3 of 4, ThaiWater level 5 is the top of 5, others have no scale', () => {
+    expect(officialScale({ id: 'magma-level-list:262000:x', level: 'Level III (Siaga)', levelGloss: null })).toEqual({ rank: 3, of: 4 });
+    expect(belowTopOfScale({ id: 'magma-level-list:x', level: 'Level IV (Awas)', levelGloss: null })).toBe(false);
+    const tw = snap.warnings.find((w) => w.id.startsWith('thaiwater:'))!;
+    expect(officialScale(tw)).toEqual({ rank: 5, of: 5 });
+    expect(belowTopOfScale(tw)).toBe(false);
+    expect(officialScale({ id: 'bmkg-inatews:x', level: 'SIAGA', levelGloss: null })).toBeNull();
   });
 });

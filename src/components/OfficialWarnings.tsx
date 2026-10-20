@@ -17,7 +17,7 @@ import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
-import { emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
+import { belowTopOfScale, emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
 import { countsText, warningCounts } from './shell/alerts';
 
@@ -232,7 +232,10 @@ function WarningItem({
 }) {
   const lang = w.language || undefined;
   const expired = isExpired(w, nowMs);
-  const variant = expired ? 'ow-item--ended' : w.authority === 'aggregator' ? 'ow-item--estimate' : 'ow-item--official';
+  // An official level below the top of its issuer's scale (e.g. DSDA Siaga 3 = 2nd lowest of 4) gets the
+  // official rail on a plain surface, not the emergency fill; its words stay verbatim (officialScale).
+  const scaled = !expired && w.authority === 'official' && belowTopOfScale(w);
+  const variant = expired ? 'ow-item--ended' : w.authority === 'aggregator' ? 'ow-item--estimate' : scaled ? 'ow-item--info' : 'ow-item--official';
   const headline = w.headline.trim();
   const area = w.areaDescription.trim();
   const instruction = w.instruction?.trim() ?? '';
@@ -250,7 +253,7 @@ function WarningItem({
       </div>
 
       <div className="ow-level">
-        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={expired} authority={w.authority} />
+        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={expired} authority={w.authority} lower={scaled} />
         <EndedChip warning={w} nowMs={nowMs} />
       </div>
 
