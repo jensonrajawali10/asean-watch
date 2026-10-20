@@ -56,7 +56,6 @@ import { officialVolcanoLevel } from './components/map/volcanoLevels';
 import type { OfficialVolcanoLevel } from './components/map/volcanoLevels';
 import MapCards from './components/map/MapCards';
 import { buildEruptionScenario } from './lib/eruptionScenario';
-import { buildPlumeLayers } from './components/map/plumeLayers';
 import EruptionScenarioPanel from './components/analyst/EruptionScenarioPanel';
 import VolcanoesSection from './components/analyst/VolcanoesSection';
 import WarningsSection from './components/analyst/WarningsSection';
@@ -73,7 +72,6 @@ import { firesSummaryFromSnapshot, headline as situationHeadline } from './lib/s
 import type { SituationInput } from './lib/situation';
 import { loadFireSnapshot } from './lib/fires';
 import type { FireSnapshot } from './lib/fires';
-import { buildFireLayers } from './components/map/fireLayers';
 import type { FirePick } from './components/map/fireLayers';
 import { firePoint, fireSelectionId, resolveFirePick } from './components/map/fireSelection';
 import type { MapLayerContext } from './components/map/MapView';
@@ -83,7 +81,15 @@ import './App.css';
 import './components/shell/shell.css';
 
 /** MapLibre + deck.gl are large: the map loads as its own chunk so the shell paints first. */
-const MapView = lazy(() => import('./components/map/MapView'));
+// Both downloads start at module evaluation, not after the first render. The deck.gl layer builders are a
+// dynamic import so deck.gl stays out of the entry chunk and off the first paint.
+const mapViewModule = import('./components/map/MapView');
+const MapView = lazy(() => mapViewModule);
+type DeckLayersModule = typeof import('./components/map/deckLayers');
+const deckLayersModule: Promise<DeckLayersModule | null> = import('./components/map/deckLayers').catch((err: unknown) => {
+  console.error('Map layer code could not be loaded:', err);
+  return null;
+});
 
 // ---------------------------------------------------------------------------
 // Snapshot data: loaded and validated once per page load.
@@ -347,6 +353,17 @@ export default function App() {
   const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
   /** Shared page clock (every 5 minutes, on visible, on online): warning expiry and the quake layer's 24 h. */
   const nowMs = useNowMs();
+  /** The deck.gl layer builders, once their chunk is in (the map draws no fire or plume layers before). */
+  const [deckLayers, setDeckLayers] = useState<DeckLayersModule | null>(null);
+  useEffect(() => {
+    let live = true;
+    void deckLayersModule.then((m) => {
+      if (live) setDeckLayers(m);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   /** Modelled 10 m wind field (Open-Meteo, live or snapshot) for the haze paths; null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
@@ -663,8 +680,10 @@ export default function App() {
   );
   const plumeLayers = useCallback(
     (timeMs: number, ctx: MapLayerContext) =>
-      buildPlumeLayers(scenario, timeMs, { theme: ctx.theme, visible: true, showTrail: true, showFootprint: true, showPlaces: true }),
-    [scenario],
+      deckLayers
+        ? deckLayers.buildPlumeLayers(scenario, timeMs, { theme: ctx.theme, visible: true, showTrail: true, showFootprint: true, showPlaces: true })
+        : [],
+    [scenario, deckLayers],
   );
 
   /** "Play ash scenario": the plume follows the one timeline, so the scrubber goes back to now and plays. */
@@ -816,7 +835,9 @@ export default function App() {
   /** The fires module's heat grid and badges, through MapView's layer seam. */
   const fireLayers = useCallback(
     (ctx: MapLayerContext) =>
-      buildFireLayers({
+      !deckLayers
+        ? []
+        : deckLayers.buildFireLayers({
         snapshot: FIRE_SNAP,
         theme: ctx.theme,
         zoom: ctx.zoom,
@@ -830,7 +851,7 @@ export default function App() {
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
-    [layers.fires, selectedClusterId, selectFire],
+    [layers.fires, selectedClusterId, selectFire, deckLayers],
   );
 
   let section: ReactNode = null;
