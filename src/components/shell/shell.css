@@ -221,6 +221,16 @@
   white-space: nowrap;
 }
 
+/* One plain line saying what the site is, always visible beside the name. */
+.brand-line {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.app[data-drawer='open'] .brand-line {
+  display: none;
+}
+
 /* "What is this?": the intro, one click away instead of always on screen. */
 .brand-about > summary {
   color: var(--text-muted);

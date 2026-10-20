@@ -82,6 +82,7 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
       <div className="topbar__left">
         <div className="brand">
           <h1 className="brand-name">ASEAN Watch</h1>
+          <p className="brand-line">Smoke forecast, fires and official warnings for South-east Asia</p>
           <details className="brand-about">
             <summary>What is this?</summary>
             <p className="brand-tag">
