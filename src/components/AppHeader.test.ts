@@ -22,3 +22,24 @@ describe('AppHeader first-load legend', () => {
     }
   });
 });
+
+describe('AppHeader alerts pill', () => {
+  const render = (urgent: boolean) =>
+    renderToStaticMarkup(
+      createElement(AppHeader, {
+        headline: 'x',
+        timeLabel: null,
+        timeISO: null,
+        freshness: null,
+        alerts: { count: 3, urgent, label: 'official alerts in force: floods, tsunami' },
+        onAlerts: () => {},
+        workspaceOpen: false,
+        onWorkspace: () => {},
+      }),
+    );
+  it('shows the number once and says what the alerts are, adding "urgent" when one is', () => {
+    expect(render(false)).toContain('official alerts in force: floods, tsunami</span>');
+    expect(render(true)).toContain('official alerts in force: floods, tsunami (incl. urgent)');
+    expect(render(true)).toContain('alerts-pill is-urgent');
+  });
+});
