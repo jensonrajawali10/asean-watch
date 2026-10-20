@@ -141,6 +141,13 @@ export const AQ_PLACES: readonly AqPlace[] = [
   { id: 'phnom-penh', name: 'Phnom Penh', country: 'KH', lat: 11.5625, lon: 104.916, kind: 'city' },
   { id: 'manila', name: 'Manila', country: 'PH', lat: 14.6042, lon: 120.9822, kind: 'city' },
   { id: 'cebu', name: 'Cebu', country: 'PH', lat: 10.3167, lon: 123.8907, kind: 'city' },
+  // Capitals added 2026-10-20 so every ASEAN member has at least one point; verified the same way.
+  { id: 'ho-chi-minh-city', name: 'Ho Chi Minh City', country: 'VN', lat: 10.823, lon: 106.6297, kind: 'city' },
+  { id: 'bandar-seri-begawan', name: 'Bandar Seri Begawan', country: 'BN', lat: 4.8904, lon: 114.9401, kind: 'city' },
+  { id: 'vientiane', name: 'Vientiane', country: 'LA', lat: 17.9667, lon: 102.6, kind: 'city' },
+  { id: 'yangon', name: 'Yangon', country: 'MM', lat: 16.8053, lon: 96.1561, kind: 'city' },
+  { id: 'naypyidaw', name: 'Naypyidaw', country: 'MM', lat: 19.7366, lon: 96.2072, kind: 'city' },
+  { id: 'dili', name: 'Dili', country: 'TL', lat: -8.5586, lon: 125.5736, kind: 'city' },
   { id: 'dumai', name: 'Dumai (Riau peatlands)', country: 'ID', lat: 1.6671, lon: 101.4432, kind: 'fire-area' },
   { id: 'kayu-agung', name: 'Kayu Agung (Ogan Komering Ilir)', country: 'ID', lat: -3.392, lon: 104.8306, kind: 'fire-area' },
   { id: 'ketapang', name: 'Ketapang (West Kalimantan)', country: 'ID', lat: -1.8386, lon: 109.9773, kind: 'fire-area' },
@@ -439,6 +446,11 @@ export function resetAqCache(opts?: { keepStorage?: boolean }): void {
   }
 }
 
+/** True when a dataset carries exactly the current AQ_PLACES, in order. */
+export function samePlaces(data: Pick<AirQualityData, 'places'>): boolean {
+  return data.places.length === AQ_PLACES.length && data.places.every((p, i) => p.id === AQ_PLACES[i].id);
+}
+
 function readStored(now: number, maxAgeMs: number): { data: AirQualityData; at: number } | null {
   try {
     const raw = globalThis.localStorage?.getItem(AQ_CACHE_KEY);
@@ -446,7 +458,8 @@ function readStored(now: number, maxAgeMs: number): { data: AirQualityData; at: 
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed) || typeof parsed.at !== 'number' || now - parsed.at > maxAgeMs || parsed.at > now + 60_000) return null;
     const data = parseAirQuality(parsed.data, 'live');
-    return data ? { data, at: parsed.at } : null;
+    // A run saved before AQ_PLACES changed lacks the new places: ignore it, so the next load fetches them.
+    return data && samePlaces(data) ? { data, at: parsed.at } : null;
   } catch {
     return null;
   }

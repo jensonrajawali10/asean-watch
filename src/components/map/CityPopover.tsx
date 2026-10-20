@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react';
 import type { HazeReading } from '../../types';
 import { PM25_MEANING, WHO_PM25_24H_UGM3, describePm25, placePm25At } from '../../lib/airQuality';
 import type { AirQualityData, Pm25Band } from '../../lib/airQuality';
-import { AIR_QUALITY_OFFICIAL, COUNTRY_NAME, localTimeLabel, placeRef } from '../../lib/places';
+import { AIR_QUALITY_OFFICIAL, COUNTRY_NAME, localTimeLabel, noPsiNote, placeRef } from '../../lib/places';
 import type { WindGrid } from '../../lib/windField';
 import { sampleWind } from '../../lib/transport';
 import { MapCard } from '../ui/MapCard';
@@ -182,6 +182,7 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
           {localTimeLabel(neaHaze.observedAt, where, { utc: false })}
         </p>
       )}
+      {noPsiNote(place.country) && <p className="city-card__line city-card__muted">{noPsiNote(place.country)}</p>}
       <p className="city-card__line">
         Official readings and advice:{' '}
         {official ? (

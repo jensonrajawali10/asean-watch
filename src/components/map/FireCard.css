@@ -45,3 +45,38 @@
   line-height: 1.35;
   color: var(--text-muted);
 }
+
+/* "Air here" (modelled PM2.5) on province, country and cluster cards. */
+.area-air {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.area-air__head {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.area-air__tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--mode-modelled-border);
+  border-radius: 999px;
+  background: var(--mode-modelled-bg);
+  color: var(--mode-modelled-fg);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.area-air__line {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.area-air__muted {
+  color: var(--text-muted);
+}

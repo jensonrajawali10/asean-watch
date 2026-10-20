@@ -74,3 +74,8 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+
+/* Why there is no PSI here (only Singapore's NEA PSI is fetched). */
+.city-card__muted {
+  color: var(--text-muted);
+}
