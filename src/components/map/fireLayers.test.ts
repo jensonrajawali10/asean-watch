@@ -8,6 +8,9 @@ import { FIRE_COLORS, buildFireLayers, fireColor, firePickFromInfo, isFireLayerI
 import type { FirePick } from './fireLayers';
 import { getMapPalette } from './mapPalette';
 
+// The bundled snapshots are lazy chunks (loaded with await).
+const WIND925 = await loadWindSnapshot('925hPa');
+
 const snap = loadFireSnapshot()!;
 const noop = () => {};
 const ids = (layers: { id: string }[]) => layers.map((l) => l.id);
@@ -98,7 +101,7 @@ describe('firePickFromInfo', () => {
 describe('FireCard', () => {
   const render = (pick: FirePick, withWind = false) =>
     renderToStaticMarkup(
-      createElement(FireCard, { pick, snapshot: snap, windGrid: withWind ? loadWindSnapshot('925hPa') : null, onOpenWorkspace: noop, onClose: noop }),
+      createElement(FireCard, { pick, snapshot: snap, windGrid: withWind ? WIND925 : null, onOpenWorkspace: noop, onClose: noop }),
     );
 
   it('shows a cluster as three measured facts, one sentence, the trend and the workspace link', () => {

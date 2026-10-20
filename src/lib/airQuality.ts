@@ -5,7 +5,6 @@
 // "μg/m³", no nulls. past_days=1 and forecast_days=3 so the scrubber's now −24 h … +48 h is always covered.
 // loadAirQuality(): memory cache → localStorage cache → live → stale cache → bundled snapshot
 // data/aq-snapshot.json (dataMode "historical", stored every 3 h). Never throws.
-import snapshotJson from '../../data/aq-snapshot.json';
 import { gridAxes, sampleRegular, timeWeights } from './windField';
 
 export const AQ_API_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
@@ -319,8 +318,27 @@ export function parseAirQuality(raw: unknown, dataMode: AirQualityData['dataMode
   };
 }
 
-export function loadAqSnapshot(): AirQualityData | null {
-  return parseAirQuality(snapshotJson as unknown, 'historical');
+// The bundled snapshot is a fallback only, so it is its own same-origin chunk (content-hashed, works
+// offline once the app is loaded), fetched in parallel with the live request by loadAirQuality.
+let snapshotChunkP: Promise<unknown> | null = null;
+function snapshotChunk(): Promise<unknown> {
+  snapshotChunkP ??= import('../../data/aq-snapshot.json').then(
+    (m) => m.default as unknown,
+    (err: unknown) => {
+      snapshotChunkP = null; // a failed chunk load can be retried
+      throw err;
+    },
+  );
+  return snapshotChunkP;
+}
+
+/** The bundled HISTORICAL air-quality run, or null when it is missing, malformed or cannot be loaded. */
+export async function loadAqSnapshot(): Promise<AirQualityData | null> {
+  try {
+    return parseAirQuality(await snapshotChunk(), 'historical');
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -442,10 +460,10 @@ function writeStored(data: AirQualityData, at: number): void {
   }
 }
 
-function fallbackResult(message: string, now: number): AqLoadResult {
+async function fallbackResult(message: string, now: number): Promise<AqLoadResult> {
   const stale = readStored(now, AQ_STALE_MAX_MS);
   if (stale) return { data: stale.data, status: 'cached', message: `${message} Showing the model run retrieved ${stale.data.retrievedAt}.` };
-  const data = loadAqSnapshot();
+  const data = await loadAqSnapshot();
   return data
     ? { data, status: 'snapshot', message: `${message} Showing the bundled air-quality snapshot.` }
     : { data: null, status: 'unavailable', message: `${message} The bundled air-quality snapshot is missing or malformed.` };
@@ -459,19 +477,19 @@ async function loadLive(timeoutMs: number, fetchImpl: typeof fetch, now: () => n
     const res = await fetchImpl(buildAqUrl(axes, AQ_PLACES), { signal: controller.signal });
     if (res.status === 429) {
       backoffUntil = now() + AQ_BACKOFF_MS;
-      return fallbackResult('Open-Meteo air-quality rate limit reached.', now());
+      return await fallbackResult('Open-Meteo air-quality rate limit reached.', now());
     }
-    if (!res.ok) return fallbackResult(`Open-Meteo air quality returned HTTP ${res.status}.`, now());
+    if (!res.ok) return await fallbackResult(`Open-Meteo air quality returned HTTP ${res.status}.`, now());
     const json: unknown = await res.json();
     const retrievedAt = new Date(now()).toISOString().replace(/\.\d{3}Z$/, 'Z');
     const data = normaliseOpenMeteoAq(json, axes, AQ_PLACES, retrievedAt, 'live');
-    if (!data) return fallbackResult('Open-Meteo air-quality response was not in the expected shape.', now());
+    if (!data) return await fallbackResult('Open-Meteo air-quality response was not in the expected shape.', now());
     memoryCache = { data, at: now() };
     writeStored(data, now());
     return { data, status: 'live', message: null };
   } catch (err) {
     const why = controller.signal.aborted ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err);
-    return fallbackResult(`Open-Meteo air quality unavailable (${why}).`, now());
+    return await fallbackResult(`Open-Meteo air quality unavailable (${why}).`, now());
   } finally {
     clearTimeout(timer);
   }
@@ -480,6 +498,8 @@ async function loadLive(timeoutMs: number, fetchImpl: typeof fetch, now: () => n
 /** Live modelled PM2.5 (CAMS), else a recent cached run, else the bundled snapshot. Never throws. */
 export async function loadAirQuality(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch; now?: () => number }): Promise<AqLoadResult> {
   const now = opts?.now ?? Date.now;
+  // Start the fallback chunk now, alongside the live request; it is awaited only if needed.
+  void snapshotChunk().catch(() => undefined);
   try {
     if (memoryCache && now() - memoryCache.at < AQ_CACHE_TTL_MS) return { data: memoryCache.data, status: 'cached', message: null };
     const fresh = readStored(now(), AQ_CACHE_TTL_MS);
@@ -487,9 +507,9 @@ export async function loadAirQuality(opts?: { timeoutMs?: number; fetchImpl?: ty
       memoryCache = fresh;
       return { data: fresh.data, status: 'cached', message: null };
     }
-    if (now() < backoffUntil) return fallbackResult('Open-Meteo air-quality rate limit backoff in effect.', now());
+    if (now() < backoffUntil) return await fallbackResult('Open-Meteo air-quality rate limit backoff in effect.', now());
     const fetchImpl = opts?.fetchImpl ?? (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
-    if (!fetchImpl) return fallbackResult('No fetch available.', now());
+    if (!fetchImpl) return await fallbackResult('No fetch available.', now());
     if (!inflight) {
       inflight = loadLive(opts?.timeoutMs ?? 10_000, fetchImpl, now).finally(() => {
         inflight = null;
@@ -497,7 +517,7 @@ export async function loadAirQuality(opts?: { timeoutMs?: number; fetchImpl?: ty
     }
     return await inflight;
   } catch (err) {
-    return fallbackResult(`Air-quality load failed (${err instanceof Error ? err.message : String(err)}).`, Date.now());
+    return await fallbackResult(`Air-quality load failed (${err instanceof Error ? err.message : String(err)}).`, Date.now());
   }
 }
 

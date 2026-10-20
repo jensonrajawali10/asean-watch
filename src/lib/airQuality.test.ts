@@ -22,6 +22,9 @@ import {
 import type { AqPlace } from './airQuality';
 import { gridAxes } from './windField';
 
+// The bundled snapshots are lazy chunks (loaded with await).
+const AQ_SNAP = await loadAqSnapshot();
+
 // Trimmed real Open-Meteo Air Quality response (2026-10-14 07:10 UTC capture, first 3 hours): grid points
 // (0,103) (0,104) (1,103) (1,104), then Singapore. Note the Greek-mu unit string Open-Meteo returns.
 const TIMES = ['2026-10-13T00:00', '2026-10-13T01:00', '2026-10-13T02:00'];
@@ -131,7 +134,7 @@ describe('loadAirQuality', () => {
   afterEach(() => resetAqCache());
 
   it('the bundled snapshot is valid, historical, on the wind grid, with every place and the full scrubber window', () => {
-    const d = loadAqSnapshot();
+    const d = AQ_SNAP;
     expect(d).not.toBeNull();
     expect(d!.dataMode).toBe('historical');
     expect(d!.lats).toEqual(gridAxes().lats);
@@ -172,7 +175,7 @@ describe('loadAirQuality', () => {
   });
 
   it('serves a live response from the memory cache afterwards', async () => {
-    const d = loadAqSnapshot()!;
+    const d = AQ_SNAP!;
     // Re-serialise the snapshot as an Open-Meteo multi-location response (grid then places).
     const times = d.times.map((t) => t.slice(0, 16));
     const body = [

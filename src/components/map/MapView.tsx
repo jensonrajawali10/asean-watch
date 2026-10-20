@@ -24,7 +24,6 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import { IconLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import type { LayersList, PickingInfo } from '@deck.gl/core';
-import regionRaw from '../../../data/region.geojson?raw';
 import type { DriftAssessment, Incident, NeaContext, OfficialWarning, QuakeEvent, ReviewState, RiverDischargeSeries, SeaLevelStation } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
 import { bmkgLevelInstruction } from '../../lib/warnings';
@@ -60,11 +59,11 @@ import ErrorBoundary from '../ErrorBoundary';
 import { FireIcon, HazeIcon, LayersIcon, VolcanoIcon, WarningIcon } from '../shell/icons';
 import {
   arrowAngleDeg,
+  ASEAN_BOUNDS,
   buildOfflineStyle,
   conePolygon,
   dashedPaths,
   destination,
-  featureBounds,
   keepAtStride,
   overlayPadding,
   psiHazeAlpha,
@@ -201,10 +200,6 @@ const MAX_GAUGE_MARKERS = 40;
 const NARROW_MAX = 640;
 const FIT_MARGIN = { top: 40, bottom: 40, left: 48, right: 48 };
 const REGION_MARGIN = { top: 12, bottom: 12, left: 12, right: 12 };
-const FALLBACK_APAC: Bounds = [
-  [92.2, -11],
-  [141, 28.6],
-];
 /** Zoom a city or warning is shown at when selected (kept when the map is already closer). */
 const POINT_ZOOM = { min: 5.6, max: 8 };
 /** Zoom a volcano is shown at when selected: its region, not its crater. */
@@ -231,22 +226,25 @@ const NO_LAYERS: LayersList = [];
 
 setWorkerUrl(maplibreWorkerUrl);
 
-let regionCache: RegionCollection | null = null;
-function getRegion(): RegionCollection {
-  if (!regionCache) regionCache = JSON.parse(regionRaw) as RegionCollection;
-  return regionCache;
+/**
+ * The Natural Earth region geometry, used only for the offline basemap. It is its own same-origin chunk
+ * (content-hashed, so the offline basemap still works once the app is loaded): loaded when the map goes
+ * offline, and prefetched at idle after the first style so a session that later loses its network has it.
+ */
+let regionP: Promise<RegionCollection> | null = null;
+function loadRegion(): Promise<RegionCollection> {
+  regionP ??= import('../../../data/region.geojson?raw').then(
+    (m) => JSON.parse(m.default) as RegionCollection,
+    (err: unknown) => {
+      regionP = null; // a failed chunk load can be retried
+      throw err;
+    },
+  );
+  return regionP;
 }
-let apacCache: Bounds | null = null;
 /** The regional view: the ASEAN member states' extent. */
 function apacBounds(): Bounds {
-  if (!apacCache) {
-    try {
-      apacCache = featureBounds(getRegion().features.filter((f) => f.properties.asean)) ?? FALLBACK_APAC;
-    } catch {
-      apacCache = FALLBACK_APAC;
-    }
-  }
-  return apacCache;
+  return ASEAN_BOUNDS;
 }
 
 function prefersReducedMotion(): boolean {
@@ -1456,13 +1454,26 @@ export default function MapView({
       if (timer !== undefined) window.clearTimeout(timer);
       timer = undefined;
     };
+    let disposed = false;
+    let offlineSeq = 0;
+    /** Swap in the offline basemap once the region chunk is in; only the latest request wins. */
+    const setOfflineStyle = (isDark: () => boolean) => {
+      const seq = ++offlineSeq;
+      loadRegion().then(
+        (region) => {
+          if (disposed || !offlineMode || seq !== offlineSeq) return;
+          map.setStyle(buildOfflineStyle(region, isDark()), { diff: false });
+        },
+        (err: unknown) => console.error('Offline basemap geometry could not be loaded:', err),
+      );
+    };
     const goOffline = () => {
       if (offlineMode) return;
       offlineMode = true;
       clearTimer();
       setOffline(true);
       styleReadyRef.current = false;
-      map.setStyle(buildOfflineStyle(getRegion(), darkRef.current), { diff: false });
+      setOfflineStyle(() => darkRef.current);
     };
     const arm = () => {
       clearTimer();
@@ -1488,13 +1499,19 @@ export default function MapView({
     applyStyleRef.current = (isDark: boolean) => {
       if (offlineMode) {
         styleReadyRef.current = false;
-        map.setStyle(buildOfflineStyle(getRegion(), isDark), { diff: false });
+        setOfflineStyle(() => isDark);
         return;
       }
       loadLive(isDark);
     };
     loadLive(darkRef.current);
 
+    map.once('style.load', () => {
+      const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
+      const prefetch = () => void loadRegion().catch(() => undefined);
+      if (idle) idle(prefetch);
+      else window.setTimeout(prefetch, 2000);
+    });
     map.on('style.load', () => {
       styleReadyRef.current = true;
       clearTimer();
@@ -1628,6 +1645,7 @@ export default function MapView({
     });
 
     return () => {
+      disposed = true;
       clearTimer();
       window.removeEventListener('online', onOnline);
       overlayEl?.removeEventListener('wheel', forwardWheel);

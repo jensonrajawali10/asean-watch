@@ -27,6 +27,11 @@ import { hazeSourcesFromFixtures } from './transport';
 import { loadWarningsSnapshot } from './warnings';
 import { loadWindSnapshot } from './windField';
 
+// The bundled snapshots are lazy chunks (loaded with await).
+const WIND925 = await loadWindSnapshot('925hPa');
+const WIND10 = await loadWindSnapshot('10m');
+const AQ_SNAP = await loadAqSnapshot();
+
 const fx = loadFixtures();
 const ws = loadWarningsSnapshot();
 const ptwc = loadPtwcSnapshot();
@@ -58,9 +63,9 @@ const TRICKY: OfficialWarning = {
 const FEEDS: WarningFeedStatus[] = [...ws.feeds, ptwc.status];
 
 const input: SituationInput = {
-  airQuality: loadAqSnapshot(),
-  wind10m: loadWindSnapshot('10m'),
-  wind925: loadWindSnapshot('925hPa'),
+  airQuality: AQ_SNAP,
+  wind10m: WIND10,
+  wind925: WIND925,
   hazeSources: hazeSourcesFromFixtures(fx),
   hotspotSnapshot: fx.snapshot,
   nea: loadNeaSnapshot(),

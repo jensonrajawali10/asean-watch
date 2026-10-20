@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASEAN_BOUNDS,
   arrowAngleDeg,
   buildOfflineStyle,
   conePolygon,
@@ -15,6 +16,7 @@ import {
   twelveHourTicks,
   windArrowStride,
 } from './mapGeometry';
+import regionRaw from '../../../data/region.geojson?raw';
 import type { RegionCollection } from './mapGeometry';
 
 const haversineKm = (a: [number, number], b: [number, number]) => {
@@ -207,5 +209,14 @@ describe('dashedPaths', () => {
   it('returns nothing for degenerate input', () => {
     expect(dashedPaths([[0, 0]])).toEqual([]);
     expect(dashedPaths([[0, 0], [1, 1]], 0, 1)).toEqual([]);
+  });
+});
+
+describe('ASEAN_BOUNDS', () => {
+  it('is the extent of the ASEAN features in data/region.geojson (so the first view needs no geometry)', () => {
+    const region = JSON.parse(regionRaw) as RegionCollection;
+    const b = featureBounds(region.features.filter((f) => f.properties.asean));
+    expect(b).not.toBeNull();
+    expect(ASEAN_BOUNDS).toEqual(b);
   });
 });
