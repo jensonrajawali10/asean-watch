@@ -23,6 +23,7 @@ import {
   forecastSteps,
   pm25Band,
   placePm25At,
+  plainAirWords,
 } from './airQuality';
 import type { AirQualityData, AqPlaceSeries, Pm25Band } from './airQuality';
 import { ASH_LEVELS, ashDriftTracks, bearingDeg, compass16, distanceKm } from './ashDrift';
@@ -747,14 +748,16 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
   const name = shortPlaceName(worst.place.name);
   const value = pmText(worst.pm25);
   let first: string;
-  // Plain words with the unit and the WHO yardstick, and always "modelled" (a forecast, not a measurement).
-  const who = `The WHO 24-hour guideline is ${WHO_PM25_24H_UGM3} µg/m³.`;
+  // Plain words with the unit, what the number means (band and WHO yardstick, as on the city card), and
+  // always "modelled" (a forecast, not a measurement).
+  const plain = plainAirWords(worst.pm25);
+  const meaning = plain ? ` That is ${plain.band}, ${plain.scale}.` : ` The WHO daily guideline is ${WHO_PM25_24H_UGM3} µg/m³.`;
   if (worst.pm25 < WHO_PM25_24H_UGM3) {
-    first = `${when}: fine smoke (PM2.5) is low at all ${aq.places.length} places we track, modelled; the highest is ${name}, ${value} µg/m³. ${who}`;
+    first = `${when}: fine smoke (PM2.5) is low at all ${aq.places.length} places we track, modelled; the highest is ${name}, ${value} µg/m³${plain ? `, ${plain.scale}` : ''}.`;
   } else if (worst.pm25 < 35) {
-    first = `${when}: the most fine smoke (PM2.5) is at ${name}, ${value} µg/m³, modelled. ${who}`;
+    first = `${when}: the most fine smoke (PM2.5) is at ${name}, ${value} µg/m³, modelled.${meaning}`;
   } else {
-    first = `${when}: the worst haze is at ${name}, ${value} µg/m³ of fine smoke (PM2.5), modelled. ${who}`;
+    first = `${when}: the worst haze is at ${name}, ${value} µg/m³ of fine smoke (PM2.5), modelled.${meaning}`;
   }
 
   // Second sentence: a modelled path reaching Singapore, else the low-level wind at the worst place.

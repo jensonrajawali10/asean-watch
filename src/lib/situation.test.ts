@@ -206,7 +206,7 @@ describe('headline', () => {
   it('names the worst place with its modelled value and says "Now" for a live run', () => {
     const h = headline({ airQuality: smoky });
     // Anchor 06:00 is hour index 30 of the run: 300 + 30.
-    expect(h.text).toBe('Now: the worst haze is at Palangka Raya, 330 µg/m³ of fine smoke (PM2.5), modelled. The WHO 24-hour guideline is 15 µg/m³.');
+    expect(h.text).toBe("Now: the worst haze is at Palangka Raya, 330 µg/m³ of fine smoke (PM2.5), modelled. That is hazardous for everyone, about 22 times the WHO's daily guideline of 15 µg/m³.");
     expect(h.freshness).toBe('LIVE');
     expect(h.chip).toBe('LIVE · 14 Oct 07:19 UTC');
     expect(h.worst?.id).toBe('palangka-raya');
@@ -228,7 +228,14 @@ describe('headline', () => {
 
   it('stays calm when every value is low', () => {
     const clean = aqData({ places: [{ id: 'singapore', pm25: () => 9 }, { id: 'cebu', pm25: () => 3 }] });
-    expect(headlineSentence({ airQuality: clean })).toBe('Now: fine smoke (PM2.5) is low at all 2 places we track, modelled; the highest is Singapore, 9 µg/m³. The WHO 24-hour guideline is 15 µg/m³.');
+    expect(headlineSentence({ airQuality: clean })).toBe("Now: fine smoke (PM2.5) is low at all 2 places we track, modelled; the highest is Singapore, 9 µg/m³, under the WHO's daily guideline of 15 µg/m³.");
+  });
+
+  it('says what a middling value means in plain words (band and WHO multiple)', () => {
+    const mid = aqData({ places: [{ id: 'singapore', pm25: () => 20 }, { id: 'cebu', pm25: () => 3 }] });
+    expect(headlineSentence({ airQuality: mid })).toBe(
+      "Now: the most fine smoke (PM2.5) is at Singapore, 20 µg/m³, modelled. That is a little smoky, about 1.3 times the WHO's daily guideline of 15 µg/m³.",
+    );
   });
 
   it('adds the low-level wind at the worst place and says when that is the direction of Singapore', () => {
