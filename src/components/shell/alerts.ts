@@ -1,7 +1,7 @@
 // The Official-alerts pill (docs/UX_V3.md section 2): the count of active official messages, and whether
 // any is a tsunami warning or an evacuation-level message (the pill then turns red). Pure, tested.
 // Nothing here rewrites an issuer's words; it only decides how prominent the pill is.
-import type { OfficialWarning } from '../../types';
+import type { OfficialWarning, WarningHazard } from '../../types';
 import { isExpired } from '../../lib/warningsView';
 
 /** Not in force: on the page clock when given (ended, or past its expiry), else the issuer's ended flag. */
@@ -59,12 +59,54 @@ export function countsText(c: WarningCounts): string {
   return `${c.total} ${c.total === 1 ? 'message' : 'messages'}: ${parts.join(', ')}`;
 }
 
+/** Hazards in the order the warnings list groups them (most life-threatening first), with plain names. */
+export const HAZARD_ORDER: readonly WarningHazard[] = ['tsunami', 'volcano', 'earthquake', 'flood', 'haze', 'weather', 'other'];
+export const HAZARD_GROUP_NAME: Record<WarningHazard, string> = {
+  tsunami: 'Tsunami',
+  volcano: 'Volcanoes',
+  earthquake: 'Earthquakes',
+  flood: 'Floods and river levels',
+  haze: 'Haze and air',
+  weather: 'Weather',
+  other: 'Other',
+};
+const HAZARD_WORD: Record<WarningHazard, [string, string]> = {
+  tsunami: ['tsunami', 'tsunami'],
+  volcano: ['volcano', 'volcanoes'],
+  earthquake: ['earthquake', 'earthquakes'],
+  flood: ['flood', 'floods'],
+  haze: ['haze', 'haze'],
+  weather: ['weather', 'weather'],
+  other: ['other', 'other'],
+};
+
+/** Count per hazard, in HAZARD_ORDER, zero counts left out. */
+export function hazardCounts(warnings: readonly OfficialWarning[]): { hazard: WarningHazard; count: number }[] {
+  return HAZARD_ORDER.map((hazard) => ({ hazard, count: warnings.filter((w) => w.hazard === hazard).length })).filter((h) => h.count > 0);
+}
+
+/** "floods, volcanoes, earthquakes": the kinds of message in force, most numerous first (up to three). */
+export function hazardMix(warnings: readonly OfficialWarning[]): string {
+  const counts = hazardCounts(warnings).sort((a, b) => b.count - a.count || HAZARD_ORDER.indexOf(a.hazard) - HAZARD_ORDER.indexOf(b.hazard));
+  return counts
+    .slice(0, 3)
+    .map((h) => HAZARD_WORD[h.hazard][h.count === 1 ? 0 : 1])
+    .join(', ');
+}
+
+/** Warnings grouped by hazard (HAZARD_ORDER), each group keeping the input order (newest first). */
+export function groupByHazard(warnings: readonly OfficialWarning[]): { hazard: WarningHazard; items: OfficialWarning[] }[] {
+  return HAZARD_ORDER.map((hazard) => ({ hazard, items: warnings.filter((w) => w.hazard === hazard) })).filter((g) => g.items.length > 0);
+}
+
 export function alertsPill(warnings: readonly OfficialWarning[], nowMs?: number): AlertsPill {
   const active = activeOfficial(warnings, nowMs);
   const count = active.length;
+  const mix = hazardMix(active);
   return {
     count,
     urgent: active.some((w) => isUrgentWarning(w, nowMs)),
-    label: `official ${count === 1 ? 'message' : 'messages'} in force`,
+    // Says what the alerts are about, so flood gauges in a haze map do not look like a bug.
+    label: `official ${count === 1 ? 'alert' : 'alerts'} in force${mix ? `: ${mix}` : ''}`,
   };
 }

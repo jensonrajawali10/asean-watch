@@ -312,3 +312,18 @@
 .ow-url {
   overflow-wrap: anywhere;
 }
+
+/* Hazard group heading inside the warnings list ("Floods and river levels (40)"). */
+.ow-group {
+  margin: 10px 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  list-style: none;
+}
+
+.ow-group:first-child {
+  margin-top: 0;
+}

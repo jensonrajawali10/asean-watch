@@ -5,7 +5,7 @@
 // Shared classes (.panel, .rail-panel, .panel-head, .drawer*, .fields, .official-*) are styled in
 // App.css; everything this file owns is prefixed ow- in OfficialWarnings.css.
 import './OfficialWarnings.css';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 /** APAC-wide lists start with this many items (newest first); "Show all" reveals the rest. */
@@ -19,7 +19,7 @@ import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
 import { belowTopOfScale, emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
-import { countsText, warningCounts } from './shell/alerts';
+import { countsText, groupByHazard, HAZARD_GROUP_NAME, warningCounts } from './shell/alerts';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -138,7 +138,15 @@ export default function OfficialWarningsPanel({
   // Long APAC-wide lists start capped (readable, and not hundreds of tab stops); "Show all" expands them.
   const [showAll, setShowAll] = useState(false);
   const capped = !showAll && n > LIST_CAP;
-  const shown = capped ? warnings.slice(0, LIST_CAP) : warnings;
+  // Grouped by hazard (tsunami, volcanoes, earthquakes, floods...), newest first within a group, so a reader
+  // sees what kind of message each is before reading it; the cap applies to the grouped order.
+  const grouped = groupByHazard(warnings);
+  const ordered = grouped.flatMap((g) => g.items);
+  const shown = capped ? ordered.slice(0, LIST_CAP) : ordered;
+  const shownIds = new Set(shown.map((w) => w.id));
+  const groupsShown = grouped
+    .map((g) => ({ hazard: g.hazard, total: g.items.length, items: g.items.filter((w) => shownIds.has(w.id)) }))
+    .filter((g) => g.items.length > 0);
 
   // Keep the selected item in view when selection comes from elsewhere (map marker, detail link).
   useEffect(() => {
@@ -168,15 +176,22 @@ export default function OfficialWarningsPanel({
           <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>
         ) : (
           <ul className="ow-list" ref={listRef}>
-            {shown.map((w) => (
-              <WarningItem
-                key={w.id}
-                w={w}
-                gauge={gaugeForWarning(w, gauges)}
-                selected={w.id === selectedWarningId}
-                onInspect={onInspect}
-                nowMs={nowMs}
-              />
+            {groupsShown.map((g) => (
+              <Fragment key={g.hazard}>
+                <li className="ow-group" aria-hidden="true">
+                  {HAZARD_GROUP_NAME[g.hazard]} <span className="panel-meta">({g.total})</span>
+                </li>
+                {g.items.map((w) => (
+                  <WarningItem
+                    key={w.id}
+                    w={w}
+                    gauge={gaugeForWarning(w, gauges)}
+                    selected={w.id === selectedWarningId}
+                    onInspect={onInspect}
+                    nowMs={nowMs}
+                  />
+                ))}
+              </Fragment>
             ))}
           </ul>
         )}
