@@ -48,7 +48,7 @@ describe('buildFireLayers', () => {
     const full = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 5 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
     const calm = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 5, cellStrength: 0.5 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
     const cell = (full.props.data as unknown[])[0];
-    const alpha = (l: typeof full) => (l.props.getFillColor as (c: unknown) => number[])(cell)[3];
+    const alpha = (l: typeof full) => (l.props as unknown as { getFillColor: (c: unknown) => number[] }).getFillColor(cell)[3];
     expect(alpha(calm)).toBeCloseTo(alpha(full) * 0.5, -0.5);
     expect(alpha(calm)).toBeLessThan(alpha(full));
   });
