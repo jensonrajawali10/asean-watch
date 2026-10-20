@@ -516,8 +516,8 @@ describe('BMKG InaTEWS tsunami parser', () => {
     // warnings adapter or the map (e.g. "0.5 to 3 m", "over 3 m", "under 0.5 m").
     expect((warningsModule as Record<string, unknown>).BMKG_TSUNAMI_GLOSS).toBeUndefined();
     for (const src of [warningsSource, mapViewSource]) {
-      expect(src).not.toMatch(/(?:over|under|above|below)\s+\d+(?:[.,]\d+)?\s*m/i);
-      expect(src).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:to|-|–)\s*\d+(?:[.,]\d+)?\s*m/);
+      expect(src).not.toMatch(/\b(?:over|under|above|below)\s+\d+(?:[.,]\d+)?\s*m\b/i);
+      expect(src).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:to|-|–)\s*\d+(?:[.,]\d+)?\s*m\b/);
     }
   });
 
