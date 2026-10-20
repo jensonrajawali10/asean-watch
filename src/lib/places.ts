@@ -253,9 +253,9 @@ export function noPsiNote(country: string): string | null {
   const name = COUNTRY_NAME[country] ?? 'This country';
   const index = AIR_QUALITY_INDEX[country] ?? null;
   const linked = Boolean(AIR_QUALITY_OFFICIAL[country]);
-  if (index === 'PSI') return `No PSI on this card: ${name} publishes its own PSI${linked ? ' at the official link below' : ''}, and this map does not fetch it.`;
-  if (index) return `No PSI here: PSI is Singapore's index. ${name} uses ${index}${linked ? ', at the official link below' : ''}.`;
-  return `No PSI here: PSI is Singapore's index. We found no official air-quality page for ${name} to link to.`;
+  if (index === 'PSI') return `${name} reports its own PSI${linked ? ' (official link below)' : ''}; this map does not fetch it.`;
+  if (index) return `Singapore reports PSI; ${name} reports ${index}${linked ? ' (official link below)' : ''}.`;
+  return `Singapore reports PSI; we found no official air-quality page for ${name}.`;
 }
 
 /** National tsunami warning services, by ISO country. */

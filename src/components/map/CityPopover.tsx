@@ -128,7 +128,7 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
         { label: 'Fine smoke (PM2.5)', value: d.valueText, unit: 'µg/m³', tone: bandTone(d.band), note: d.band ? d.band.label : at },
         { label: 'Times the WHO daily guideline', value: d.timesWho === null ? '—' : `${d.timesWho.toLocaleString('en-US')}×`, note: `guideline: ${WHO_PM25_24H_UGM3} µg/m³ over 24 h` },
         spark
-          ? { label: snapshot ? 'Peak, 48 h of the run' : 'Peak, next 48 h', value: group(spark.peak.v), unit: 'µg/m³', note: localTimeLabel(isoOf(spark.peak.ms), where, { utc: false }) }
+          ? { label: snapshot ? 'Worst hour in the saved run' : 'Worst hour, next 48 h (forecast)', value: group(spark.peak.v), unit: 'µg/m³', note: localTimeLabel(isoOf(spark.peak.ms), where, { utc: false }) }
           : { label: 'Hour shown', value: at },
       ]}
       sentence={
@@ -150,6 +150,9 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
       {arriving && <p className="city-card__line">{arriving}</p>}
       {spark && (
         <figure className="city-card__spark">
+          <figcaption className="city-card__cap">
+            {snapshot ? 'Fine smoke over 48 hours of the saved forecast run' : 'Fine smoke forecast for the next 48 hours'}, µg/m³ (dot: the hour shown)
+          </figcaption>
           <svg
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"

@@ -73,9 +73,9 @@ describe('areaAir', () => {
 describe('noPsiNote', () => {
   it('is null for Singapore and explains the national index elsewhere', () => {
     expect(noPsiNote('SG')).toBeNull();
-    expect(noPsiNote('ID')).toBe("No PSI here: PSI is Singapore's index. Indonesia uses ISPU, at the official link below.");
-    expect(noPsiNote('BN')).toMatch(/Brunei publishes its own PSI at the official link below/);
-    expect(noPsiNote('LA')).toBe("No PSI here: PSI is Singapore's index. We found no official air-quality page for Laos to link to.");
+    expect(noPsiNote('ID')).toBe('Singapore reports PSI; Indonesia reports ISPU (official link below).');
+    expect(noPsiNote('BN')).toBe('Brunei reports its own PSI (official link below); this map does not fetch it.');
+    expect(noPsiNote('LA')).toBe('Singapore reports PSI; we found no official air-quality page for Laos.');
     for (const c of ASEAN) expect(COUNTRY_NAME[c], c).toBeDefined();
   });
 
@@ -106,8 +106,10 @@ describe('cards', () => {
     const city = (id: string) =>
       renderToStaticMarkup(createElement(CityCard, { cityId: id, airQuality: AQ, timeISO: T, nowISO: AQ.times[0], onClose: noop, onOpenWorkspace: noop }));
     expect(city('vientiane')).toContain('found no official air-quality page for Laos');
-    expect(city('ho-chi-minh-city')).toContain('Vietnam uses VN_AQI');
-    expect(city('singapore')).not.toContain('No PSI');
+    expect(city('ho-chi-minh-city')).toContain('Vietnam reports VN_AQI');
+    expect(city('singapore')).not.toContain('Singapore reports PSI');
+    expect(city('vientiane')).toContain(AQ.dataMode === 'historical' ? 'Worst hour in the saved run' : 'Worst hour, next 48 h (forecast)');
+    expect(city('vientiane')).toMatch(/Fine smoke (forecast for the next 48 hours|over 48 hours of the saved forecast run), µg\/m³/);
   });
 });
 

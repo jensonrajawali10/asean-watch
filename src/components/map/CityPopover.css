@@ -79,3 +79,9 @@
 .city-card__muted {
   color: var(--text-muted);
 }
+
+.city-card__cap {
+  margin: 0 0 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
