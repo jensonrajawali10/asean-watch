@@ -869,7 +869,7 @@
   position: absolute;
   left: 0;
   bottom: calc(100% + 8px);
-  max-width: min(300px, 100%);
+  max-width: min(340px, 100%);
   padding: 6px 10px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -877,9 +877,14 @@
   -webkit-backdrop-filter: var(--panel-filter);
   backdrop-filter: var(--panel-filter);
   box-shadow: var(--shadow);
+  border-color: var(--border-strong);
   color: var(--text);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
+}
+
+.mv-key strong {
+  font-weight: 650;
 }
 
 .mv-key.is-closed {
@@ -953,14 +958,14 @@
 
 .mv-key__icon {
   justify-self: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
 }
 
 .mv-key__fire {
   justify-self: center;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   margin-top: 3px;
   background: #f08c2e;
   outline: 1px solid rgb(0 0 0 / 25%);

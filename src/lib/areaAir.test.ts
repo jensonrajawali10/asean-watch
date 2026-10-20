@@ -127,7 +127,8 @@ describe('plain words', () => {
     expect(html).toContain('µg/m³');
     expect(html).toContain('MODELLED');
     expect(html).toContain('Not a fire.');
-    expect(html).toContain('Fire seen by NASA satellites');
-    expect(html).toContain('Volcano');
+    expect(html).toContain('What&#x27;s on the map');
+    expect(html).toContain('Fires seen by NASA satellites');
+    expect(html).toContain('Volcanoes.');
   });
 });

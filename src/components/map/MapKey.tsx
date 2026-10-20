@@ -6,10 +6,10 @@ import { useState } from 'react';
 import { PM25_BANDS, WHO_PM25_24H_UGM3 } from '../../lib/airQuality';
 
 const MAP_KEY_ROWS = {
-  circles: 'Fine smoke (PM2.5) in the air, µg/m³. A forecast, not a measurement.',
-  pins: 'Official warning from a national agency. Not a fire.',
-  volcanoes: 'Volcano. Click for its official alert level.',
-  fires: 'Fire seen by NASA satellites (a "hotspot").',
+  circles: { name: 'Coloured circles', text: 'Fine smoke (PM2.5) in the air, in µg/m³. Bigger and darker is worse. A forecast, not a measurement.' },
+  pins: { name: 'Red pins', text: 'An official warning from a national agency (floods, tsunamis, volcanoes). Not a fire.' },
+  volcanoes: { name: 'Triangles', text: 'Volcanoes. Click one for its official alert level.' },
+  fires: { name: 'Orange squares', text: 'Fires seen by NASA satellites in the last 24 hours ("hotspots").' },
 } as const;
 
 export default function MapKey() {
@@ -17,7 +17,7 @@ export default function MapKey() {
   return (
     <section className={`mv-key${open ? '' : ' is-closed'}`} aria-label="Map key">
       <button type="button" className="mv-key__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        Map key
+        What's on the map
       </button>
       {open && (
         <ul className="mv-key__list">
@@ -28,9 +28,9 @@ export default function MapKey() {
               ))}
             </span>
             <span>
-              {MAP_KEY_ROWS.circles}
+              <strong>{MAP_KEY_ROWS.circles.name}</strong> {MAP_KEY_ROWS.circles.text}
               <span className="mv-key__scale">
-                {PM25_BANDS.map((b) => b.min).join(' · ')} · WHO daily guideline {WHO_PM25_24H_UGM3} <span className="mv-key__tag">MODELLED</span>
+                {PM25_BANDS.map((b) => b.min).join(' · ')} µg/m³ · WHO daily guideline {WHO_PM25_24H_UGM3} <span className="mv-key__tag">MODELLED</span>
               </span>
             </span>
           </li>
@@ -39,17 +39,23 @@ export default function MapKey() {
               <path className="mv-wpin" d="M12 21.5s-6-6.1-6-11a6 6 0 0 1 12 0c0 4.9-6 11-6 11z" />
               <circle className="mv-wpin-dot" cx="12" cy="10.5" r="2.1" />
             </svg>
-            <span>{MAP_KEY_ROWS.pins}</span>
+            <span>
+              <strong>{MAP_KEY_ROWS.pins.name}</strong> {MAP_KEY_ROWS.pins.text}
+            </span>
           </li>
           <li>
             <svg className="mv-key__icon" viewBox="0 0 24 24" aria-hidden="true">
               <path className="mv-volcano" d="M12 4 21 19H3z" />
             </svg>
-            <span>{MAP_KEY_ROWS.volcanoes}</span>
+            <span>
+              <strong>{MAP_KEY_ROWS.volcanoes.name}</strong> {MAP_KEY_ROWS.volcanoes.text}
+            </span>
           </li>
           <li>
             <span className="mv-key__fire" aria-hidden="true" />
-            <span>{MAP_KEY_ROWS.fires}</span>
+            <span>
+              <strong>{MAP_KEY_ROWS.fires.name}</strong> {MAP_KEY_ROWS.fires.text}
+            </span>
           </li>
         </ul>
       )}
