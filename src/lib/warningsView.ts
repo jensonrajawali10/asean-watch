@@ -148,7 +148,12 @@ export function officialScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGl
   if (w.id.startsWith('jma-volcano:')) {
     // Our fixed gloss carries JMA's position, e.g. "JMA Volcanic Alert Level 2 of 5: crater area restricted".
     const m = /Level\s+([1-5])\s+of\s+5/i.exec(w.levelGloss ?? '');
-    return m ? { rank: Number(m[1]), of: 5 } : null;
+    if (m) return { rank: Number(m[1]), of: 5 };
+    // Without alert levels (e.g. submarine volcanoes): JMA's eruption forecast is the lower of two states, its
+    // eruption warning for the surrounding sea the upper (jmaVolcanoGloss in warnings.ts, from JMA's own words).
+    if (/^JMA eruption forecast, no warning in force/.test(w.levelGloss ?? '')) return { rank: 1, of: 2 };
+    if (/^JMA eruption warning for the sea around/.test(w.levelGloss ?? '')) return { rank: 2, of: 2 };
+    return null;
   }
   if (w.id.startsWith('thaiwater:')) {
     const m = /level\s+([1-5])\s+of\s+5/i.exec(w.levelGloss ?? '') ?? /situation_level\s+([1-5])/i.exec(w.level);

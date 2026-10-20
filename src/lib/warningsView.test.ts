@@ -318,6 +318,11 @@ describe('officialScale: style by the issuer\'s own scale', () => {
     expect(officialScale(tw)).toEqual({ rank: 5, of: 5 });
     expect(belowTopOfScale(tw)).toBe(false);
     expect(officialScale({ id: 'bmkg-inatews:x', level: 'SIAGA', levelGloss: null })).toBeNull();
+    // A submarine volcano's eruption forecast (no warning) sits below JMA's warning for the surrounding sea.
+    const fc = { id: 'jma-volcano:323:x', level: '活火山であることに留意（海底火山）', levelGloss: 'JMA eruption forecast, no warning in force: note that this is an active volcano' };
+    expect(officialScale(fc)).toEqual({ rank: 1, of: 2 });
+    expect(belowTopOfScale(fc)).toBe(true);
+    expect(belowTopOfScale({ ...fc, level: '周辺海域警戒', levelGloss: 'JMA eruption warning for the sea around this submarine volcano' })).toBe(false);
     const jma = snap.warnings.filter((w) => w.id.startsWith('jma-volcano:') && /Level\s+[1-5]\s+of\s+5/i.test(w.levelGloss ?? ''));
     expect(jma.length).toBeGreaterThan(0);
     for (const w of jma) {
