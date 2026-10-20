@@ -327,3 +327,24 @@
 .ow-group:first-child {
   margin-top: 0;
 }
+
+/* Region heading: Southeast Asia first, then the wider Asia-Pacific. */
+.ow-region {
+  margin: 14px 0 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.ow-region:first-child {
+  margin-top: 0;
+}
+
+.ow-relayed {
+  margin: 2px 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}

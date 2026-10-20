@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OfficialWarning } from '../../types';
-import { activeOfficial, alertsPill, countsText, groupByHazard, HAZARD_ORDER, hazardMix, isUrgentWarning, warningCounts } from './alerts';
+import { activeOfficial, alertsPill, countsText, groupByHazard, HAZARD_ORDER, hazardMix, isSoutheastAsia, isUrgentWarning, warningCounts } from './alerts';
 
 function warning(over: Partial<OfficialWarning>): OfficialWarning {
   return {
@@ -108,5 +108,20 @@ describe('what the alerts are about', () => {
     expect(g.map((x) => x.hazard)).toEqual(['tsunami', 'volcano', 'flood']);
     expect(g[2].items.map((w) => w.id)).toEqual(['f1', 'f2']);
     expect(HAZARD_ORDER[0]).toBe('tsunami');
+  });
+});
+
+describe('Southeast Asia first', () => {
+  it('splits the bundled messages by where the agency is (and GDACS by country)', async () => {
+    const { loadWarningsSnapshot } = await import('../../lib/warnings');
+    const all = loadWarningsSnapshot().warnings;
+    for (const w of all) {
+      const sea = isSoutheastAsia(w);
+      if (/^(bmkg-|magma-level-list:|thaiwater:|dsda-jakarta:|pub-flood:)/.test(w.id)) expect(sea, w.id).toBe(true);
+      if (/^(jma-|geonet-val:|nws-tsunami:)/.test(w.id)) expect(sea, w.id).toBe(false);
+    }
+    expect(isSoutheastAsia({ id: 'gdacs:EQ1:1', areaDescription: 'Indonesia' })).toBe(true);
+    expect(isSoutheastAsia({ id: 'gdacs:EQ2:1', areaDescription: 'Papua New Guinea' })).toBe(false);
+    expect(isSoutheastAsia({ id: 'ptwc:x', areaDescription: 'NEAR THE EAST COAST OF KAMCHATKA RUSSIA' })).toBe(false);
   });
 });

@@ -19,7 +19,7 @@ import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
 import { belowTopOfScale, emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
-import { countsText, groupByHazard, HAZARD_GROUP_NAME, warningCounts } from './shell/alerts';
+import { countsText, groupByHazard, HAZARD_GROUP_NAME, isSoutheastAsia, warningCounts } from './shell/alerts';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -140,13 +140,25 @@ export default function OfficialWarningsPanel({
   const capped = !showAll && n > LIST_CAP;
   // Grouped by hazard (tsunami, volcanoes, earthquakes, floods...), newest first within a group, so a reader
   // sees what kind of message each is before reading it; the cap applies to the grouped order.
-  const grouped = groupByHazard(warnings, (w) => w.authority === 'official' && !isExpired(w, nowMs));
-  const ordered = grouped.flatMap((g) => g.items);
+  // Southeast Asia first (the site's region), then the wider Asia-Pacific (JMA, GeoNet, NWS, PTWC, GDACS
+  // elsewhere); each grouped by hazard with active alerts first.
+  const isActive = (w: OfficialWarning) => w.authority === 'official' && !isExpired(w, nowMs);
+  const regions = [
+    { key: 'sea', name: 'Southeast Asia', groups: groupByHazard(warnings.filter(isSoutheastAsia), isActive) },
+    { key: 'apac', name: 'Wider Asia-Pacific (Japan, New Zealand, US Pacific, Pacific-wide)', groups: groupByHazard(warnings.filter((w) => !isSoutheastAsia(w)), isActive) },
+  ].filter((r) => r.groups.length > 0);
+  const ordered = regions.flatMap((r) => r.groups.flatMap((g) => g.items));
   const shown = capped ? ordered.slice(0, LIST_CAP) : ordered;
   const shownIds = new Set(shown.map((w) => w.id));
-  const groupsShown = grouped
-    .map((g) => ({ hazard: g.hazard, total: g.items.length, active: g.active, items: g.items.filter((w) => shownIds.has(w.id)) }))
-    .filter((g) => g.items.length > 0);
+  const regionsShown = regions
+    .map((r) => ({
+      key: r.key,
+      name: r.name,
+      groups: r.groups
+        .map((g) => ({ hazard: g.hazard, total: g.items.length, active: g.active, items: g.items.filter((w) => shownIds.has(w.id)) }))
+        .filter((g) => g.items.length > 0),
+    }))
+    .filter((r) => r.groups.length > 0);
 
   // Keep the selected item in view when selection comes from elsewhere (map marker, detail link).
   useEffect(() => {
@@ -171,25 +183,33 @@ export default function OfficialWarningsPanel({
         )}
       </div>
 
+      <p className="ow-relayed">Each message is the agency's own text, relayed as issued. Southeast Asia first, then the wider Asia-Pacific.</p>
       <div className="ow-scroll">
         {n === 0 ? (
           <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>
         ) : (
           <ul className="ow-list" ref={listRef}>
-            {groupsShown.map((g) => (
-              <Fragment key={g.hazard}>
-                <li className="ow-group" aria-hidden="true">
-                  {HAZARD_GROUP_NAME[g.hazard]} <span className="panel-meta">({g.active} active, {g.total} in all)</span>
+            {regionsShown.map((r) => (
+              <Fragment key={r.key}>
+                <li className="ow-region" aria-hidden="true">
+                  {r.name}
                 </li>
-                {g.items.map((w) => (
-                  <WarningItem
-                    key={w.id}
-                    w={w}
-                    gauge={gaugeForWarning(w, gauges)}
-                    selected={w.id === selectedWarningId}
-                    onInspect={onInspect}
-                    nowMs={nowMs}
-                  />
+                {r.groups.map((g) => (
+                  <Fragment key={`${r.key}-${g.hazard}`}>
+                    <li className="ow-group" aria-hidden="true">
+                      {HAZARD_GROUP_NAME[g.hazard]} <span className="panel-meta">({g.active} active, {g.total} in all)</span>
+                    </li>
+                    {g.items.map((w) => (
+                      <WarningItem
+                        key={w.id}
+                        w={w}
+                        gauge={gaugeForWarning(w, gauges)}
+                        selected={w.id === selectedWarningId}
+                        onInspect={onInspect}
+                        nowMs={nowMs}
+                      />
+                    ))}
+                  </Fragment>
                 ))}
               </Fragment>
             ))}

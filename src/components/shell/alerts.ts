@@ -59,6 +59,22 @@ export function countsText(c: WarningCounts): string {
   return `${c.total} ${c.total === 1 ? 'message' : 'messages'}: ${parts.join(', ')}`;
 }
 
+/** Feeds whose messages are from Southeast Asian national agencies (by warning id prefix). */
+const SEA_FEEDS = ['bmkg-inatews:', 'bmkg-gempa:', 'magma-level-list:', 'thaiwater:', 'dsda-jakarta:', 'pub-flood:'];
+/** ASEAN members as GDACS names the country of an event. */
+const SEA_COUNTRIES = /\b(Indonesia|Malaysia|Singapore|Thailand|Viet ?Nam|Cambodia|Laos|Lao PDR|Philippines|Brunei|Myanmar|Timor-Leste|East Timor)\b/i;
+
+/**
+ * True for a message about Southeast Asia: from a Southeast Asian agency (BMKG, MAGMA/PVMBG, ThaiWater, Jakarta
+ * DSDA, Singapore PUB), or a GDACS estimate whose country is an ASEAN member. JMA, GeoNet, NWS and PTWC
+ * messages (Japan, New Zealand, US Pacific, the wider Pacific) are the wider Asia-Pacific.
+ */
+export function isSoutheastAsia(w: Pick<OfficialWarning, 'id' | 'areaDescription'>): boolean {
+  if (SEA_FEEDS.some((p) => w.id.startsWith(p))) return true;
+  if (w.id.startsWith('gdacs:')) return SEA_COUNTRIES.test(w.areaDescription ?? '');
+  return false;
+}
+
 /** Hazards in the order the warnings list groups them (most life-threatening first), with plain names. */
 export const HAZARD_ORDER: readonly WarningHazard[] = ['tsunami', 'volcano', 'earthquake', 'flood', 'haze', 'weather', 'other'];
 export const HAZARD_GROUP_NAME: Record<WarningHazard, string> = {
