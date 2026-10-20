@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetConnectorCaches } from './liveLoad';
 import {
-  BUNDLED_QUAKES_SNAPSHOT,
+  bundledQuakesSnapshot,
   combineQuakes,
   inQuakeBox,
   loadQuakes,
@@ -13,6 +13,9 @@ import {
   USGS_TSUNAMI_FLAG_NOTE,
 } from './quakesLive';
 import { BUNDLED_WARNINGS_SNAPSHOT, xmlBlocks, xmlText } from './warnings';
+
+// The bundled snapshot is a lazy chunk.
+const BUNDLED_QUAKES_SNAPSHOT = (await bundledQuakesSnapshot())!;
 
 // Trimmed real samples captured 2026-10-14 (data/quakes-snapshot.json).
 const USGS_FIJI = {
@@ -181,7 +184,7 @@ describe('combining and loading', () => {
 
   it('bundled snapshot parses: every USGS event in the box and M4.5+', () => {
     expect(BUNDLED_QUAKES_SNAPSHOT.capturedAt).toMatch(/Z$/);
-    const res = loadQuakesSnapshot();
+    const res = loadQuakesSnapshot(BUNDLED_QUAKES_SNAPSHOT);
     const u = res.events.filter((q) => q.source === 'USGS');
     expect(u.length).toBeGreaterThan(0);
     expect(u.every((q) => q.magnitude >= 4.5 && inQuakeBox(q.lat, q.lon) && q.lon >= -180 && q.lon < 180)).toBe(true);

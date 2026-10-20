@@ -5,10 +5,10 @@ import type { AirQualityData, AqPlaceSeries } from './airQuality';
 import { loadAshWindSnapshot } from './ashDrift';
 import { loadFireSnapshot } from './fires';
 import { loadFixtures } from './fixtures';
-import { loadFloodModelSnapshot } from './floodModel';
+import { bundledFloodSnapshot, loadFloodModelSnapshot } from './floodModel';
 import { loadNeaSnapshot } from './nea';
 import { loadPtwcSnapshot } from './ptwc';
-import { loadQuakesSnapshot } from './quakesLive';
+import { bundledQuakesSnapshot, loadQuakesSnapshot } from './quakesLive';
 import {
   SITUATION_DISCLAIMER,
   activeOfficial,
@@ -33,6 +33,8 @@ import type { HotspotSource } from './transport';
 import { loadWarningsSnapshot } from './warnings';
 import { loadWindSnapshot } from './windField';
 import type { WindGrid } from './windField';
+const FLOOD_SNAP = await bundledFloodSnapshot();
+const QUAKES_SNAP = await bundledQuakesSnapshot();
 
 // The bundled snapshots are lazy chunks (loaded with await).
 const WIND925 = await loadWindSnapshot('925hPa');
@@ -487,8 +489,8 @@ describe('situationReport on the bundled snapshots', () => {
     warnings: [...w.warnings, ...p.warnings],
     warningFeeds: [...w.feeds, p.status],
     ashWind: loadAshWindSnapshot(),
-    riverFlow: loadFloodModelSnapshot(),
-    quakes: loadQuakesSnapshot(),
+    riverFlow: loadFloodModelSnapshot(FLOOD_SNAP),
+    quakes: loadQuakesSnapshot(QUAKES_SNAP),
   };
 
   it('builds a full report with a snapshot headline', () => {

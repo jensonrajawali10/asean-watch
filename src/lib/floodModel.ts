@@ -8,7 +8,6 @@
 // 1.8 m³/s at the requested cell vs 4,314 m³/s one cell away), so each point searches a 5×5
 // neighbourhood (±0.1°) and uses the cell with the highest mean discharge. Small urban rivers
 // (Ciliwung) remain poorly resolved. Snapshot: data/flood-snapshot.json (npm run refresh:flood).
-import snapshotJson from '../../data/flood-snapshot.json';
 import type { ConnectorStatus, RiverDischargeDay, RiverDischargeSeries } from '../types';
 import { isRecord, isoNoMs, loadLiveFirst, num, snapshotOnly, str } from './liveLoad';
 
@@ -149,7 +148,20 @@ export interface FloodSnapshot {
   retrievedAt: string;
   raw: unknown;
 }
-export const BUNDLED_FLOOD_SNAPSHOT = snapshotJson as unknown as FloodSnapshot;
+// The bundled snapshot is a fallback (and the first view until the live answer arrives), so it is its own
+// same-origin chunk, not part of the entry chunk. Content-hashed: works offline once the app is loaded.
+let bundledP: Promise<FloodSnapshot | null> | null = null;
+/** The bundled HISTORICAL GloFAS snapshot (memoised dynamic import); null when its chunk cannot be loaded. */
+export function bundledFloodSnapshot(): Promise<FloodSnapshot | null> {
+  bundledP ??= import('../../data/flood-snapshot.json').then(
+    (m) => m.default as unknown as FloodSnapshot,
+    () => {
+      bundledP = null; // a failed chunk load can be retried
+      return null;
+    },
+  );
+  return bundledP;
+}
 
 export interface FloodModelResult {
   series: RiverDischargeSeries[];
@@ -187,10 +199,10 @@ function wrap(r: { value: RiverDischargeSeries[] | null; status: ConnectorStatus
 
 /** Live GloFAS discharge (1 h cache, 60 s backoff) with the HISTORICAL snapshot fallback. Never throws. */
 export async function loadFloodModel(opts?: { fetchImpl?: typeof fetch; timeoutMs?: number; snapshot?: FloodSnapshot | null }): Promise<FloodModelResult> {
-  const source = opts?.snapshot === undefined ? BUNDLED_FLOOD_SNAPSHOT : opts.snapshot;
+  const source = opts?.snapshot === undefined ? await bundledFloodSnapshot() : opts.snapshot;
   return wrap(await loadLiveFirst(spec(source, opts)));
 }
 
-export function loadFloodModelSnapshot(source: FloodSnapshot | null = BUNDLED_FLOOD_SNAPSHOT): FloodModelResult {
+export function loadFloodModelSnapshot(source: FloodSnapshot | null): FloodModelResult {
   return wrap(snapshotOnly(spec(source)));
 }

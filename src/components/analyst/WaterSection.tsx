@@ -22,7 +22,8 @@ export interface WaterSectionProps {
   gauges: GaugeReading[];
   tideStations: SeaLevelStation[];
   tideListRetrievedAt: string | null;
-  riverFlow: FloodModelResult;
+  /** Null until the bundled snapshot or the live run has loaded (moments after first paint). */
+  riverFlow: FloodModelResult | null;
   layers: MapLayerState;
   onLayersChange: (patch: Partial<MapLayerState>) => void;
   onInspectWarning: (id: string) => void;
@@ -62,7 +63,7 @@ export default function WaterSection(p: WaterSectionProps) {
     { label: 'NOAA/NWS Pacific Tsunami Warning Center', url: 'https://www.tsunami.gov/', mode: p.ptwc.status.status === 'live' ? 'LIVE' : 'SNAPSHOT', retrievedAt: p.ptwc.status.retrievedAt },
     { label: 'BMKG InaTEWS tsunami messages', url: 'https://inatews.bmkg.go.id/', mode: 'OFFICIAL' },
     { label: 'IOC Sea Level Station Monitoring Facility (VLIZ)', url: 'https://www.ioc-sealevelmonitoring.org/', mode: 'MEASURED', retrievedAt: p.tideListRetrievedAt, licence: 'DOI 10.14284/482' },
-    { label: 'GloFAS river discharge via Open-Meteo Flood API', url: 'https://open-meteo.com/en/docs/flood-api', mode: 'MODELLED', retrievedAt: p.riverFlow.status.retrievedAt, licence: 'CC BY 4.0' },
+    { label: 'GloFAS river discharge via Open-Meteo Flood API', url: 'https://open-meteo.com/en/docs/flood-api', mode: 'MODELLED', retrievedAt: p.riverFlow?.status.retrievedAt ?? null, licence: 'CC BY 4.0' },
     { label: 'ThaiWater (HII), DSDA Jakarta Posko Banjir, PUB Singapore flood alerts', mode: 'OFFICIAL' },
   ];
 
@@ -77,7 +78,11 @@ export default function WaterSection(p: WaterSectionProps) {
         <KeyFigure label="BMKG tsunami message" value={tsunami.inForce ? 'In force' : 'None in force'} note={tsunami.latest ? `last: ${formatUtc(tsunami.latest.issuedAt)}` : 'no message with areas on file'} />
         <KeyFigure label="Flood gauges relayed" value={String(relayedGauges.length)} note={`${otherGauges} more below threshold`} />
         <KeyFigure label="Tide gauges (APAC)" value={String(p.tideStations.length)} note={`${recentStations} reported in the last 48 h at list capture`} />
-        <KeyFigure label="River points (modelled)" value={String(p.riverFlow.series.length)} note={p.riverFlow.status.status === 'live' ? 'live GloFAS run' : 'saved GloFAS run'} />
+        <KeyFigure
+          label="River points (modelled)"
+          value={p.riverFlow ? String(p.riverFlow.series.length) : '…'}
+          note={!p.riverFlow ? 'loading GloFAS run' : p.riverFlow.status.status === 'live' ? 'live GloFAS run' : 'saved GloFAS run'}
+        />
       </div>
 
       <AnalystSubhead>PTWC: latest product</AnalystSubhead>
@@ -217,7 +222,9 @@ export default function WaterSection(p: WaterSectionProps) {
 
       <AnalystSubhead>River flow (modelled, GloFAS)</AnalystSubhead>
       <p className="an-note">{FLOOD_MODEL_NOTE}</p>
-      {p.riverFlow.series.length > 0 ? (
+      {!p.riverFlow ? (
+        <p className="an-muted">Loading the GloFAS river model…</p>
+      ) : p.riverFlow.series.length > 0 ? (
         <div className="an-table-wrap">
           <table className="an-table">
             <caption>

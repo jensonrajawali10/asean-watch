@@ -28,9 +28,9 @@ import type { MapHotspot } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
 import { loadAshWind } from './lib/ashDrift';
 import type { AshWindData } from './lib/ashDrift';
-import { loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
+import { bundledQuakesSnapshot, loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
 import type { QuakesResult } from './lib/quakesLive';
-import { loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
+import { bundledFloodSnapshot, loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
 import type { FloodModelResult } from './lib/floodModel';
 import type { WindGrid, WindLoadResult } from './lib/windField';
 import { loadAirQuality } from './lib/airQuality';
@@ -180,6 +180,7 @@ const RULES_BY_WATCH: Record<string, string[]> = (() => {
 
 /** The FIRMS whole-region snapshot (fires module): the Fires chip's heat grid, the fire cards and section. */
 const FIRE_SNAP: FireSnapshot | null = loadFireSnapshot();
+const NO_RIVER_SERIES: FloodModelResult['series'] = [];
 const FIRES_SUMMARY = (() => {
   try {
     return FIRE_SNAP ? firesSummaryFromSnapshot(FIRE_SNAP) : null;
@@ -373,8 +374,21 @@ export default function App() {
   /** Modelled pressure-level winds at the volcano summits (live or snapshot); null until loaded. */
   const [ashWind, setAshWind] = useState<AshWindData | null>(null);
   /** Connector layers: bundled snapshot first, replaced by the live load when it settles. */
-  const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
-  const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
+  // Null until the bundled snapshot chunk (moments after first paint) or the live answer arrives.
+  const [quakes, setQuakes] = useState<QuakesResult | null>(null);
+  const [riverFlow, setRiverFlow] = useState<FloodModelResult | null>(null);
+  useEffect(() => {
+    let live = true;
+    void bundledQuakesSnapshot().then((s) => {
+      if (live) setQuakes((prev) => prev ?? loadQuakesSnapshot(s));
+    });
+    void bundledFloodSnapshot().then((s) => {
+      if (live) setRiverFlow((prev) => prev ?? loadFloodModelSnapshot(s));
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
 
@@ -1074,7 +1088,7 @@ export default function App() {
     scenarioLayers: scenario ? plumeLayers : null,
     scenarioInfo: scenario ? { startMs: scenario.startMs, bounds: scenario.bounds } : null,
     quakes,
-    riverFlow: riverFlow.series,
+    riverFlow: riverFlow?.series ?? NO_RIVER_SERIES,
   };
 
   const freshness =
