@@ -242,3 +242,78 @@
 .an-sources a {
   color: var(--accent);
 }
+
+/* Water & tsunami: the BMKG tsunami status leads the section (design review with Grok, 2026-10-20).
+   In force: the reserved official rail and surface, larger type. None in force: neutral, never green. */
+.an-tsunami-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.an-tsunami-status--active {
+  border-color: var(--official-border);
+  border-left: 6px solid var(--official);
+  background: var(--official-bg);
+}
+
+.an-tsunami-status__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.an-tsunami-status__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.an-tsunami-status__meta,
+.an-tsunami-status__others {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.an-tsunami-status__others {
+  color: var(--text);
+}
+
+/* The BMKG areas table stays readable in a narrow drawer: header stays put, rows scroll. */
+.an-tsunami-areas thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+
+/* Weight only (no colour of our own) for BMKG's two evacuation levels; the text is BMKG's. */
+.an-bmkg-level--awas,
+.an-bmkg-level--siaga {
+  font-weight: 700;
+}
+
+.an-show-all {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+
+/* An ended BMKG message stays available (verbatim) but collapsed, so it never competes with the status. */
+.an-ended-details > summary {
+  margin: 6px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}

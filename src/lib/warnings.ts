@@ -226,7 +226,8 @@ const DSDA_GLOSS: Record<string, string> = {
   '4': 'Siaga 4 is the LEAST severe of DSDA’s four levels (Siaga 1 is the most severe)',
 };
 
-const BMKG_LEVEL_RANK: Record<string, number> = { AWAS: 3, SIAGA: 2, WASPADA: 1 };
+/** BMKG InaTEWS per-area levels, most severe first (AWAS > SIAGA > WASPADA). Used for ordering only. */
+export const BMKG_LEVEL_RANK: Record<string, number> = { AWAS: 3, SIAGA: 2, WASPADA: 1 };
 
 // ---------------------------------------------------------------------------
 // Feed identities
