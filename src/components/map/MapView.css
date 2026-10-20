@@ -862,3 +862,109 @@
   border-radius: 50%;
   background: var(--state-check-border);
 }
+
+/* ---------- Map key (first-time visitors): what the symbols mean, in plain words ---------- */
+.mv-key {
+  align-self: flex-start;
+  max-width: min(360px, 100%);
+  padding: 6px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-glass);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mv-key.is-closed {
+  padding-bottom: 6px;
+}
+
+.mv-key__toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.mv-key__toggle::after {
+  content: ' BE';
+  color: var(--text-muted);
+}
+
+.mv-key.is-closed .mv-key__toggle::after {
+  content: ' B8';
+}
+
+.mv-key__list {
+  display: grid;
+  gap: 5px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mv-key__list li {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: start;
+  gap: 8px;
+}
+
+.mv-key__bands {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  height: 10px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+.mv-key__band {
+  background: var(--band);
+}
+
+.mv-key__scale {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.mv-key__tag {
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--mode-modelled-border);
+  border-radius: 999px;
+  background: var(--mode-modelled-bg);
+  color: var(--mode-modelled-fg);
+  font-size: 10px;
+}
+
+.mv-key__icon {
+  justify-self: center;
+  width: 20px;
+  height: 20px;
+}
+
+.mv-key__fire {
+  justify-self: center;
+  width: 12px;
+  height: 12px;
+  margin-top: 3px;
+  background: #f08c2e;
+  outline: 1px solid rgb(0 0 0 / 25%);
+}
+
+@media (max-width: 767px) {
+  .mv-key:not(.is-closed) .mv-key__list li:nth-child(n + 3) {
+    display: none;
+  }
+}

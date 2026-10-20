@@ -47,6 +47,7 @@ import { getMapPalette, rgbCss, volcanoLevelColour } from './mapPalette';
 import type { Rgb, Rgba } from './mapPalette';
 import { BASEMAP_BUILDING_SOURCES, basemapStyleFor, basemapStyleOptions, buildingPaint } from './basemap';
 import { LAYER_CATALOG, MAP_CHIPS } from './layerCatalog';
+import MapKey from './MapKey';
 import type { LayerKey, MapLayerState } from './layerCatalog';
 import type { OfficialVolcanoLevel } from './volcanoLevels';
 import { REGIONAL_ZOOM, planRegionalLabels } from './labelPlan';
@@ -2164,6 +2165,7 @@ export default function MapView({
       )}
 
       <div ref={dockRef} className="mv-dock" data-no-pan>
+        <MapKey />
         <div className="mv-chips" role="group" aria-label="Map layers">
           {MAP_CHIPS.map((c) => {
             const Icon = c.key === 'particles' ? WindChipIcon : c.key === 'satIr' ? SatelliteChipIcon : CHIP_ICONS[c.key];

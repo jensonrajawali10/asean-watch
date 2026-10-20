@@ -30,7 +30,7 @@ import type { WindGrid, WindSlice } from '../../lib/windField';
 import { AdaptiveBudget, FrameLimiter, intersectBox, ParticleSystem, rasterisePm25, streakArrows, trailForZoom } from './hazeRender';
 import type { ParticleBox } from './hazeRender';
 import { cityBandStyle, getMapPalette } from './mapPalette';
-import { CITY_LABEL_ZOOM, cityDrawOrder, cityMarkerRadius, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
+import { CITY_LABEL_ZOOM, cityDrawOrder, cityMarkerRadius, fullCityLabel, placeCityLabels, pulseRing, shortCityName, valueText, worstId } from './cityMarkers';
 
 export type { AirQualityData };
 
@@ -510,7 +510,7 @@ export class HazeLayerController {
       // always gets its full label.
       labelOf = new Map([...i.labels].map(([id, text]) => [id, { text, kind: text.includes('  ') ? ('full' as const) : ('value' as const) }]));
       const hovered = this.hoveredId ? data.find((d) => d.id === this.hoveredId) : null;
-      if (hovered) labelOf.set(hovered.id, { text: `${shortCityName(hovered.name)}  ${valueText(hovered.pm25)}`, kind: 'full' });
+      if (hovered) labelOf.set(hovered.id, { text: fullCityLabel(shortCityName(hovered.name), valueText(hovered.pm25)), kind: 'full' });
     } else {
       const { width: vw, height: vh } = this.map.getContainer().getBoundingClientRect();
       const placed = placeCityLabels(

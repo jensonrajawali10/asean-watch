@@ -34,7 +34,7 @@ describe('placeCityLabels', () => {
 
   it('labels the worst first and drops to the value when the full label collides', () => {
     const out = placeCityLabels([c('a', 100, 100, 50), c('b', 100, 108, 600)]);
-    expect(out[0]).toEqual({ id: 'b', text: 'B  600', kind: 'full' });
+    expect(out[0]).toEqual({ id: 'b', text: 'B  600 µg/m³', kind: 'full' });
     expect(out.find((l) => l.id === 'a')).toBeUndefined();
   });
 
@@ -45,7 +45,7 @@ describe('placeCityLabels', () => {
 
   it('always labels a forced (selected) city in full', () => {
     const out = placeCityLabels([c('a', 100, 100, 50, true), c('b', 100, 104, 600)]);
-    expect(out[0]).toEqual({ id: 'a', text: 'A  50', kind: 'full' });
+    expect(out[0]).toEqual({ id: 'a', text: 'A  50 µg/m³', kind: 'full' });
   });
 
   it('skips labels outside the viewport', () => {

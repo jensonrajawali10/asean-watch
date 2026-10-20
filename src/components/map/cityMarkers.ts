@@ -28,6 +28,11 @@ export function valueText(pm25: number): string {
   return Number.isFinite(pm25) ? Math.round(pm25).toLocaleString('en-US') : '—';
 }
 
+/** "Palangka Raya  407 µg/m³": a city's full map label, with the unit (the value-only label stays a bare number). */
+export function fullCityLabel(name: string, value: string): string {
+  return `${name}  ${value} µg/m³`;
+}
+
 export interface LabelCandidate {
   id: string;
   /** Screen position of the circle centre (px). */
@@ -80,7 +85,7 @@ export function placeCityLabels(cands: readonly LabelCandidate[], opts: { charPx
       const x0 = c.x + c.r + gap;
       return { x0, y0: c.y - h / 2, x1: x0 + w, y1: c.y + h / 2 };
     };
-    const full = `${c.name}  ${c.value}`;
+    const full = fullCityLabel(c.name, c.value);
     const fb = box(full);
     if (c.force || free(fb, c.id)) {
       placed.push(fb);
