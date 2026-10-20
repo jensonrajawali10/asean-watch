@@ -180,6 +180,11 @@ export interface FireLayerOptions {
   showBadges?: boolean;
   /** Below this zoom the squares are hidden and only the glow shows (default 4.5 on dark, 0 on light). */
   cellsMinZoom?: number;
+  /**
+   * Calm squares (the simple view): the grid at this fraction of its usual strength, so the city circles,
+   * pins and coastlines stay on top. 1 (default) is full strength.
+   */
+  cellStrength?: number;
   onClick?: (pick: FirePick, info: PickingInfo) => void;
   onHover?: (pick: FirePick | null, info: PickingInfo) => void;
 }
@@ -360,6 +365,7 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
   // Squares fade as the user zooms in, so a 0.25° cell never reads as a solid block over towns and roads:
   // full strength at the regional view, about a third by zoom 8.
   const cellFade = zoom <= 5.5 ? 1 : Math.max(0.32, 1 - (zoom - 5.5) * 0.28);
+  const strength = Math.max(0, Math.min(1, opts.cellStrength ?? 1));
   const glowLayer = (id: string, data: FireCell[], alpha: (c: FireCell) => number, minPx: number, days: number) =>
     sprite
       ? new IconLayer<FireCell>({
@@ -403,14 +409,14 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
           getPosition: (c) => [c.west, c.south],
           cellSize: cellDeg * M_PER_DEG,
           coverage: zoom >= 6.5 ? 0.8 : 0.9,
-          getFillColor: (c) => fireColor(c.frp / days, theme, alpha(c) * cellFade),
+          getFillColor: (c) => fireColor(c.frp / days, theme, alpha(c) * cellFade * strength),
           parameters,
           pickable: true,
           autoHighlight: true,
           highlightColor: pal.highlight,
           onClick,
           onHover,
-          updateTriggers: { getFillColor: [theme, recentLayer, cellFade] },
+          updateTriggers: { getFillColor: [theme, recentLayer, cellFade, strength] },
         }),
     );
 

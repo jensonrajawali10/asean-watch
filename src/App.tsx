@@ -865,6 +865,9 @@ export default function App() {
         cellsMinZoom: 4.5,
         // Hotspot count badges are details: hidden in the simple view (the squares stay).
         showBadges: detailMode === 'full' && ctx.zoom >= REGIONAL_ZOOM,
+        // Simple view: only the last 24 h (what the map key says), at half strength, so the squares never
+        // read as part of the haze forecast or bury the pins and circles.
+        ...(detailMode === 'simple' ? { window: '24h' as const, cellStrength: 0.5 } : {}),
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),

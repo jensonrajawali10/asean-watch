@@ -44,6 +44,15 @@ describe('buildFireLayers', () => {
     expect(sel).toContain('fires-selected');
   });
 
+  it('calm squares (simple view): the same cells at the given fraction of their alpha', () => {
+    const full = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 5 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
+    const calm = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 5, cellStrength: 0.5 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
+    const cell = (full.props.data as unknown[])[0];
+    const alpha = (l: typeof full) => (l.props.getFillColor as (c: unknown) => number[])(cell)[3];
+    expect(alpha(calm)).toBeCloseTo(alpha(full) * 0.5, -0.5);
+    expect(alpha(calm)).toBeLessThan(alpha(full));
+  });
+
   it('blends additively on dark and normally on light', () => {
     const dark = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 6 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
     const light = buildFireLayers({ snapshot: snap, theme: 'light', zoom: 6 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
