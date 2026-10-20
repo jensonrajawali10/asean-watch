@@ -478,12 +478,65 @@ export function parseBmkgGempa(raw: unknown, meta: ParseMeta): FeedParseResult {
   return { warnings: [warning], gauges: [], note: 'Latest BMKG earthquake information message.' };
 }
 
-/** JMA tsunami: the latest product in list.json, one warning per forecast area. */
-export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult {
+/** JMA bosai tsunami products that carry a forecast per coastal area (warnings/advisories/forecasts; tsunami information). */
+const JMA_FORECAST_PRODUCT = /_VTSE(41|51)_/;
+/** At most this many events (newest first) have their newest forecast product fetched. */
+export const JMA_MAX_EVENTS = 5;
+
+/**
+ * From JMA's list.json, the newest forecast product (VTSE41/VTSE51) of each event (`eid`), newest event
+ * first, at most JMA_MAX_EVENTS. Products without a per-area forecast (e.g. VTSE52 offshore observations)
+ * are skipped, so they never replace an event's forecast; one event never replaces another.
+ */
+export function jmaNewestForecastPerEvent(list: unknown): Record<string, unknown>[] {
+  const items = Array.isArray(list) ? list.filter(isRecord) : [];
+  const newest = new Map<string, Record<string, unknown>>();
+  for (const it of items) {
+    const json = str(it.json);
+    if (!json || !JMA_FORECAST_PRODUCT.test(json)) continue;
+    const eid = str(it.eid) ?? json;
+    const prev = newest.get(eid);
+    if (!prev || (str(it.rdt) ?? '') > (str(prev.rdt) ?? '')) newest.set(eid, it);
+  }
+  return [...newest.values()].sort((a, b) => (str(b.rdt) ?? '').localeCompare(str(a.rdt) ?? '')).slice(0, JMA_MAX_EVENTS);
+}
+
+interface JmaDetail {
+  detail: Record<string, unknown>;
+  url: string;
+}
+
+/**
+ * The detail documents in a JMA raw payload. Current shape: { list, details: [{ url, detail }] } (one per
+ * event). Older snapshots: { list, detail, detailUrl } (the single newest product). If two documents are
+ * for the same EventID, only the newest ReportDateTime is kept: JMA's newest forecast replaces the older one.
+ */
+function jmaDetails(raw: Record<string, unknown>, fallbackUrl: string): JmaDetail[] {
+  const out: JmaDetail[] = [];
+  if (Array.isArray(raw.details)) {
+    for (const d of raw.details) {
+      if (isRecord(d) && isRecord(d.detail)) out.push({ detail: d.detail, url: str(d.url) ?? fallbackUrl });
+    }
+  } else if (isRecord(raw.detail)) {
+    out.push({ detail: raw.detail, url: str(raw.detailUrl) ?? fallbackUrl });
+  }
+  const head = (d: JmaDetail) => (isRecord(d.detail.Head) ? d.detail.Head : {});
+  const reportMs = (d: JmaDetail) => {
+    const iso = toUtcIso(head(d).ReportDateTime);
+    return iso ? Date.parse(iso) : Number.NEGATIVE_INFINITY;
+  };
+  const byEvent = new Map<string, JmaDetail>();
+  out.forEach((d, i) => {
+    const key = str(head(d).EventID) ?? `#${i}`;
+    const prev = byEvent.get(key);
+    if (!prev || reportMs(d) > reportMs(prev)) byEvent.set(key, d);
+  });
+  return [...byEvent.values()].sort((a, b) => reportMs(b) - reportMs(a));
+}
+
+/** One warning per forecast area of one JMA detail document. */
+function parseJmaDetail(detail: Record<string, unknown>, detailUrl: string, meta: ParseMeta): OfficialWarning[] {
   const feed = FEEDS.jmaTsunami;
-  if (!isRecord(raw) || !Array.isArray(raw.list)) throw new Error('not a JMA tsunami list');
-  const detail = isRecord(raw.detail) ? raw.detail : null;
-  if (!detail) return { warnings: [], gauges: [], note: 'JMA lists no tsunami message. Not an all-clear; check JMA directly.' };
   const head = isRecord(detail.Head) ? detail.Head : {};
   const body = isRecord(detail.Body) ? detail.Body : {};
   const forecast = isRecord(body.Tsunami) && isRecord(body.Tsunami.Forecast) ? body.Tsunami.Forecast : {};
@@ -493,7 +546,6 @@ export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult 
   const expiresAt = toUtcIso(head.ValidDateTime);
   const cancelled = str(head.InfoType) === '取消';
   const title = str(head.enTitle) ? `${str(head.enTitle)} (${str(head.Title) ?? ''})` : (str(head.Title) ?? 'JMA tsunami information');
-  const detailUrl = str(raw.detailUrl) ?? feed.url;
   const warnings: OfficialWarning[] = [];
   for (const item of items) {
     if (!isRecord(item) || !isRecord(item.Area)) continue;
@@ -527,12 +579,30 @@ export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult 
       }),
     );
   }
+  return warnings;
+}
+
+/**
+ * JMA tsunami: the newest forecast product of each event in list.json (jmaNewestForecastPerEvent), one
+ * warning per forecast area. An event's older products are not shown: its newest forecast replaces them.
+ */
+export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult {
+  const feed = FEEDS.jmaTsunami;
+  if (!isRecord(raw) || !Array.isArray(raw.list)) throw new Error('not a JMA tsunami list');
+  const details = jmaDetails(raw, feed.url);
+  const missing = Array.isArray(raw.details) ? raw.details.filter((d) => !isRecord(d) || !isRecord(d.detail)).length : 0;
+  const missingNote = missing > 0 ? ` ${missing} event product${missing === 1 ? '' : 's'} could not be fetched: check JMA directly.` : '';
+  if (details.length === 0) {
+    return { warnings: [], gauges: [], note: `JMA lists no tsunami message. Not an all-clear; check JMA directly.${missingNote}` };
+  }
+  const warnings = details.flatMap((d) => parseJmaDetail(d.detail, d.url, meta));
   const open = warnings.filter((w) => !w.ended).length;
-  return {
-    warnings,
-    gauges: [],
-    note: `Latest JMA product ${str(head.enTitle) ?? str(head.Title) ?? ''} issued ${issuedAt ?? 'at an unknown time'}: ${warnings.length} areas, ${open} not ended or expired.`,
-  };
+  const products = details.map((d) => {
+    const head = isRecord(d.detail.Head) ? d.detail.Head : {};
+    return `${str(head.enTitle) ?? str(head.Title) ?? ''} issued ${toUtcIso(head.ReportDateTime) ?? 'at an unknown time'}`;
+  });
+  const lead = details.length === 1 ? `Latest JMA product ${products[0]}` : `Newest JMA forecast for each of ${details.length} events (${products.join('; ')})`;
+  return { warnings, gauges: [], note: `${lead}: ${warnings.length} areas, ${open} not ended or expired.${missingNote}` };
 }
 
 /** JMA volcano warnings in force (warning.json) joined to volcano_list.json for English names and coordinates. */
@@ -1169,10 +1239,13 @@ const SPECS: FeedSpec[] = [
     fetchRaw: async (get) => {
       const list = await get(FEEDS.jmaTsunami.url, 'json');
       const items = Array.isArray(list) ? list.filter(isRecord) : [];
-      const latest = [...items].sort((a, b) => (str(b.rdt) ?? '').localeCompare(str(a.rdt) ?? ''))[0];
-      if (!latest || !str(latest.json)) return { list: items, detail: null };
-      const detailUrl = `https://www.jma.go.jp/bosai/tsunami/data/${str(latest.json)}`;
-      return { list: items, detail: await get(detailUrl, 'json'), detailUrl };
+      const urls = jmaNewestForecastPerEvent(items).map((it) => `https://www.jma.go.jp/bosai/tsunami/data/${str(it.json)}`);
+      const settled = await Promise.allSettled(urls.map((url) => get(url, 'json')));
+      // One event's detail failing must not hide the others; only when every detail fails does the feed fail.
+      const firstFailure = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (firstFailure && settled.every((r) => r.status === 'rejected')) throw firstFailure.reason;
+      const details = settled.map((r, i) => ({ url: urls[i], detail: r.status === 'fulfilled' ? r.value : null }));
+      return { list: items, details };
     },
   },
   {
@@ -1214,8 +1287,9 @@ export const BUNDLED_WARNINGS_SNAPSHOT = snapshotJson as unknown as WarningsSnap
 function snapshotFeed(id: string, source: WarningsSnapshot | null): SnapshotFeed | null {
   const f = source?.feeds?.[id];
   if (!f || f.raw === null || f.raw === undefined || typeof f.retrievedAt !== 'string') return null;
-  // The script stores JMA tsunami as { list, detail }; the detail URL is the second captured URL.
-  if (id === FEEDS.jmaTsunami.id && isRecord(f.raw) && Array.isArray(f.urls) && f.urls[1]) {
+  // Older snapshots store JMA tsunami as { list, detail }; the detail URL is the second captured URL.
+  // Current ones store { list, details: [{ url, detail }] }, which carries its own URLs.
+  if (id === FEEDS.jmaTsunami.id && isRecord(f.raw) && !Array.isArray(f.raw.details) && Array.isArray(f.urls) && f.urls[1]) {
     return { ...f, raw: { ...f.raw, detailUrl: f.urls[1] } };
   }
   return f;

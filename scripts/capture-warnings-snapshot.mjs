@@ -93,10 +93,23 @@ const FEEDS = {
   'jma-tsunami': async () => {
     const listUrl = `${JMA}/tsunami/data/list.json`;
     const list = await get(listUrl, 'json');
-    const latest = [...list].sort((a, b) => String(b.rdt).localeCompare(String(a.rdt)))[0];
-    if (!latest) return { urls: [listUrl], raw: { list, detail: null } };
-    const detailUrl = `${JMA}/tsunami/data/${latest.json}`;
-    return { urls: [listUrl, detailUrl], raw: { list, detail: await get(detailUrl, 'json') } };
+    // The newest forecast product (VTSE41/VTSE51) of each event, newest 5 events: the same selection as
+    // jmaNewestForecastPerEvent in src/lib/warnings.ts. An observation-only product (VTSE52) never
+    // replaces an event's forecast, and one event never replaces another.
+    const newest = new Map();
+    for (const it of Array.isArray(list) ? list : []) {
+      if (!it || typeof it.json !== 'string' || !/_VTSE(41|51)_/.test(it.json)) continue;
+      const eid = String(it.eid ?? it.json);
+      const prev = newest.get(eid);
+      if (!prev || String(it.rdt ?? '') > String(prev.rdt ?? '')) newest.set(eid, it);
+    }
+    const picked = [...newest.values()].sort((a, b) => String(b.rdt ?? '').localeCompare(String(a.rdt ?? ''))).slice(0, 5);
+    const details = [];
+    for (const it of picked) {
+      const url = `${JMA}/tsunami/data/${it.json}`;
+      details.push({ url, detail: await get(url, 'json') });
+    }
+    return { urls: [listUrl, ...details.map((d) => d.url)], raw: { list, details } };
   },
   'jma-volcano': async () => {
     const warningUrl = `${JMA}/volcano/data/warning.json`;
