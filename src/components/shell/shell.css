@@ -923,3 +923,61 @@
     display: block;
   }
 }
+
+/* One-line legend under the headline: what the symbols mean before any click. */
+.headline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.headline-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.hl-sym {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+
+.hl-sym--circle {
+  border-radius: 50%;
+  background: linear-gradient(90deg, #62b77a, #e3c95a 35%, #dc6262 70%, #a774c4);
+}
+
+.hl-sym--fire {
+  background: #f08c2e;
+}
+
+.hl-sym--volcano {
+  width: 0;
+  height: 0;
+  border-right: 6px solid transparent;
+  border-bottom: 10px solid var(--text);
+  border-left: 6px solid transparent;
+}
+
+.hl-sym--pin {
+  border-radius: 50% 50% 50% 0;
+  background: var(--official);
+  transform: rotate(-45deg);
+}
+
+.app[data-drawer='open'] .headline-legend {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .headline-legend {
+    display: none;
+  }
+}

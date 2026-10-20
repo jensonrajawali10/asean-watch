@@ -95,6 +95,21 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
         <p className="headline" aria-live="polite">
           {headline}
         </p>
+        {/* What the symbols mean, on first load, without opening anything (the map key has the detail). */}
+        <p className="headline-legend">
+          <span>
+            <i className="hl-sym hl-sym--circle" aria-hidden="true" /> Circles: fine smoke forecast (PM2.5, modelled)
+          </span>
+          <span>
+            <i className="hl-sym hl-sym--fire" aria-hidden="true" /> Orange squares: fires seen by NASA satellites
+          </span>
+          <span>
+            <i className="hl-sym hl-sym--volcano" aria-hidden="true" /> Triangles: volcanoes
+          </span>
+          <span>
+            <i className="hl-sym hl-sym--pin" aria-hidden="true" /> Red pins: official warnings
+          </span>
+        </p>
         <p className="headline-meta">
           {timeLabel && <time dateTime={timeISO ?? undefined}>{timeLabel}</time>}
           {freshness && (
