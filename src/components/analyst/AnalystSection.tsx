@@ -43,8 +43,9 @@ export function AnalystSection({ id, title, lede, meta, children, sources }: Ana
         <footer className="an-sources">
           <h3 className="an-sources__title">Sources</h3>
           <ol>
-            {sources.map((s) => (
-              <li key={`${s.label}|${s.url ?? ''}`}>
+            {sources.map((s, i) => (
+              // Index in the key: two sources may share a label and a link (e.g. one agency's two feeds).
+              <li key={`${i}|${s.label}|${s.url ?? ''}`}>
                 {s.url ? (
                   <a href={s.url} target="_blank" rel="noopener noreferrer">
                     {s.label}

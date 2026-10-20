@@ -26,9 +26,25 @@ export interface WarningsSectionProps {
   onInspect: (id: string) => void;
 }
 
+/** What each feed carries, so two feeds from one agency (BMKG, JMA) are told apart in the sources list. */
+const FEED_WHAT: Readonly<Record<string, string>> = {
+  'bmkg-inatews': 'tsunami messages',
+  'bmkg-gempa': 'latest earthquake message',
+  'jma-tsunami': 'tsunami warnings and forecasts',
+  'jma-volcano': 'volcanic warnings',
+  'geonet-val': 'volcanic alert levels',
+  'nws-tsunami': 'US Pacific alerts',
+  gdacs: 'disaster impact estimates',
+  'magma-level-list': 'volcano activity levels',
+  thaiwater: 'river gauges',
+  'dsda-jakarta': 'Jakarta floodgates',
+  'pub-flood': 'Singapore flood alerts',
+  ptwc: 'Pacific tsunami messages',
+};
+
 function sourcesFromFeeds(feeds: WarningFeedStatus[]): SectionSource[] {
   return feeds.map((f) => ({
-    label: f.issuer,
+    label: FEED_WHAT[f.feedId] ? `${f.issuer}: ${FEED_WHAT[f.feedId]}` : f.issuer,
     url: f.issuerUrl,
     retrievedAt: f.retrievedAt,
     mode: f.status === 'live' ? 'LIVE' : f.status === 'unavailable' ? 'UNAVAILABLE' : 'SNAPSHOT',

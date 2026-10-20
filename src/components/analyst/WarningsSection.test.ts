@@ -27,5 +27,11 @@ describe('WarningsSection tiles', () => {
     expect(html).toContain('not warnings');
     expect(html).toContain('Agency sources checked');
     expect(html).not.toContain('not ended by the issuer');
+    // Two feeds from one agency are told apart in the sources list (no duplicate entries).
+    expect(html).toContain('BMKG InaTEWS: tsunami messages');
+    expect(html).toContain('BMKG InaTEWS: latest earthquake message');
+    const items = [...html.matchAll(/<li><a href="[^"]*"[^>]*>([^<]+)</g)].map((m) => m[1]);
+    expect(items.length).toBeGreaterThan(5);
+    expect(new Set(items).size).toBe(items.length);
   });
 });
