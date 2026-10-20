@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetConnectorCaches } from './liveLoad';
-import { loadPtwc, loadPtwcSnapshot, parsePtwc, PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from './ptwc';
-import { capUrlFromAtom, handlePtwcRequest, resetPtwcProxyState } from './ptwcProxy';
+import { loadPtwc, loadPtwcSnapshot, parsePtwc, PTWC_CLIENT_TIMEOUT_MS, PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from './ptwc';
+import { capUrlFromAtom, handlePtwcRequest, PTWC_UPSTREAM_BUDGET_MS, resetPtwcProxyState } from './ptwcProxy';
 
 // Trimmed real PTWC Atom feed and CAP document (retrieved 2026-10-14; signature block removed).
 const ATOM = `<?xml version="1.0" encoding="UTF-8"?>
@@ -175,5 +175,59 @@ describe('ptwc proxy', () => {
     const down = (async () => new Response('x', { status: 503 })) as unknown as typeof fetch;
     const r = await handlePtwcRequest(new Request('https://aw.example/api/ptwc'), { clientIp: 'c', fetchImpl: down });
     expect(r.status).toBe(502);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slow tsunami.gov (QC finding L3): the proxy answers within one overall budget, and the client waits
+// longer than that budget, so a slow upstream during a real event is not replaced by the snapshot.
+
+describe('ptwc timeouts', () => {
+  const req = () => new Request('https://aw.example/api/ptwc', { headers: { host: 'aw.example', 'sec-fetch-site': 'same-origin' } });
+  /** Upstream that answers the Atom feed after atomMs and the CAP after capMs, honouring the abort signal. */
+  const slow = (atomMs: number, capMs: number, seen: { url: string; aborted: boolean }[]) =>
+    ((url: string, init?: RequestInit) =>
+      new Promise<Response>((resolve, reject) => {
+        const isCap = String(url).endsWith('PHEBCAP.xml');
+        const rec = { url: String(url), aborted: false };
+        seen.push(rec);
+        const t = setTimeout(() => resolve(new Response(isCap ? CAP : ATOM, { status: 200 })), isCap ? capMs : atomMs);
+        init?.signal?.addEventListener('abort', () => {
+          clearTimeout(t);
+          rec.aborted = true;
+          reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+        });
+      })) as unknown as typeof fetch;
+
+  it('the client waits longer than the whole proxy budget', () => {
+    expect(PTWC_CLIENT_TIMEOUT_MS).toBeGreaterThanOrEqual(PTWC_UPSTREAM_BUDGET_MS * 2);
+  });
+
+  it('a slow CAP is cut at the budget: the Atom entry is returned on time, CAP null', async () => {
+    const seen: { url: string; aborted: boolean }[] = [];
+    const budgetMs = 300;
+    const t0 = Date.now();
+    const r = await handlePtwcRequest(req(), { clientIp: 'a', fetchImpl: slow(100, 5000, seen), budgetMs });
+    const took = Date.now() - t0;
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { atom: string; cap: string | null; capUrl: string | null };
+    expect(body.atom).toContain('<feed');
+    expect(body.cap).toBeNull();
+    expect(body.capUrl).toBe(CAP_URL);
+    expect(seen.find((x) => x.url === CAP_URL)?.aborted).toBe(true);
+    expect(took).toBeLessThan(budgetMs + 250);
+  });
+
+  it('when the Atom feed used most of the budget, the CAP is not requested at all', async () => {
+    const seen: { url: string; aborted: boolean }[] = [];
+    const r = await handlePtwcRequest(req(), { clientIp: 'b', fetchImpl: slow(260, 10, seen), budgetMs: 300 });
+    expect(r.status).toBe(200);
+    expect(seen.map((x) => x.url)).toEqual(['https://www.tsunami.gov/events/xml/PHEBAtom.xml']);
+  });
+
+  it('fast upstream: both documents within the budget', async () => {
+    const seen: { url: string; aborted: boolean }[] = [];
+    const r = await handlePtwcRequest(req(), { clientIp: 'c', fetchImpl: slow(5, 5, seen), budgetMs: 300 });
+    expect(((await r.json()) as { cap: string | null }).cap).toContain('<alert');
   });
 });

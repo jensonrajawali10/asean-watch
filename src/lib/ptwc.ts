@@ -139,12 +139,19 @@ function toFeedStatus(s: { status: WarningFeedStatus['status']; retrievedAt: str
   return { feedId: 'ptwc', issuer: PTWC_ISSUER, issuerUrl: PTWC_ISSUER_URL, status: s.status, retrievedAt: s.retrievedAt, message };
 }
 
+/**
+ * Client timeout for /api/ptwc. Above the proxy's whole upstream budget (PTWC_UPSTREAM_BUDGET_MS, 7 s)
+ * plus a serverless cold start, so a slow tsunami.gov during a real event is waited for rather than
+ * replaced by the HISTORICAL snapshot and a 60 s backoff.
+ */
+export const PTWC_CLIENT_TIMEOUT_MS = 15000;
+
 function spec(source: PtwcPayload | null, opts?: { fetchImpl?: typeof fetch; timeoutMs?: number; proxyUrl?: string }) {
   return {
     sourceId: 'ptwc',
     sourceName: PTWC_ISSUER,
     fetchImpl: opts?.fetchImpl,
-    timeoutMs: opts?.timeoutMs ?? 10000,
+    timeoutMs: opts?.timeoutMs ?? PTWC_CLIENT_TIMEOUT_MS,
     retrievedAtOf: (v: PtwcParsed) => v.warnings[0]?.retrievedAt ?? isoNoMs(Date.now()),
     live: async (get: (url: string, kind: 'json' | 'text') => Promise<unknown>) => {
       const payload = await get(opts?.proxyUrl ?? PTWC_PROXY_PATH, 'json');
