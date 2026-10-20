@@ -82,7 +82,29 @@ function aiBriefDevApi(): Plugin {
 export default defineConfig({
   plugins: [react(), aiBriefDevApi()],
   // Bundled geometry and real-data snapshots are intentional: the app must work offline.
-  build: { chunkSizeWarningLimit: 1600 },
+  build: {
+    chunkSizeWarningLimit: 1600,
+    rolldownOptions: {
+      output: {
+        // Vendor libraries in their own chunks: they download and compile in parallel with the app, and
+        // keep their content hash when only the app or a data snapshot changes (returning visitors).
+        // The preload helper gets its own group so index.html does not modulepreload a vendor chunk
+        // just because the helper landed in it.
+        codeSplitting: {
+          groups: [
+            { name: 'vite-helpers', test: /preload-helper/, priority: 40 },
+            { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 30 },
+            { name: 'vendor-maplibre', test: /node_modules[\\/]maplibre-gl[\\/]/, priority: 20 },
+            {
+              name: 'vendor-deck',
+              test: /node_modules[\\/](@deck\.gl|@luma\.gl|@math\.gl|@loaders\.gl|@probe\.gl|mjolnir\.js|earcut|@mapbox)[\\/]/,
+              priority: 10,
+            },
+          ],
+        },
+      },
+    },
+  },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
