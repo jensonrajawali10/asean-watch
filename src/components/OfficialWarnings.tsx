@@ -189,7 +189,8 @@ export default function OfficialWarningsPanel({
         {elsewhere.length > 0 && (
           <details className="ow-elsewhere">
             <summary>
-              Elsewhere in APAC <span className="panel-meta">({elsewhere.length}, no coordinates published)</span>
+              Elsewhere in APAC{' '}
+              <span className="panel-meta">({elsewhere.length}: no coordinates published, or tsunami messages in force for other coasts)</span>
             </summary>
             <ul className="ow-list ow-list--inner">
               {elsewhere.map((w) => (

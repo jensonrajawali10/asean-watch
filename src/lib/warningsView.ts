@@ -3,6 +3,9 @@
 // workspace all make the same decisions. Nothing here rewords, re-scores or merges an issuer's text.
 import type { HazardType, Incident, OfficialWarning, WarningHazard } from '../types';
 import { compareWarnings, warningDistanceKm } from './warnings';
+import { isExpired, timeMs } from './warningExpiry';
+
+export { isExpired };
 
 /**
  * One list from several sources (the official feeds and PTWC), newest first with the same ordering as
@@ -90,23 +93,6 @@ export function officialLevelFor(watch: OfficialLevelWatch, warnings: readonly O
 export function warningMatchesGauge(warningId: string, gaugeId: string): boolean {
   if (!gaugeId || gaugeId.endsWith(':')) return false;
   return warningId === gaugeId || warningId.startsWith(`${gaugeId}:`);
-}
-
-/** Epoch ms of an ISO time, or null when absent or unreadable. */
-function timeMs(iso: string | null | undefined): number | null {
-  const t = iso ? Date.parse(iso) : Number.NaN;
-  return Number.isFinite(t) ? t : null;
-}
-
-/**
- * True when a message is no longer in force: the issuer ended or cancelled it, or its expiry has passed
- * on the nowMs clock. `ended` alone was fixed when the message was parsed (against its retrieval time),
- * so a bundled snapshot or a tab left open would otherwise keep an expired message active.
- */
-export function isExpired(w: Pick<OfficialWarning, 'ended' | 'expiresAt'>, nowMs: number): boolean {
-  if (w.ended) return true;
-  const expires = timeMs(w.expiresAt);
-  return expires !== null && expires <= nowMs;
 }
 
 /** How an inactive message is labelled. EXPIRED carries the issuer's expiry time. */

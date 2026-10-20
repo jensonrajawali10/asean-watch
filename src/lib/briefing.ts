@@ -32,6 +32,12 @@ export interface BriefingInput {
   drift?: DriftAssessment | null;
   /** Official warnings near this incident (e.g. from warningsNear); relayed verbatim. */
   warnings?: OfficialWarning[];
+  /**
+   * Official tsunami messages in force whose warned areas are not within the near radius, or could not all
+   * be placed (partitionWarnings' `elsewhere`, tsunami only); relayed verbatim in their own sub-list so a
+   * tsunami message is never left out of the brief.
+   */
+  otherTsunami?: OfficialWarning[];
   /** Status of every official feed checked; listed so absence is never read as an all-clear. */
   warningFeeds?: WarningFeedStatus[];
   /** ISO 8601 UTC time of the data snapshot (header "snapshot as of"); ignored when any record is live. */
@@ -228,8 +234,49 @@ const FEED_STATUS_LABEL: Record<WarningFeedStatus['status'], string> = {
   unavailable: 'UNAVAILABLE',
 };
 
+/** One relayed message in the OFFICIAL WARNINGS section, verbatim, cited as `ref` (e.g. "[W1]"). */
+function warningItem(w: OfficialWarning, ref: string): string[] {
+  const lines: string[] = [];
+  const indent = ' '.repeat(2 + ref.length + 1);
+  const lw = 14;
+  const mode = w.dataMode === 'live' ? 'LIVE' : 'HISTORICAL';
+  const authority = w.authority === 'aggregator' ? 'aggregator impact estimate, NOT an official warning' : 'official issuer';
+  let status = 'in force as relayed (check the issuer for the current status)';
+  if (w.ended && w.expiresAt && Date.parse(w.expiresAt) <= Date.parse(w.retrievedAt)) status = `EXPIRED at ${w.expiresAt}`;
+  else if (w.ended) status = 'ENDED by the issuer';
+  lines.push('');
+  lines.push(...wrap(`${ref} ${w.issuer} (${authority}) - ${mode}`, '  ', indent));
+  lines.push(
+    ...field(indent, 'Level', w.levelGloss ? `${w.level} [${w.levelGloss}]` : w.level, lw),
+    ...field(indent, 'Headline', w.headline, lw),
+    ...field(indent, 'Area', w.areaDescription || 'not given', lw),
+  );
+  if (w.hazard === 'tsunami' && w.areas.length > 0) {
+    const named = w.areas.map((a) => (a.level ? `${a.name} (${a.level})` : a.name)).join('; ');
+    lines.push(...field(indent, 'Warned areas', named, lw));
+  }
+  lines.push(
+    ...field(indent, 'Issued', w.issuedAt ?? `no issue time published; retrieved ${w.retrievedAt}`, lw),
+    ...field(indent, 'Expires', w.expiresAt ?? 'no expiry given', lw),
+    ...field(indent, 'Status', status, lw),
+  );
+  if (w.instruction) {
+    const instructionLines = w.instruction.split('\n');
+    instructionLines.forEach((line, j) => {
+      const prefix = j === 0 ? fieldPrefix(indent, 'Instruction', lw) : ' '.repeat(fieldPrefix(indent, 'Instruction', lw).length);
+      lines.push(...wrap(line, prefix, ' '.repeat(prefix.length)));
+    });
+  }
+  lines.push(
+    ...field(indent, 'Language', w.language, lw),
+    ...fieldWithUrl(indent, 'Follow', `Follow official instructions from ${w.issuer}`, w.issuerUrl, lw),
+    ...fieldWithUrl(indent, 'Source', `retrieved ${w.retrievedAt}`, w.sourceUrl, lw),
+  );
+  return lines;
+}
+
 /** OFFICIAL WARNINGS section: issuer messages relayed verbatim; never an all-clear. */
-function warningsSection(warnings: OfficialWarning[], feeds: WarningFeedStatus[]): string[] {
+function warningsSection(warnings: OfficialWarning[], feeds: WarningFeedStatus[], otherTsunami: OfficialWarning[] = []): string[] {
   const lines = [
     ...heading('OFFICIAL WARNINGS NEAR THIS INCIDENT (relayed verbatim; follow the issuer)'),
     ...wrap(
@@ -239,42 +286,23 @@ function warningsSection(warnings: OfficialWarning[], feeds: WarningFeedStatus[]
     ),
   ];
   const sorted = [...warnings].sort(compareWarnings);
+  const nearIds = new Set(sorted.map((w) => w.id));
+  const others = otherTsunami.filter((w) => !nearIds.has(w.id)).sort(compareWarnings);
   if (sorted.length === 0) {
     lines.push(...wrap('No official warning near this incident was returned by the feeds checked below.', '  '));
   }
-  sorted.forEach((w, i) => {
-    const ref = `[W${i + 1}]`;
-    const indent = ' '.repeat(2 + ref.length + 1);
-    const lw = 14;
-    const mode = w.dataMode === 'live' ? 'LIVE' : 'HISTORICAL';
-    const authority =
-      w.authority === 'aggregator' ? 'aggregator impact estimate, NOT an official warning' : 'official issuer';
-    let status = 'in force as relayed (check the issuer for the current status)';
-    if (w.ended && w.expiresAt && Date.parse(w.expiresAt) <= Date.parse(w.retrievedAt)) status = `EXPIRED at ${w.expiresAt}`;
-    else if (w.ended) status = 'ENDED by the issuer';
+  sorted.forEach((w, i) => lines.push(...warningItem(w, `[W${i + 1}]`)));
+  if (others.length > 0) {
     lines.push('');
-    lines.push(...wrap(`${ref} ${w.issuer} (${authority}) - ${mode}`, '  ', indent));
     lines.push(
-      ...field(indent, 'Level', w.levelGloss ? `${w.level} [${w.levelGloss}]` : w.level, lw),
-      ...field(indent, 'Headline', w.headline, lw),
-      ...field(indent, 'Area', w.areaDescription || 'not given', lw),
-      ...field(indent, 'Issued', w.issuedAt ?? `no issue time published; retrieved ${w.retrievedAt}`, lw),
-      ...field(indent, 'Expires', w.expiresAt ?? 'no expiry given', lw),
-      ...field(indent, 'Status', status, lw),
+      ...wrap(
+        'Other official tsunami messages in force (their warned areas are not all placed within the search ' +
+          'radius of this incident; relayed in full, not filtered out):',
+        '  ',
+      ),
     );
-    if (w.instruction) {
-      const instructionLines = w.instruction.split('\n');
-      instructionLines.forEach((line, j) => {
-        const prefix = j === 0 ? fieldPrefix(indent, 'Instruction', lw) : ' '.repeat(fieldPrefix(indent, 'Instruction', lw).length);
-        lines.push(...wrap(line, prefix, ' '.repeat(prefix.length)));
-      });
-    }
-    lines.push(
-      ...field(indent, 'Language', w.language, lw),
-      ...fieldWithUrl(indent, 'Follow', `Follow official instructions from ${w.issuer}`, w.issuerUrl, lw),
-      ...fieldWithUrl(indent, 'Source', `retrieved ${w.retrievedAt}`, w.sourceUrl, lw),
-    );
-  });
+    others.forEach((w, i) => lines.push(...warningItem(w, `[W${sorted.length + i + 1}]`)));
+  }
   if (feeds.length > 0) {
     lines.push('', '  Feeds checked:');
     for (const f of feeds) {
@@ -614,8 +642,8 @@ export function buildBriefing(input: BriefingInput): string {
     ...headerSection(input),
     ...incidentSection(incident, volcano),
     ...replaySection(incident, step, input.stepCount ?? 7),
-    ...(input.warnings !== undefined || input.warningFeeds !== undefined
-      ? warningsSection(input.warnings ?? [], input.warningFeeds ?? [])
+    ...(input.warnings !== undefined || input.warningFeeds !== undefined || input.otherTsunami !== undefined
+      ? warningsSection(input.warnings ?? [], input.warningFeeds ?? [], input.otherTsunami ?? [])
       : []),
     ...dataModeSection(incident, review.evidence),
     ...reviewSection(review),

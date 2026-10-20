@@ -18,8 +18,8 @@ import { buildBriefing, briefingFilename, downloadText } from './lib/briefing';
 import type { BriefingInput } from './lib/briefing';
 import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
-import { warningDistanceKm, warningsNear } from './lib/warnings';
-import { NEAR_KM, mergeWarnings } from './lib/warningsView';
+import { partitionWarnings } from './lib/warnings';
+import { NEAR_KM, isExpired, mergeWarnings } from './lib/warningsView';
 import { useOfficialWarnings } from './lib/useOfficialWarnings';
 import { useNowMs } from './lib/useNowMs';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
@@ -463,22 +463,21 @@ export default function App() {
     () => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }],
     [warningsResult.feeds, ptwc],
   );
-  /** Warnings near the selected area, or every warning when nothing is selected. */
-  const nearWarnings = useMemo<OfficialWarning[]>(() => {
-    if (!incident) return allWarnings;
+  /**
+   * Warnings near the selected area (or every warning when nothing is selected), and the ones listed apart:
+   * no coordinates published (e.g. JMA tsunami areas), or an official tsunami message in force whose warned
+   * areas are not near (never dropped; see partitionWarnings).
+   */
+  const { nearWarnings, elsewhereWarnings } = useMemo<{ nearWarnings: OfficialWarning[]; elsewhereWarnings: OfficialWarning[] }>(() => {
+    if (!incident) return { nearWarnings: allWarnings, elsewhereWarnings: [] };
     try {
-      return warningsNear(allWarnings, incident.lat, incident.lon, NEAR_KM);
+      const { near, elsewhere } = partitionWarnings(allWarnings, incident.lat, incident.lon, NEAR_KM, nowMs);
+      return { nearWarnings: near, elsewhereWarnings: elsewhere };
     } catch (err) {
       console.error('Official warnings could not be filtered by distance:', err);
-      return [];
+      return { nearWarnings: [], elsewhereWarnings: allWarnings };
     }
-  }, [allWarnings, incident]);
-
-  /** Warnings with no coordinates at all (e.g. JMA tsunami areas): never "near" anything, so listed apart. */
-  const elsewhereWarnings = useMemo<OfficialWarning[]>(() => {
-    if (!incident) return [];
-    return allWarnings.filter((w) => warningDistanceKm(w, incident.lat, incident.lon) === null);
-  }, [allWarnings, incident]);
+  }, [allWarnings, incident, nowMs]);
 
   const inspectedWarning = useMemo(
     () => (inspectedWarningId ? (allWarnings.find((w) => w.id === inspectedWarningId) ?? null) : null),
@@ -621,6 +620,7 @@ export default function App() {
       nea,
       drift,
       warnings: nearWarnings,
+      otherTsunami: elsewhereWarnings.filter((w) => w.authority === 'official' && w.hazard === 'tsunami' && !isExpired(w, nowMs)),
       warningFeeds: allFeeds,
       dataAsOf: DATA_AS_OF,
       stepCount: STEPS.length || undefined,

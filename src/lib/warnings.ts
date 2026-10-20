@@ -23,6 +23,8 @@
 import snapshotJson from '../../data/warnings-snapshot.json';
 import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
+import { idnDistrictIndex, placeTsunamiAreas } from './tsunamiAreas';
+import { isExpired } from './warningExpiry';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -1045,11 +1047,41 @@ export function parsePubFlood(raw: unknown, meta: ParseMeta): FeedParseResult {
 // ---------------------------------------------------------------------------
 // Proximity and ordering
 
-/** Smallest distance from a point to a warning's location or any of its areas with coordinates; null when it has none. */
+type LatLon = { lat: number; lon: number };
+
+/**
+ * The points a warning is matched on. A tsunami message that names its warned areas is matched on those
+ * areas only, never on the quake epicentre in `location`: the issuer warned those coasts, so a watch
+ * next to a warned district is matched even when the epicentre is far away, and a watch next to the
+ * epicentre is not matched when its coast was not warned. Areas without coordinates of their own are
+ * placed where possible (BMKG InaTEWS districts at their geoBoundaries centres, see tsunamiAreas.ts);
+ * `unplaced` counts the named areas that could not be placed.
+ */
+export function warningMatchPoints(w: OfficialWarning): { points: LatLon[]; unplaced: number } {
+  const own = (a: OfficialWarningArea) => validLatLon(a.lat, a.lon);
+  if (w.hazard === 'tsunami' && w.areas.length > 0) {
+    const points: LatLon[] = [];
+    const needPlacing: OfficialWarningArea[] = [];
+    for (const a of w.areas) {
+      const p = own(a);
+      if (p) points.push(p);
+      else needPlacing.push(a);
+    }
+    if (needPlacing.length === 0) return { points, unplaced: 0 };
+    if (!w.id.startsWith(`${FEEDS.bmkgInatews.id}:`)) return { points, unplaced: needPlacing.length };
+    const placement = placeTsunamiAreas(needPlacing, idnDistrictIndex());
+    return { points: [...points, ...placement.placed.map((p) => ({ lat: p.lat, lon: p.lon }))], unplaced: placement.unplaced.length };
+  }
+  const points = [w.location, ...w.areas.map(own)].filter((p): p is LatLon => p !== null);
+  return { points, unplaced: 0 };
+}
+
+/**
+ * Smallest distance from a point to the places a warning names (warningMatchPoints: its location or
+ * areas; for a tsunami message with named areas, those areas only); null when none has coordinates.
+ */
 export function warningDistanceKm(w: OfficialWarning, lat: number, lon: number): number | null {
-  const points = [w.location, ...w.areas.map((a) => validLatLon(a.lat, a.lon))].filter(
-    (p): p is { lat: number; lon: number } => p !== null,
-  );
+  const { points } = warningMatchPoints(w);
   if (points.length === 0) return null;
   return Math.min(...points.map((p) => haversineKm(lat, lon, p.lat, p.lon)));
 }
@@ -1060,6 +1092,37 @@ export function warningsNear(warnings: OfficialWarning[], lat: number, lon: numb
     const d = warningDistanceKm(w, lat, lon);
     return d !== null && d <= radiusKm;
   });
+}
+
+/** An official tsunami message that is still in force (not ended; with nowMs, not past its expiry). */
+function activeOfficialTsunami(w: OfficialWarning, nowMs?: number): boolean {
+  if (w.authority !== 'official' || w.hazard !== 'tsunami') return false;
+  return nowMs === undefined ? !w.ended : !isExpired(w, nowMs);
+}
+
+/**
+ * Splits warnings for a selected place:
+ * - `near`: warnings whose location or named areas lie within radiusKm (warningsNear);
+ * - `elsewhere`: everything else that must still be shown, i.e. warnings with no coordinates at all,
+ *   and every official tsunami message still in force that is not near. A tsunami message is never
+ *   dropped: one whose warned areas are far away, or only partly placed, is listed here in full.
+ * Both lists keep the input order. Without nowMs, "in force" means not ended by the issuer.
+ */
+export function partitionWarnings(
+  warnings: readonly OfficialWarning[],
+  lat: number,
+  lon: number,
+  radiusKm: number,
+  nowMs?: number,
+): { near: OfficialWarning[]; elsewhere: OfficialWarning[] } {
+  const near: OfficialWarning[] = [];
+  const elsewhere: OfficialWarning[] = [];
+  for (const w of warnings) {
+    const d = warningDistanceKm(w, lat, lon);
+    if (d !== null && d <= radiusKm) near.push(w);
+    else if (d === null || activeOfficialTsunami(w, nowMs)) elsewhere.push(w);
+  }
+  return { near, elsewhere };
 }
 
 /** issuedAt descending, nulls last; then issuer and id for a stable order. */
