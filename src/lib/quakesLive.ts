@@ -12,7 +12,7 @@
 import snapshotJson from '../../data/quakes-snapshot.json';
 import type { ConnectorStatus, QuakeEvent } from '../types';
 import { isRecord, isoNoMs, loadLiveFirst, normLon, num, snapshotOnly, str, toIsoUtc, type LiveLoadSpec } from './liveLoad';
-import { wibToUtc } from './warnings';
+import { bmkgOriginUtc, wibToUtc } from './warnings';
 
 /** APAC / Western Pacific box. Longitudes run east from 90°E across the dateline to 150°W (210°). */
 export const QUAKE_BOX = { minLat: -50, maxLat: 60, minLon: 90, maxLon: 210 } as const;
@@ -149,9 +149,12 @@ export function parseBmkgDatagempa(raw: unknown, meta: ParseMeta): QuakeEvent[] 
   const mag = num(info.magnitude);
   const sent = isRecord(raw) ? raw.sent : null;
   const eventId = str(info.eventid);
-  // Origin time: eventid is YYYYMMDDhhmmss in WIB (UTC+7), matching info.date/info.time.
+  // Origin time from info.date/info.time (WIB, UTC+7). eventid is NOT the origin in general: it equals it
+  // in "felt" messages, but in InaTEWS tsunami messages (PD-1..PD-4) it is the send time, hours later.
+  // eventid (YYYYMMDDhhmmss WIB), then the send time, are used only when date/time are missing.
   const m = eventId ? /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(eventId) : null;
-  const timeISO = m ? wibToUtc(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}WIB`) : wibToUtc(sent);
+  const timeISO =
+    bmkgOriginUtc(info.date, info.time) ?? (m ? wibToUtc(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}WIB`) : wibToUtc(sent));
   if (lat == null || lon == null || mag === null || !timeISO) return [];
   return [
     {

@@ -317,12 +317,20 @@ function expired(expiresAt: string | null, retrievedAt: string): boolean {
 // Parsers (pure)
 
 /** BMKG quake origin from <date>15-08-26</date><time>04:58:24 WIB</time> (two-digit year) -> epoch ms. */
-function bmkgOriginMs(date: string | null, time: string | null): number | null {
-  const d = /^(\d{2})-(\d{2})-(\d{2,4})$/.exec(date ?? '');
-  const t = /^(\d{2}):(\d{2})(?::(\d{2}))?\s*WIB$/i.exec(time ?? '');
+/**
+ * A BMKG quake's origin time from its <date>/<time> (or datagempa info.date/info.time) fields, e.g.
+ * "15-08-26" + "04:58:24 WIB" -> ISO 8601 UTC. Null when either is missing or unreadable.
+ */
+export function bmkgOriginUtc(date: unknown, time: unknown): string | null {
+  const d = /^(\d{2})-(\d{2})-(\d{2,4})$/.exec(typeof date === 'string' ? date.trim() : '');
+  const t = /^(\d{2}):(\d{2})(?::(\d{2}))?\s*WIB$/i.exec(typeof time === 'string' ? time.trim() : '');
   if (!d || !t) return null;
   const year = d[3].length === 2 ? 2000 + Number(d[3]) : Number(d[3]);
-  const iso = localToUtc(year, +d[2], +d[1], +t[1], +t[2], t[3] ? +t[3] : 0, 7);
+  return localToUtc(year, +d[2], +d[1], +t[1], +t[2], t[3] ? +t[3] : 0, 7);
+}
+
+function bmkgOriginMs(date: string | null, time: string | null): number | null {
+  const iso = bmkgOriginUtc(date, time);
   return iso ? Date.parse(iso) : null;
 }
 

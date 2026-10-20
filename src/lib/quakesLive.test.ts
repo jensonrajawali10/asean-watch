@@ -12,6 +12,7 @@ import {
   usgsQueryUrl,
   USGS_TSUNAMI_FLAG_NOTE,
 } from './quakesLive';
+import { BUNDLED_WARNINGS_SNAPSHOT, xmlBlocks, xmlText } from './warnings';
 
 // Trimmed real samples captured 2026-10-14 (data/quakes-snapshot.json).
 const USGS_FIJI = {
@@ -184,5 +185,76 @@ describe('combining and loading', () => {
     const u = res.events.filter((q) => q.source === 'USGS');
     expect(u.length).toBeGreaterThan(0);
     expect(u.every((q) => q.magnitude >= 4.5 && inQuakeBox(q.lat, q.lon) && q.lon >= -180 && q.lon < 180)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BMKG datagempa origin time (QC finding L1). In InaTEWS tsunami messages (PD-1..PD-4) eventid is the
+// SEND time, not the origin; the origin is info.date + info.time (WIB, UTC+7). Built from the bundled
+// last30tsunamievent.xml: each <info> carries the same fields datagempa.json does.
+
+describe('BMKG datagempa origin time', () => {
+  const xml = BUNDLED_WARNINGS_SNAPSHOT.feeds['bmkg-inatews'].raw as string;
+  const infos = xmlBlocks(xml, 'info').map((b) => b.replace(/<(wzarea|obsarea)(?:\s[^>]*)?>[\s\S]*?<\/>/g, ''));
+  /** datagempa.json shape from one InaTEWS <info>. */
+  const asDatagempa = (info: string) => ({
+    identifier: `x-${xmlText(info, 'eventid')}`,
+    sent: xmlText(info, 'timesent'),
+    info: {
+      date: xmlText(info, 'date'),
+      time: xmlText(info, 'time'),
+      point: { coordinates: xmlText(info, 'coordinates') },
+      magnitude: xmlText(info, 'magnitude'),
+      depth: xmlText(info, 'depth'),
+      area: xmlText(info, 'area'),
+      eventid: xmlText(info, 'eventid'),
+      subject: xmlText(info, 'subject'),
+      potential: xmlText(info, 'potential'),
+    },
+  });
+  /** Independent check: "DD-MM-YY" + "hh:mm:ss WIB" minus 7 hours. */
+  const expectedOrigin = (date: string, time: string) => {
+    const [d, m, y] = date.split('-').map(Number);
+    const [hh, mm, ss] = time.replace(/\s*WIB$/i, '').split(':').map(Number);
+    return new Date(Date.UTC(y < 100 ? 2000 + y : y, m - 1, d, hh - 7, mm, ss)).toISOString().replace('.000Z', 'Z');
+  };
+
+  it('uses info.date/info.time, not eventid, for every bundled PD message', () => {
+    const pd = infos.filter((i) => /PD-/.test(xmlText(i, 'subject') ?? ''));
+    expect(pd.length).toBeGreaterThan(0);
+    let differ = 0;
+    for (const info of pd) {
+      const [q] = parseBmkgDatagempa(asDatagempa(info), { dataMode: 'historical' });
+      expect(q.timeISO).toBe(expectedOrigin(xmlText(info, 'date')!, xmlText(info, 'time')!));
+      const eventidAsUtc = expectedOrigin(
+        `${xmlText(info, 'eventid')!.slice(6, 8)}-${xmlText(info, 'eventid')!.slice(4, 6)}-${xmlText(info, 'eventid')!.slice(0, 4)}`,
+        `${xmlText(info, 'eventid')!.slice(8, 10)}:${xmlText(info, 'eventid')!.slice(10, 12)}:${xmlText(info, 'eventid')!.slice(12, 14)}`,
+      );
+      if (eventidAsUtc !== q.timeISO) differ += 1;
+    }
+    // The bug was real in the bundled data: at least one PD message's eventid is not its origin.
+    expect(differ).toBeGreaterThan(0);
+  });
+
+  it('a PD message dedupes against the gempaterkini record of the same quake', () => {
+    const info = infos.find((i) => /PD-4/.test(xmlText(i, 'subject') ?? ''))!;
+    const [dg] = parseBmkgDatagempa(asDatagempa(info), { dataMode: 'historical' });
+    const terkini = { ...dg, id: `bmkg-gempaterkini:${dg.timeISO.replace(/\D/g, '').slice(0, 14)}`, product: 'BMKG gempaterkini (latest 15, M 5.0+)' };
+    const all = combineQuakes([], [terkini], [dg]);
+    expect(all.filter((q) => q.source === 'BMKG')).toHaveLength(1);
+  });
+
+  it('the bundled datagempa (a felt message) keeps its time: there eventid and date/time agree', () => {
+    const raw = BUNDLED_QUAKES_SNAPSHOT.feeds['bmkg-datagempa']!.raw as { info: { date: string; time: string } };
+    const [q] = parseBmkgDatagempa(raw, { dataMode: 'historical' });
+    expect(q.timeISO).toBe(expectedOrigin(raw.info.date, raw.info.time));
+  });
+
+  it('falls back to eventid when date/time are missing', () => {
+    const info = infos[0];
+    const raw = asDatagempa(info);
+    const [q] = parseBmkgDatagempa({ ...raw, info: { ...raw.info, date: null, time: null } }, { dataMode: 'historical' });
+    const e = raw.info.eventid!;
+    expect(q.timeISO).toBe(expectedOrigin(`${e.slice(6, 8)}-${e.slice(4, 6)}-${e.slice(0, 4)}`, `${e.slice(8, 10)}:${e.slice(10, 12)}:${e.slice(12, 14)}`));
   });
 });
