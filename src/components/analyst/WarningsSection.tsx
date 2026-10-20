@@ -50,7 +50,7 @@ export default function WarningsSection(p: WarningsSectionProps) {
       sources={sourcesFromFeeds(p.feeds)}
     >
       <div className="an-figures">
-        <KeyFigure label="Active official messages" value={String(active.length)} note="not ended by the issuer or past expiry" />
+        <KeyFigure label="Official messages in force" value={String(active.length)} note="not ended by the issuer or past expiry (the number on the alerts button)" />
         <KeyFigure label="Tsunami or evacuation-level" value={String(urgent)} note={urgent > 0 ? 'in force now' : 'none in force'} />
         <KeyFigure label="Impact estimates (GDACS)" value={String(estimates)} note="aggregator, not warnings" />
         <KeyFigure

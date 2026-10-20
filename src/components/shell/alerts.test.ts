@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OfficialWarning } from '../../types';
-import { activeOfficial, alertsPill, isUrgentWarning } from './alerts';
+import { activeOfficial, alertsPill, countsText, isUrgentWarning, warningCounts } from './alerts';
 
 function warning(over: Partial<OfficialWarning>): OfficialWarning {
   return {
@@ -32,8 +32,8 @@ describe('alertsPill', () => {
   it('counts active official messages only', () => {
     const list = [warning({}), warning({ id: 'x:2', ended: true }), warning({ id: 'x:3', authority: 'aggregator' })];
     expect(activeOfficial(list)).toHaveLength(1);
-    expect(alertsPill(list)).toEqual({ count: 1, urgent: false, label: '1 official alert' });
-    expect(alertsPill([]).label).toBe('0 official alerts');
+    expect(alertsPill(list)).toEqual({ count: 1, urgent: false, label: 'official message in force' });
+    expect(alertsPill([]).label).toBe('official messages in force');
   });
 
   it('turns red for a tsunami warning in force, not for an information statement', () => {
@@ -52,11 +52,30 @@ describe('alertsPill', () => {
     const tsunami = warning({ hazard: 'tsunami', level: 'Warning', product: 'Warning', expiresAt: '2026-10-14T00:00:00Z' });
     const before = Date.parse('2026-10-13T12:00:00Z');
     const after = Date.parse('2026-10-14T06:00:00Z');
-    expect(alertsPill([tsunami], before)).toEqual({ count: 1, urgent: true, label: '1 official alert' });
+    expect(alertsPill([tsunami], before)).toEqual({ count: 1, urgent: true, label: 'official message in force' });
     // Past its expiry: no longer counted, and the pill is not red, although the issuer's ended flag is false.
-    expect(alertsPill([tsunami], after)).toEqual({ count: 0, urgent: false, label: '0 official alerts' });
+    expect(alertsPill([tsunami], after)).toEqual({ count: 0, urgent: false, label: 'official messages in force' });
     expect(isUrgentWarning(tsunami, after)).toBe(false);
     // Without a clock: judged as relayed.
     expect(alertsPill([tsunami]).count).toBe(1);
+  });
+});
+
+describe('warningCounts: one number everywhere', () => {
+  it('the pill, the tile and the list heading count the same in-force set', async () => {
+    const { loadWarningsSnapshot } = await import('../../lib/warnings');
+    const { loadPtwcSnapshot } = await import('../../lib/ptwc');
+    const { mergeWarnings } = await import('../../lib/warningsView');
+    const all = mergeWarnings(loadWarningsSnapshot().warnings, loadPtwcSnapshot().warnings);
+    const now = Date.parse('2026-10-20T06:00:00Z');
+    const c = warningCounts(all, now);
+    expect(c.inForce).toBe(alertsPill(all, now).count);
+    expect(c.inForce).toBe(activeOfficial(all, now).length);
+    expect(c.inForce + c.endedOrExpired + c.estimates).toBe(all.length);
+    expect(countsText(c)).toBe(
+      `${c.total} messages: ${c.inForce} in force` +
+        (c.endedOrExpired ? `, ${c.endedOrExpired} ended or expired` : '') +
+        (c.estimates ? `, ${c.estimates} impact estimate${c.estimates === 1 ? '' : 's'}` : ''),
+    );
   });
 });

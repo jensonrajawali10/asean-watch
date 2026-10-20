@@ -104,7 +104,7 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
         >
           <WarningIcon size={16} />
           <span className="alerts-pill__count">{alerts.count}</span>
-          <span className="alerts-pill__text">{alerts.urgent ? 'official alerts: urgent' : alerts.label}</span>
+          <span className="alerts-pill__text">{alerts.urgent ? 'in force, incl. urgent' : alerts.label}</span>
         </button>
         <div className="theme-toggle" role="group" aria-label="Colour theme">
           <button type="button" aria-pressed={theme === 'dark'} onClick={() => choose('dark')}>

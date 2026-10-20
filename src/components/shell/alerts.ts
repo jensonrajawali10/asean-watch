@@ -29,8 +29,34 @@ export function isUrgentWarning(w: OfficialWarning, nowMs?: number): boolean {
 export interface AlertsPill {
   count: number;
   urgent: boolean;
-  /** Short label, e.g. "3 official alerts" or "1 official alert". */
+  /** Short label after the count, e.g. "official messages in force" (the number is shown once, beside it). */
   label: string;
+}
+
+/** How a list of relayed messages splits: in force (the pill's number), ended or expired, impact estimates. */
+export interface WarningCounts {
+  total: number;
+  inForce: number;
+  endedOrExpired: number;
+  /** Aggregator impact estimates (GDACS): not warnings. */
+  estimates: number;
+}
+
+/** The one count used by the pill, the Warnings tile and the list heading, so they always agree. */
+export function warningCounts(warnings: readonly OfficialWarning[], nowMs?: number): WarningCounts {
+  const estimates = warnings.filter((w) => w.authority !== 'official').length;
+  const inForce = activeOfficial(warnings, nowMs).length;
+  return { total: warnings.length, inForce, endedOrExpired: warnings.length - estimates - inForce, estimates };
+}
+
+/** "113 messages: 48 in force, 59 ended or expired, 6 impact estimates" (zero parts left out). */
+export function countsText(c: WarningCounts): string {
+  const parts = [
+    `${c.inForce} in force`,
+    c.endedOrExpired > 0 ? `${c.endedOrExpired} ended or expired` : null,
+    c.estimates > 0 ? `${c.estimates} impact ${c.estimates === 1 ? 'estimate' : 'estimates'}` : null,
+  ].filter(Boolean);
+  return `${c.total} ${c.total === 1 ? 'message' : 'messages'}: ${parts.join(', ')}`;
 }
 
 export function alertsPill(warnings: readonly OfficialWarning[], nowMs?: number): AlertsPill {
@@ -39,6 +65,6 @@ export function alertsPill(warnings: readonly OfficialWarning[], nowMs?: number)
   return {
     count,
     urgent: active.some((w) => isUrgentWarning(w, nowMs)),
-    label: `${count} official ${count === 1 ? 'alert' : 'alerts'}`,
+    label: `official ${count === 1 ? 'message' : 'messages'} in force`,
   };
 }

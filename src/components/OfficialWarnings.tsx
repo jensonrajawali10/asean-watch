@@ -19,6 +19,7 @@ import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
 import { emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
+import { countsText, warningCounts } from './shell/alerts';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -151,7 +152,9 @@ export default function OfficialWarningsPanel({
       <div className="panel-head">
         <h2 id="official-heading">
           Official warnings{' '}
-          <span className="panel-meta">{nearName ? `near ${nearName} (${n})` : `APAC (${n})`}</span>
+          <span className="panel-meta">
+            {nearName ? `near ${nearName}` : 'across APAC'} · {countsText(warningCounts(warnings, nowMs))}
+          </span>
         </h2>
         {nearName && onShowAll && (
           <button type="button" className="link-button head-action" onClick={onShowAll}>
