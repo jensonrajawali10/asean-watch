@@ -94,9 +94,21 @@ export function hazardMix(warnings: readonly OfficialWarning[]): string {
     .join(', ');
 }
 
-/** Warnings grouped by hazard (HAZARD_ORDER), each group keeping the input order (newest first). */
-export function groupByHazard(warnings: readonly OfficialWarning[]): { hazard: WarningHazard; items: OfficialWarning[] }[] {
-  return HAZARD_ORDER.map((hazard) => ({ hazard, items: warnings.filter((w) => w.hazard === hazard) })).filter((g) => g.items.length > 0);
+/**
+ * Warnings grouped by hazard. Active messages come first: groups with an active message before groups with
+ * none (each set in HAZARD_ORDER), and within a group the active ones before the ended or expired ones,
+ * each keeping the input order (newest first). Without `isActive` every message counts as active.
+ */
+export function groupByHazard(
+  warnings: readonly OfficialWarning[],
+  isActive: (w: OfficialWarning) => boolean = () => true,
+): { hazard: WarningHazard; items: OfficialWarning[]; active: number }[] {
+  const groups = HAZARD_ORDER.map((hazard) => {
+    const all = warnings.filter((w) => w.hazard === hazard);
+    const live = all.filter(isActive);
+    return { hazard, items: [...live, ...all.filter((w) => !isActive(w))], active: live.length };
+  }).filter((g) => g.items.length > 0);
+  return [...groups.filter((g) => g.active > 0), ...groups.filter((g) => g.active === 0)];
 }
 
 export function alertsPill(warnings: readonly OfficialWarning[], nowMs?: number): AlertsPill {

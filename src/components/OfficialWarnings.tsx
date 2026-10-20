@@ -140,12 +140,12 @@ export default function OfficialWarningsPanel({
   const capped = !showAll && n > LIST_CAP;
   // Grouped by hazard (tsunami, volcanoes, earthquakes, floods...), newest first within a group, so a reader
   // sees what kind of message each is before reading it; the cap applies to the grouped order.
-  const grouped = groupByHazard(warnings);
+  const grouped = groupByHazard(warnings, (w) => w.authority === 'official' && !isExpired(w, nowMs));
   const ordered = grouped.flatMap((g) => g.items);
   const shown = capped ? ordered.slice(0, LIST_CAP) : ordered;
   const shownIds = new Set(shown.map((w) => w.id));
   const groupsShown = grouped
-    .map((g) => ({ hazard: g.hazard, total: g.items.length, items: g.items.filter((w) => shownIds.has(w.id)) }))
+    .map((g) => ({ hazard: g.hazard, total: g.items.length, active: g.active, items: g.items.filter((w) => shownIds.has(w.id)) }))
     .filter((g) => g.items.length > 0);
 
   // Keep the selected item in view when selection comes from elsewhere (map marker, detail link).
@@ -179,7 +179,7 @@ export default function OfficialWarningsPanel({
             {groupsShown.map((g) => (
               <Fragment key={g.hazard}>
                 <li className="ow-group" aria-hidden="true">
-                  {HAZARD_GROUP_NAME[g.hazard]} <span className="panel-meta">({g.total})</span>
+                  {HAZARD_GROUP_NAME[g.hazard]} <span className="panel-meta">({g.active} active, {g.total} in all)</span>
                 </li>
                 {g.items.map((w) => (
                   <WarningItem

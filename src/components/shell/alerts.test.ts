@@ -91,6 +91,18 @@ describe('what the alerts are about', () => {
     expect(hazardMix(list)).toBe('floods, tsunami, volcano');
     expect(alertsPill(list).label).toBe('official alerts in force: floods, tsunami, volcano');
   });
+  it('puts active messages first: groups with one before groups without, and active before ended inside a group', () => {
+    const mixed = [
+      warning({ id: 't-old', hazard: 'tsunami', ended: true }),
+      warning({ id: 'f-old', hazard: 'flood', ended: true }),
+      warning({ id: 'f-new', hazard: 'flood' }),
+    ];
+    const g = groupByHazard(mixed, (w) => !w.ended);
+    expect(g.map((x) => x.hazard)).toEqual(['flood', 'tsunami']);
+    expect(g[0].items.map((w) => w.id)).toEqual(['f-new', 'f-old']);
+    expect(g[0].active).toBe(1);
+  });
+
   it('groups the list by hazard, tsunami first, keeping each group in order', () => {
     const g = groupByHazard(list);
     expect(g.map((x) => x.hazard)).toEqual(['tsunami', 'volcano', 'flood']);
