@@ -6,7 +6,7 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import type { HazeReading } from '../../types';
-import { PM25_MEANING, WHO_PM25_24H_UGM3, describePm25, placePm25At } from '../../lib/airQuality';
+import { PM25_MEANING, UGM3_WORDS, WHO_PM25_24H_UGM3, describePm25, placePm25At, plainAirSentence } from '../../lib/airQuality';
 import type { AirQualityData, Pm25Band } from '../../lib/airQuality';
 import { AIR_QUALITY_OFFICIAL, COUNTRY_NAME, localTimeLabel, noPsiNote, placeRef } from '../../lib/places';
 import type { WindGrid } from '../../lib/windField';
@@ -125,15 +125,18 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
       kind="modelled"
       onClose={onClose}
       facts={[
-        { label: 'PM2.5', value: d.valueText, unit: 'µg/m³', tone: bandTone(d.band), note: d.band ? d.band.label : at },
-        { label: 'vs WHO 24 h level', value: d.timesWho === null ? '—' : `${d.timesWho.toLocaleString('en-US')}×`, note: `of ${WHO_PM25_24H_UGM3} µg/m³` },
+        { label: 'Fine smoke (PM2.5)', value: d.valueText, unit: 'µg/m³', tone: bandTone(d.band), note: d.band ? d.band.label : at },
+        { label: 'Times the WHO daily guideline', value: d.timesWho === null ? '—' : `${d.timesWho.toLocaleString('en-US')}×`, note: `guideline: ${WHO_PM25_24H_UGM3} µg/m³ over 24 h` },
         spark
           ? { label: snapshot ? 'Peak, 48 h of the run' : 'Peak, next 48 h', value: group(spark.peak.v), unit: 'µg/m³', note: localTimeLabel(isoOf(spark.peak.ms), where, { utc: false }) }
           : { label: 'Hour shown', value: at },
       ]}
       sentence={
         <>
-          {PM25_MEANING} <span className="city-card__sub">A forecast from a computer model for {at}, not a measurement.</span>
+          {plainAirSentence(name, value)}{' '}
+          <span className="city-card__sub">
+            A computer forecast for {at}, not a measurement. PM2.5 is {PM25_MEANING.charAt(0).toLowerCase() + PM25_MEANING.slice(1)} {UGM3_WORDS}
+          </span>
         </>
       }
       action={{ label: 'Open in workspace', onClick: onOpenWorkspace, title: 'Haze & air section: the full city table and transport' }}

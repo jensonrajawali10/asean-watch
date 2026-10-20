@@ -102,6 +102,36 @@ export function describePm25(value: number): Pm25Description {
   return { band, timesWho, valueText: groupInt(value), sentence: `${PM25_MEANING} ${scale}`, scale };
 }
 
+/** What the band means for a reader, in plain words (lower case, after "the air is forecast to be"). */
+const BAND_WORDS: Record<Pm25Band['key'], string> = {
+  good: 'fairly clean',
+  moderate: 'a little smoky',
+  usg: 'smoky enough to bother sensitive people (children, older people, anyone with asthma)',
+  unhealthy: 'unhealthy for everyone',
+  'very-unhealthy': 'very unhealthy for everyone',
+  hazardous: 'hazardous for everyone',
+};
+
+/** What "µg/m³" means, in one plain line. */
+export const UGM3_WORDS = 'µg/m³ means micrograms of smoke in each cubic metre of air.';
+
+/**
+ * The first sentence of a city card, in plain words: how smoky the air is forecast to be and how far over
+ * the WHO's daily guideline. Says it is a forecast; gives no health advice of our own.
+ */
+export function plainAirSentence(name: string, value: number): string {
+  const d = describePm25(value);
+  if (!d.band || d.timesWho === null) return `No forecast value for ${name} at this hour.`;
+  const who = WHO_PM25_24H_UGM3;
+  const scale =
+    value < who * 0.95
+      ? `under the WHO's daily guideline of ${who} µg/m³`
+      : value < who * 1.05
+        ? `about the WHO's daily guideline of ${who} µg/m³`
+        : `about ${d.timesWho.toLocaleString('en-US')} times the WHO's daily guideline of ${who} µg/m³`;
+  return `The air around ${name} is forecast to be ${BAND_WORDS[d.band.key]}: ${d.valueText} µg/m³ of fine smoke, ${scale}.`;
+}
+
 /** "PM2.5 23 µg/m³ (modelled)". */
 export function pm25Label(value: number): string {
   return `PM2.5 ${Math.round(value)} ${AQ_UNIT} (modelled)`;

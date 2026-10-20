@@ -110,3 +110,22 @@ describe('cards', () => {
     expect(city('singapore')).not.toContain('No PSI');
   });
 });
+
+describe('plain words', () => {
+  it('plainAirSentence says how smoky, the unit and the WHO comparison, and that it is a forecast', async () => {
+    const { plainAirSentence } = await import('./airQuality');
+    expect(plainAirSentence('Palangka Raya', 407)).toBe(
+      "The air around Palangka Raya is forecast to be hazardous for everyone: 407 µg/m³ of fine smoke, about 27 times the WHO's daily guideline of 15 µg/m³.",
+    );
+    expect(plainAirSentence('Cebu', 5)).toBe("The air around Cebu is forecast to be fairly clean: 5 µg/m³ of fine smoke, under the WHO's daily guideline of 15 µg/m³.");
+  });
+  it('the map key explains every symbol, including that red pins are not fires', async () => {
+    const MapKey = (await import('../components/map/MapKey')).default;
+    const html = renderToStaticMarkup(createElement(MapKey));
+    expect(html).toContain('µg/m³');
+    expect(html).toContain('MODELLED');
+    expect(html).toContain('Not fires.');
+    expect(html).toContain('fires seen by NASA satellites');
+    expect(html).toContain('volcanoes');
+  });
+});

@@ -31,10 +31,10 @@ export function AreaAirQuality({ area, iso3, airQuality, timeISO }: AreaAirQuali
         <p className="area-air__line">{air.kind === 'none' ? air.reason : ''}</p>
       ) : (
         <p className="area-air__line">
-          PM2.5 <strong>{d.valueText} µg/m³</strong>
+          Fine smoke (PM2.5) <strong>{d.valueText} µg/m³</strong>
           {d.band ? `, ${d.band.label}` : ''}
-          {d.timesWho !== null ? ` (${d.timesWho.toLocaleString('en-US')}× the WHO 24-hour level of ${WHO_PM25_24H_UGM3})` : ''} {air.where}. A forecast from a
-          computer model in ~45 km squares, not a measurement.
+          {d.timesWho !== null ? `, about ${d.timesWho.toLocaleString('en-US')} times the WHO's daily guideline of ${WHO_PM25_24H_UGM3} µg/m³,` : ''} {air.where}. A
+          computer forecast in ~45 km squares, not a measurement.
         </p>
       )}
       {psi && <p className="area-air__line area-air__muted">{psi}</p>}
