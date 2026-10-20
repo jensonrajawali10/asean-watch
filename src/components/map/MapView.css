@@ -865,8 +865,11 @@
 
 /* ---------- Map key (first-time visitors): what the symbols mean, in plain words ---------- */
 .mv-key {
-  align-self: flex-start;
-  max-width: min(360px, 100%);
+  /* Floats above the layer chips, so it never changes the dock height the camera pads for. */
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  max-width: min(300px, 100%);
   padding: 6px 10px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -894,12 +897,12 @@
 }
 
 .mv-key__toggle::after {
-  content: ' BE';
+  content: ' ▾';
   color: var(--text-muted);
 }
 
 .mv-key.is-closed .mv-key__toggle::after {
-  content: ' B8';
+  content: ' ▸';
 }
 
 .mv-key__list {

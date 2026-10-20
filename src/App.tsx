@@ -22,6 +22,7 @@ import { partitionWarnings } from './lib/warnings';
 import { NEAR_KM, isExpired, mergeWarnings } from './lib/warningsView';
 import { useOfficialWarnings } from './lib/useOfficialWarnings';
 import { useNowMs } from './lib/useNowMs';
+import { useDetailMode } from './lib/detailMode';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
 import { hotspotsUpToDay } from './components/map/mapGeometry';
 import type { MapHotspot } from './components/map/mapGeometry';
@@ -354,6 +355,7 @@ export default function App() {
   const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
   /** Shared page clock (every 5 minutes, on visible, on online): warning expiry and the quake layer's 24 h. */
   const nowMs = useNowMs();
+  const detailMode = useDetailMode();
   /** The deck.gl layer builders, once their chunk is in (the map draws no fire or plume layers before). */
   const [deckLayers, setDeckLayers] = useState<DeckLayersModule | null>(null);
   useEffect(() => {
@@ -861,11 +863,12 @@ export default function App() {
         // regional zoom are MapView's (one collision plan with pins, volcano names and city labels); the
         // fires module draws the cluster badges from zoom 5.2.
         cellsMinZoom: 4.5,
-        showBadges: ctx.zoom >= REGIONAL_ZOOM,
+        // Hotspot count badges are details: hidden in the simple view (the squares stay).
+        showBadges: detailMode === 'full' && ctx.zoom >= REGIONAL_ZOOM,
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
-    [layers.fires, selectedClusterId, selectFire, deckLayers],
+    [layers.fires, selectedClusterId, selectFire, deckLayers, detailMode],
   );
 
   let section: ReactNode = null;

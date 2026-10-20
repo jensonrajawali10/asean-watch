@@ -6,10 +6,10 @@ import { useState } from 'react';
 import { PM25_BANDS, WHO_PM25_24H_UGM3 } from '../../lib/airQuality';
 
 const MAP_KEY_ROWS = {
-  circles: `Circles: fine smoke (PM2.5) in the air, in µg/m³. Bigger and darker is worse. A computer forecast (modelled), not a measurement. The WHO 24-hour guideline is ${WHO_PM25_24H_UGM3}.`,
-  pins: 'Red pins: warnings issued by national agencies (floods, tsunamis, volcanoes), shown word for word. Not fires.',
-  volcanoes: 'Triangles: volcanoes we watch. Click one for its official alert level.',
-  fires: 'Orange squares and "N hotspots": fires seen by NASA satellites in the last 24 hours (hotspots).',
+  circles: 'Fine smoke (PM2.5) in the air, µg/m³. A forecast, not a measurement.',
+  pins: 'Official warning from a national agency. Not a fire.',
+  volcanoes: 'Volcano. Click for its official alert level.',
+  fires: 'Fire seen by NASA satellites (a "hotspot").',
 } as const;
 
 export default function MapKey() {
@@ -30,7 +30,7 @@ export default function MapKey() {
             <span>
               {MAP_KEY_ROWS.circles}
               <span className="mv-key__scale">
-                {PM25_BANDS.map((b) => b.min).join(' · ')} µg/m³ <span className="mv-key__tag">MODELLED</span>
+                {PM25_BANDS.map((b) => b.min).join(' · ')} · WHO daily guideline {WHO_PM25_24H_UGM3} <span className="mv-key__tag">MODELLED</span>
               </span>
             </span>
           </li>

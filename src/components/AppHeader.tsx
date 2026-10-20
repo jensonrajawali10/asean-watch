@@ -7,6 +7,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { WarningIcon, LayersIcon } from './shell/icons';
+import { applyDetail, useDetailMode } from '../lib/detailMode';
 
 export type Theme = 'dark' | 'light';
 /** localStorage key; index.html's pre-paint script reads the same key. */
@@ -46,6 +47,12 @@ export interface AppHeaderProps {
 export default function AppHeader({ headline, timeLabel, timeISO, freshness, alerts, onAlerts, workspaceOpen, onWorkspace, children }: AppHeaderProps) {
   const ref = useRef<HTMLElement>(null);
   const [theme, setTheme] = useState<Theme>(readTheme);
+  // Simple view by default; "Show details" brings back the advanced parts (src/lib/detailMode.ts).
+  const detail = useDetailMode();
+  useLayoutEffect(() => {
+    document.documentElement.dataset.detail = detail;
+  }, [detail]);
+  const toggleDetail = () => applyDetail(detail === 'simple' ? 'full' : 'simple');
 
   // The attribute is always present (dark when the pre-paint script did not run).
   useLayoutEffect(() => {
@@ -105,9 +112,22 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
       <div className="topbar__right">
         <button
           type="button"
+          className="detail-toggle"
+          aria-pressed={detail === 'full'}
+          onClick={toggleDetail}
+          title={detail === 'full' ? 'Back to the simple view' : 'Show the forecast timeline, fire counts, workspace links and theme'}
+        >
+          {detail === 'full' ? 'Simple view' : 'Show details'}
+        </button>
+        <button
+          type="button"
           className={`alerts-pill${alerts.urgent ? ' is-urgent' : ''}${alerts.count === 0 ? ' is-empty' : ''}`}
           onClick={onAlerts}
-          title={alerts.urgent ? 'A tsunami or evacuation-level message is in force. Open the official warnings.' : 'Open the official warnings'}
+          title={
+            alerts.urgent
+              ? `${alerts.count} ${alerts.label}, including a tsunami or evacuation-level message. Open the official warnings.`
+              : `${alerts.count} ${alerts.label}. Open the official warnings.`
+          }
         >
           <WarningIcon size={16} />
           <span className="alerts-pill__count">{alerts.count}</span>

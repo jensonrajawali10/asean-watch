@@ -124,8 +124,8 @@ describe('plain words', () => {
     const html = renderToStaticMarkup(createElement(MapKey));
     expect(html).toContain('µg/m³');
     expect(html).toContain('MODELLED');
-    expect(html).toContain('Not fires.');
-    expect(html).toContain('fires seen by NASA satellites');
-    expect(html).toContain('volcanoes');
+    expect(html).toContain('Not a fire.');
+    expect(html).toContain('Fire seen by NASA satellites');
+    expect(html).toContain('Volcano');
   });
 });
