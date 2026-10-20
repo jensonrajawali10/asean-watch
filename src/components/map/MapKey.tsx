@@ -12,8 +12,17 @@ const MAP_KEY_ROWS = {
   fires: { name: 'Orange squares', text: 'Fires seen by NASA satellites in the last 24 hours ("hotspots").' },
 } as const;
 
+/** Phones start with the key folded to its title (one tap opens it): open, it would cover most of the map. */
+function startsOpen(): boolean {
+  try {
+    return !(typeof window !== 'undefined' && window.matchMedia?.('(max-width: 767px)').matches);
+  } catch {
+    return true;
+  }
+}
+
 export default function MapKey() {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(startsOpen);
   return (
     <section className={`mv-key${open ? '' : ' is-closed'}`} aria-label="Map key">
       <button type="button" className="mv-key__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
