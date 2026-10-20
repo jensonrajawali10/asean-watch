@@ -75,7 +75,14 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
       <div className="topbar__left">
         <div className="brand">
           <h1 className="brand-name">ASEAN Watch</h1>
-          <p className="brand-tag">Haze, fires and volcanoes across South-east Asia, with official warnings relayed as issued.</p>
+          <details className="brand-about">
+            <summary>What is this?</summary>
+            <p className="brand-tag">
+              A map of haze, fires and volcanoes across South-east Asia. Coloured circles are a computer forecast of fine smoke
+              (PM2.5) in the air; small orange squares are fires seen by NASA satellites; red pins are warnings from national
+              agencies, shown word for word. ASEAN Watch never issues warnings of its own.
+            </p>
+          </details>
         </div>
         <p className="headline" aria-live="polite">
           {headline}

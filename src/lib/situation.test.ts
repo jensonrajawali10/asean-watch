@@ -206,7 +206,7 @@ describe('headline', () => {
   it('names the worst place with its modelled value and says "Now" for a live run', () => {
     const h = headline({ airQuality: smoky });
     // Anchor 06:00 is hour index 30 of the run: 300 + 30.
-    expect(h.text).toBe('Now: haze is worst over Palangka Raya (330 µg/m³, modelled).');
+    expect(h.text).toBe('Now: the worst haze is at Palangka Raya, 330 µg/m³ of fine smoke (PM2.5), modelled. The WHO 24-hour guideline is 15 µg/m³.');
     expect(h.freshness).toBe('LIVE');
     expect(h.chip).toBe('LIVE · 14 Oct 07:19 UTC');
     expect(h.worst?.id).toBe('palangka-raya');
@@ -216,19 +216,19 @@ describe('headline', () => {
   it('never says "now" for a snapshot run (docs/CONTRACT.md)', () => {
     const snap = { ...smoky, dataMode: 'historical' as const };
     const h = headline({ airQuality: snap });
-    expect(h.text.startsWith('Snapshot run, Wed 14 Oct, 06:00 UTC: haze is worst over Palangka Raya')).toBe(true);
+    expect(h.text.startsWith('Snapshot run, Wed 14 Oct, 06:00 UTC: the worst haze is at Palangka Raya')).toBe(true);
     expect(h.text).not.toMatch(/\bnow\b/i);
     expect(h.chip.startsWith('SNAPSHOT')).toBe(true);
   });
 
   it('follows the scrubber hour when given', () => {
     const h = headline({ airQuality: smoky }, { atISO: '2026-10-15T06:00:00Z' });
-    expect(h.text.startsWith('Forecast +24 h (Thu 15 Oct, 06:00 UTC): haze is worst over Palangka Raya (354 µg/m³, modelled).')).toBe(true);
+    expect(h.text.startsWith('Forecast +24 h (Thu 15 Oct, 06:00 UTC): the worst haze is at Palangka Raya, 354 µg/m³ of fine smoke (PM2.5), modelled.')).toBe(true);
   });
 
   it('stays calm when every value is low', () => {
     const clean = aqData({ places: [{ id: 'singapore', pm25: () => 9 }, { id: 'cebu', pm25: () => 3 }] });
-    expect(headlineSentence({ airQuality: clean })).toBe('Now: modelled PM2.5 is low at all 2 tracked places; the highest is Singapore (9 µg/m³, modelled).');
+    expect(headlineSentence({ airQuality: clean })).toBe('Now: fine smoke (PM2.5) is low at all 2 places we track, modelled; the highest is Singapore, 9 µg/m³. The WHO 24-hour guideline is 15 µg/m³.');
   });
 
   it('adds the low-level wind at the worst place and says when that is the direction of Singapore', () => {
@@ -236,20 +236,20 @@ describe('headline', () => {
     // the north-west (315°) is 26° off, so it is not called the direction of Singapore.
     const wnw = uniformWind(-5, 1.75);
     expect(headlineSentence({ airQuality: smoky, wind925: wnw })).toContain(
-      'Low-level winds there blow toward the west, the direction of Singapore (modelled).',
+      'Winds there blow toward the west, toward Singapore (modelled).',
     );
     expect(headlineSentence({ airQuality: smoky, wind925: uniformWind(-5, 5) })).toContain(
-      'Low-level winds there blow toward the north-west (modelled).',
+      'Winds there blow toward the north-west (modelled).',
     );
     const east = uniformWind(5, 0);
-    expect(headlineSentence({ airQuality: smoky, wind925: east })).toContain('Low-level winds there blow toward the east (modelled).');
+    expect(headlineSentence({ airQuality: smoky, wind925: east })).toContain('Winds there blow toward the east (modelled).');
     const calm = uniformWind(0.2, 0.1);
-    expect(headlineSentence({ airQuality: smoky, wind925: calm })).toContain('Low-level winds there are light (modelled).');
+    expect(headlineSentence({ airQuality: smoky, wind925: calm })).toContain('Winds there are light (modelled).');
   });
 
   it('prefers a modelled path that reaches Singapore', () => {
     const h = headlineSentence({ airQuality: smoky, wind925: uniformWind(5, 0), hazeSources: [WEST_OF_SG] });
-    expect(h).toMatch(/Modelled low-level winds carry air from Test cluster to Singapore in about \d+ h\./);
+    expect(h).toMatch(/Winds carry air from Test cluster to Singapore in about \d+ h \(modelled\)\./);
   });
 
   it('handles a missing air-quality model without an all-clear', () => {

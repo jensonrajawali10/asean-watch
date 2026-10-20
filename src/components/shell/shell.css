@@ -177,7 +177,7 @@
   left: calc(var(--taskbar-w) + var(--drawer-w));
 }
 
-.app[data-drawer='open'] .brand-tag {
+.app[data-drawer='open'] .brand-about {
   display: none;
 }
 
@@ -208,10 +208,22 @@
   white-space: nowrap;
 }
 
-.brand-tag {
+/* "What is this?": the intro, one click away instead of always on screen. */
+.brand-about > summary {
   color: var(--text-muted);
   font-size: 12px;
-  line-height: 1.3;
+  cursor: pointer;
+}
+
+.brand-about[open] {
+  flex-basis: 100%;
+}
+
+.brand-tag {
+  margin: 4px 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .headline {
@@ -746,7 +758,7 @@
     padding: 8px 12px;
   }
 
-  .brand-tag {
+  .brand-about:not([open]) .brand-tag {
     display: none;
   }
 
