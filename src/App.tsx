@@ -867,7 +867,7 @@ export default function App() {
         showBadges: detailMode === 'full' && ctx.zoom >= REGIONAL_ZOOM,
         // Simple view: only the last 24 h (what the map key says), at half strength, so the squares never
         // read as part of the haze forecast or bury the pins and circles.
-        ...(detailMode === 'simple' ? { window: '24h' as const, cellStrength: 0.5 } : {}),
+        ...(detailMode === 'simple' ? { window: '24h' as const, cellStrength: 0.35 } : {}),
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
