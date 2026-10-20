@@ -131,7 +131,8 @@ export function emptyWarningsText(opts: { loading: boolean; nearName: string | n
  * rank `of` = most severe. Read from the verbatim level, never re-scored:
  * - Jakarta DSDA "Siaga 1".."Siaga 4" (Siaga 1 is the MOST severe, so Siaga 3 is rank 2 of 4);
  * - MAGMA Indonesia "Level I".."Level IV";
- * - ThaiWater situation level 1..5 (our fixed gloss carries "level N of 5").
+ * - ThaiWater situation level 1..5 (our fixed gloss carries "level N of 5");
+ * - JMA Volcanic Alert Level 1..5 (our fixed gloss carries "Level N of 5").
  * Null for every other message: it keeps the full official styling.
  */
 export function officialScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGloss'>): { rank: number; of: number } | null {
@@ -143,6 +144,11 @@ export function officialScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGl
     const roman = /Level\s+(IV|III|II|I)\b/.exec(w.level)?.[1];
     const n = roman ? ({ I: 1, II: 2, III: 3, IV: 4 } as Record<string, number>)[roman] : undefined;
     return n ? { rank: n, of: 4 } : null;
+  }
+  if (w.id.startsWith('jma-volcano:')) {
+    // Our fixed gloss carries JMA's position, e.g. "JMA Volcanic Alert Level 2 of 5: crater area restricted".
+    const m = /Level\s+([1-5])\s+of\s+5/i.exec(w.levelGloss ?? '');
+    return m ? { rank: Number(m[1]), of: 5 } : null;
   }
   if (w.id.startsWith('thaiwater:')) {
     const m = /level\s+([1-5])\s+of\s+5/i.exec(w.levelGloss ?? '') ?? /situation_level\s+([1-5])/i.exec(w.level);

@@ -318,5 +318,12 @@ describe('officialScale: style by the issuer\'s own scale', () => {
     expect(officialScale(tw)).toEqual({ rank: 5, of: 5 });
     expect(belowTopOfScale(tw)).toBe(false);
     expect(officialScale({ id: 'bmkg-inatews:x', level: 'SIAGA', levelGloss: null })).toBeNull();
+    const jma = snap.warnings.filter((w) => w.id.startsWith('jma-volcano:') && /Level\s+[1-5]\s+of\s+5/i.test(w.levelGloss ?? ''));
+    expect(jma.length).toBeGreaterThan(0);
+    for (const w of jma) {
+      const n = Number(/Level\s+([1-5])\s+of\s+5/i.exec(w.levelGloss!)![1]);
+      expect(officialScale(w)).toEqual({ rank: n, of: 5 });
+      expect(belowTopOfScale(w)).toBe(n < 5);
+    }
   });
 });
