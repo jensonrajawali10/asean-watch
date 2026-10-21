@@ -183,7 +183,35 @@ export default function OfficialWarningsPanel({
         )}
       </div>
 
-      <p className="ow-relayed">Each message is the agency's own text, relayed as issued. Southeast Asia first, then the wider Asia-Pacific.</p>
+      {/* How to read the list, before the first card: who wrote what, and LIVE versus HISTORICAL. */}
+      <ul className="ow-howto" aria-label="How to read this list">
+        <li>
+          <span className="ow-howto__card" aria-hidden="true" />
+          <span>
+            <strong>Each card</strong> is one agency message in the agency's own words, as issued.
+          </span>
+        </li>
+        <li>
+          <span className="official-chip official-chip--lower ow-howto__chip" aria-hidden="true">
+            Level
+          </span>
+          <span>
+            <strong>The agency's level</strong>, as issued. The grey words after it are our fixed, plain gloss of that agency's scale (for example
+            "Level 2 of 4").
+          </span>
+        </li>
+        <li>
+          <span className="ow-howto__modes" aria-hidden="true">
+            <span className="badge badge-mode badge-mode--live">LIVE</span>
+            <span className="badge badge-mode badge-mode--historical">HISTORICAL</span>
+          </span>
+          <span>
+            <strong>LIVE</strong>: fetched from the agency during this visit. <strong>HISTORICAL SNAPSHOT</strong>: a saved copy with the time it was
+            saved, shown when the agency has no open live feed or did not answer. Check the agency for the current state.
+          </span>
+        </li>
+      </ul>
+      <p className="ow-relayed">Southeast Asia first, then the wider Asia-Pacific.</p>
       <div className="ow-scroll">
         {n === 0 ? (
           <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>

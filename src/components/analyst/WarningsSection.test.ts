@@ -35,3 +35,30 @@ describe('WarningsSection tiles', () => {
     expect(new Set(items).size).toBe(items.length);
   });
 });
+
+describe('WarningsSection how-to-read key', () => {
+  it('says, before the first card, whose words are whose and what LIVE and HISTORICAL mean', () => {
+    const snap = loadWarningsSnapshot();
+    const noop = () => {};
+    const html = renderToStaticMarkup(
+      createElement(WarningsSection, {
+        warnings: snap.warnings,
+        allWarnings: snap.warnings,
+        elsewhere: [],
+        gauges: snap.gauges,
+        feeds: snap.feeds,
+        nearName: null,
+        loading: false,
+        selectedWarningId: null,
+        onInspect: noop,
+      } as never),
+    );
+    const key = html.indexOf('aria-label="How to read this list"');
+    expect(key).toBeGreaterThan(-1);
+    expect(key).toBeLessThan(html.indexOf('class="ow-list"'));
+    expect(html).toContain("is one agency message in the agency&#x27;s own words, as issued.");
+    expect(html).toContain('our fixed, plain gloss of that agency&#x27;s scale');
+    expect(html).toContain('fetched from the agency during this visit');
+    expect(html).toContain('a saved copy with the time it was');
+  });
+});
