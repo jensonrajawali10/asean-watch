@@ -1088,6 +1088,17 @@
   display: none;
 }
 
+/* Phones: while a card is open the top bar keeps the brand, the headline and the disclaimer only, so the
+   card does not cover the whole map (the card states its own time and that it is a forecast). */
+@media (max-width: 767px) {
+  .app[data-card='open'] .brand-line,
+  .app[data-card='open'] .brand-about,
+  .app[data-card='open'] .headline-legend,
+  .app[data-card='open'] .headline-meta > :not(.headline-note) {
+    display: none;
+  }
+}
+
 /* Phones: the same legend in short words, on one or two lines. */
 @media (max-width: 767px) {
   .headline-legend {
