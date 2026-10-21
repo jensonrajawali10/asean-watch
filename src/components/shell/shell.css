@@ -1103,6 +1103,16 @@
   display: none;
 }
 
+/* Phones: a shorter top bar. The brand line already says what the site is ("What is this?" is in the
+   workspace), the freshness chip carries a UTC time, and the region is in the name. */
+@media (max-width: 767px) {
+  .brand-about,
+  .brand-line__region,
+  .headline-utc {
+    display: none;
+  }
+}
+
 /* Phones: while a card is open the top bar keeps the brand, the headline and the disclaimer only, so the
    card does not cover the whole map (the card states its own time and that it is a forecast). */
 @media (max-width: 767px) {
@@ -1114,12 +1124,17 @@
   }
 }
 
-/* Phones: the same legend in short words, on one or two lines. */
+/* Phones: the same legend in short words, as a strip set apart from the headline. */
 @media (max-width: 767px) {
   .headline-legend {
-    gap: 2px 10px;
-    margin-top: 4px;
-    font-size: 12px;
+    gap: 4px 12px;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-2);
+    font-size: 13px;
+    font-weight: 600;
   }
 
   .headline-legend .hl-long {

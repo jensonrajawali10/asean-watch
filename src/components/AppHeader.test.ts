@@ -18,6 +18,7 @@ describe('AppHeader first-load legend', () => {
         onWorkspace: () => {},
       }),
     );
+    expect(html).toContain('Smoke forecast (modelled) · NASA fire detections · official warnings, word for word<span class="brand-line__region"> · South-east Asia</span>');
     for (const t of ['Circles: fine smoke forecast (PM2.5, modelled)', 'Orange squares: fires seen by NASA satellites', 'Triangles: volcanoes', 'Red pins: official warnings', 'Streaks: wind (forecast)']) {
       expect(html).toContain(t);
     }
@@ -62,7 +63,8 @@ describe('AppHeader time and freshness', () => {
       }),
     );
   it('says what the time is and whether the forecast was fetched now or saved, keeping the LIVE / SNAPSHOT label', () => {
-    expect(render('LIVE')).toContain('Map shows <time dateTime="2026-10-21T12:00:00Z">Wed 21 Oct 12:00 UTC</time>');
+    // Local time first (the visitor's clock), the UTC time the analysts use after it.
+    expect(render('LIVE')).toMatch(/Map shows <span class="headline-local">\w{3} \d{1,2}:\d{2} [ap]m your time<\/span><span class="headline-utc"> \(<time dateTime="2026-10-21T12:00:00Z">Wed 21 Oct 12:00 UTC<\/time>\)<\/span>/);
     expect(render('LIVE')).toMatch(/>LIVE<span class="fresh-chip__run"> · fetched 21 Oct 12:55 UTC<\/span>/);
     expect(render('SNAPSHOT')).toMatch(/>SNAPSHOT<span class="fresh-chip__run"> · saved 21 Oct 12:55 UTC<\/span>/);
     expect(render('LIVE')).toContain('Not an official warning service: follow your national agency.');

@@ -92,7 +92,9 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
       <div className="topbar__left">
         <div className="brand">
           <h1 className="brand-name">ASEAN Watch</h1>
-          <p className="brand-line">Smoke forecast, fires and official warnings for South-east Asia</p>
+          <p className="brand-line">
+            Smoke forecast (modelled) · NASA fire detections · official warnings, word for word<span className="brand-line__region"> · South-east Asia</span>
+          </p>
           <details className="brand-about">
             <summary>What is this?</summary>
             <p className="brand-tag">
@@ -123,8 +125,18 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
         <p className="headline-meta">
           {timeLabel && (
             <span>
-              Map shows <time dateTime={timeISO ?? undefined}>{timeLabel}</time>
-              {localTimeLabel(timeISO) && <span className="headline-local"> ({localTimeLabel(timeISO)})</span>}
+              Map shows{' '}
+              {localTimeLabel(timeISO) ? (
+                <>
+                  <span className="headline-local">{localTimeLabel(timeISO)}</span>
+                  <span className="headline-utc">
+                    {' '}
+                    (<time dateTime={timeISO ?? undefined}>{timeLabel}</time>)
+                  </span>
+                </>
+              ) : (
+                <time dateTime={timeISO ?? undefined}>{timeLabel}</time>
+              )}
             </span>
           )}
           {freshness && (

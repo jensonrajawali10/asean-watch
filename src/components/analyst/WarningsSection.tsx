@@ -4,7 +4,7 @@
 // the panel itself. Absence is never an all-clear.
 import type { OfficialWarning, WarningFeedStatus } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
-import OfficialWarningsPanel from '../OfficialWarnings';
+import OfficialWarningsPanel, { WarningsHowTo } from '../OfficialWarnings';
 import ErrorBoundary from '../ErrorBoundary';
 import { activeOfficial, isUrgentWarning } from '../shell/alerts';
 import { useNowMs } from '../../lib/useNowMs';
@@ -65,9 +65,10 @@ export default function WarningsSection(p: WarningsSectionProps) {
     <AnalystSection
       id="warnings"
       title="Official warnings"
-      lede="Every message below is the issuing agency's own text, relayed as issued: level, headline, area, times and instruction. ASEAN Watch never issues a warning of its own, never re-scores a level, and never treats an empty feed as an all-clear."
+      lede="Messages from national agencies, relayed as issued. ASEAN Watch never issues a warning of its own, never re-scores a level, and never treats an empty feed as an all-clear."
       sources={sourcesFromFeeds(p.feeds)}
     >
+      <WarningsHowTo />
       <div className="an-figures">
         <KeyFigure label="Official alerts still active" value={String(active.length)} note="not ended by the agency and not past their expiry time (the number on the alerts button)" />
         <KeyFigure label="Tsunami or evacuation alerts" value={String(urgent)} note={urgent > 0 ? 'active now' : 'none active'} />
