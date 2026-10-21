@@ -117,18 +117,29 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
             </span>
           ))}
         </p>
+        {/* The hour on the map, whether the forecast was fetched now (LIVE) or is a saved copy (SNAPSHOT), and
+            the disclaimer, each in words a newcomer can read without hovering. */}
         <p className="headline-meta">
-          {timeLabel && <time dateTime={timeISO ?? undefined}>{timeLabel}</time>}
+          {timeLabel && (
+            <span>
+              Map shows <time dateTime={timeISO ?? undefined}>{timeLabel}</time>
+            </span>
+          )}
           {freshness && (
             <span
               className={`fresh-chip${freshness.mode === 'SNAPSHOT' ? ' is-snapshot' : ' is-live'}`}
               title={freshness.mode === 'SNAPSHOT' ? `Bundled snapshot of the model run captured ${freshness.run ?? ''}` : `Model run retrieved ${freshness.run ?? ''}`}
             >
               {freshness.mode}
-              {freshness.run && <span className="fresh-chip__run"> {freshness.run}</span>}
+              {freshness.run && (
+                <span className="fresh-chip__run">
+                  {' '}
+                  · {freshness.mode === 'SNAPSHOT' ? 'saved' : 'fetched'} {freshness.run}
+                </span>
+              )}
             </span>
           )}
-          <span className="headline-note">Not an official warning service.</span>
+          <span className="headline-note">Not an official warning service: follow your national agency.</span>
         </p>
         {children}
       </div>
