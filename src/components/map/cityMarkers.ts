@@ -2,6 +2,9 @@
 // MODELLED PM2.5, each labelled with its value, labels placed without overlaps, and a gentle pulse on the
 // worst city. Pure helpers for HazeLayerController; tested.
 
+/** Below this zoom the map is at its regional view: city labels are planned and overlapping fire-area circles hidden. */
+export const CITY_LABEL_ZOOM = 6;
+
 /** Circle radius in pixels for a PM2.5 value: grows with the square root, 6 to 26 px (HazeView's scale). */
 export function cityRadiusPx(pm25: number): number {
   if (!Number.isFinite(pm25) || pm25 <= 0) return 6;
@@ -23,6 +26,11 @@ export function shortCityName(name: string): string {
 /** "719", "1,204": the value as a label. */
 export function valueText(pm25: number): string {
   return Number.isFinite(pm25) ? Math.round(pm25).toLocaleString('en-US') : '—';
+}
+
+/** "Palangka Raya  407 µg/m³": a city's full map label, with the unit (the value-only label stays a bare number). */
+export function fullCityLabel(name: string, value: string): string {
+  return `${name}  ${value} µg/m³`;
 }
 
 export interface LabelCandidate {
@@ -77,7 +85,7 @@ export function placeCityLabels(cands: readonly LabelCandidate[], opts: { charPx
       const x0 = c.x + c.r + gap;
       return { x0, y0: c.y - h / 2, x1: x0 + w, y1: c.y + h / 2 };
     };
-    const full = `${c.name}  ${c.value}`;
+    const full = fullCityLabel(c.name, c.value);
     const fb = box(full);
     if (c.force || free(fb, c.id)) {
       placed.push(fb);
@@ -108,4 +116,27 @@ export function cityMarkerRadius(pm25: number, zoom: number, kind: 'city' | 'fir
 export function pulseRing(radiusPx: number, tMs: number, periodMs = 2400, spreadPx = 24): { radius: number; alpha: number } {
   const phase = (((tMs % periodMs) + periodMs) % periodMs) / periodMs;
   return { radius: radiusPx + 3 + phase * spreadPx, alpha: Math.round((1 - phase) * 180) };
+}
+
+/**
+ * Circles in draw order for the map, cities last (on top, so a click on a city's circle opens that city),
+ * without the fire-area circles that overlap a city circle on screen at the regional zoom: there the
+ * fire-area town (e.g. Pulang Pisau) sat on top of its province's city (Palangka Raya) and took its clicks.
+ * Zoomed in (`regional` false) every circle is kept. `screen` gives each circle's centre and radius in px.
+ */
+export function cityDrawOrder<T extends { id: string; kind: 'city' | 'fire-area' }>(
+  items: readonly T[],
+  screen: (d: T) => { x: number; y: number; r: number },
+  regional: boolean,
+): T[] {
+  const cities = items.filter((d) => d.kind === 'city');
+  const fireAreas = items.filter((d) => d.kind === 'fire-area');
+  const cityPts = cities.map(screen);
+  const keep = regional
+    ? fireAreas.filter((f) => {
+        const p = screen(f);
+        return cityPts.every((c) => Math.hypot(c.x - p.x, c.y - p.y) > c.r + p.r);
+      })
+    : fireAreas;
+  return [...keep, ...cities];
 }

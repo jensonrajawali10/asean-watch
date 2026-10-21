@@ -195,9 +195,23 @@ const JMA_VOLCANO_GLOSS: Record<string, { level: number; keyword: string; meanin
   '15': { level: 5, keyword: '避難', meaning: 'evacuate' },
 };
 
+/** JMA's eruption forecast keyword: the calm state, no warning in force (with or without alert levels). */
+export const JMA_FORECAST_KEYWORD = '活火山であることに留意';
+/** JMA's eruption warning for the sea around a submarine volcano (噴火警報（周辺海域）, keyword 周辺海域警戒). */
+const JMA_SEA_WARNING = /周辺海域警戒|噴火警報（周辺海域）/;
+
 export function jmaVolcanoGloss(code: string | null, name: string): string | null {
   const g = code ? JMA_VOLCANO_GLOSS[code] : undefined;
-  if (!g) return null;
+  if (!g) {
+    // Volcanoes without alert levels, such as submarine ones (e.g. "活火山であることに留意（海底火山）", code 35),
+    // have two states: an eruption forecast (calm, no warning) or an eruption warning for the surrounding sea.
+    // Matched on JMA's own words, not the code. Checked 2026-10-20 on jma.go.jp: kishou/know/kazan/volinfo.html
+    // (噴火警報（周辺海域） is the submarine-volcano warning; 噴火予報 is issued when activity is calm) and JMA's
+    // monthly volcano tables (e.g. Kaitoku Seamount lowered from 噴火警報(周辺海域) to 噴火予報(活火山であることに留意)).
+    if (JMA_SEA_WARNING.test(name)) return 'JMA eruption warning for the sea around this submarine volcano';
+    if (name.includes(JMA_FORECAST_KEYWORD)) return 'JMA eruption forecast, no warning in force: note that this is an active volcano';
+    return null;
+  }
   const rank = `JMA Volcanic Alert Level ${g.level} of 5${g.level === 5 ? ' (highest)' : ''}`;
   // Code 15's keyword (避難) is a substring of code 14's; codes are checked first, so this is safe.
   return name.includes(g.keyword) ? `${rank}: ${g.meaning}` : rank;

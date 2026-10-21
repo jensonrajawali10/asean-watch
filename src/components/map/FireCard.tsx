@@ -22,6 +22,8 @@ import {
 } from '../../lib/fires';
 import type { FireCluster, FireRollup, FireSeries, FireSnapshot, SmokeHeading, SmokePlace } from '../../lib/fires';
 import type { WindGrid } from '../../lib/windField';
+import type { AirQualityData } from '../../lib/airQuality';
+import { AreaAirQuality } from './AreaAirQuality';
 import type { FirePick } from './fireLayers';
 import './FireCard.css';
 
@@ -35,6 +37,10 @@ export interface FireCardProps {
   smokeStartISO?: string;
   /** Places the smoke path is checked against; defaults to DEFAULT_SMOKE_PLACES. */
   smokePlaces?: readonly SmokePlace[];
+  /** Modelled PM2.5 for the "Air here" block; omit to leave it out. */
+  airQuality?: AirQualityData | null;
+  /** The hour the "Air here" value is for (the scrubber time). */
+  airTimeISO?: string | null;
   /** "Open in workspace →": open the Fires section (and select the cluster there). */
   onOpenWorkspace: () => void;
   onClose?: () => void;
@@ -91,7 +97,8 @@ function HeadingLine({ heading }: { heading: SmokeHeading }) {
   );
 }
 
-export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlaces, onOpenWorkspace, onClose, className }: FireCardProps) {
+export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlaces, airQuality, airTimeISO, onOpenWorkspace, onClose, className }: FireCardProps) {
+  const withAir = airQuality !== undefined;
   const cluster: FireCluster | null = useMemo(() => {
     if (pick.kind === 'fire-cluster') return pick.cluster;
     if (pick.kind === 'fire-cell') return clusterAt(s, pick.cell.lat, pick.cell.lon);
@@ -139,6 +146,18 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
       >
         {trendBars(s, cluster.series, cluster.name)}
         {heading && <HeadingLine heading={heading} />}
+        {withAir && (
+          <AreaAirQuality
+            area={{
+              key: cluster.place.adm1 ? `${cluster.place.iso3}:${cluster.place.adm1}` : cluster.place.iso3,
+              name: cluster.name,
+              centre: [cluster.lat, cluster.lon],
+            }}
+            iso3={cluster.place.iso3}
+            airQuality={airQuality ?? null}
+            timeISO={airTimeISO ?? null}
+          />
+        )}
         {cluster.place.method.includes('approximate') && (
           <p className="firecard__muted">Place name from the nearest district or province centre: approximate.</p>
         )}
@@ -171,6 +190,14 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
         onClose={onClose}
       >
         {trendBars(s, rollup.series, rollup.name)}
+        {withAir && (
+          <AreaAirQuality
+            area={{ key: rollup.key, name: rollup.name, centre: rollup.centre24h ?? rollup.centre7d }}
+            iso3={rollup.iso3}
+            airQuality={airQuality ?? null}
+            timeISO={airTimeISO ?? null}
+          />
+        )}
         {rollup.kind === 'region' && <p className="firecard__muted">Province from the nearest regency centre: approximate.</p>}
       </MapCard>
     );

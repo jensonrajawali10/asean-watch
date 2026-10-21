@@ -23,6 +23,7 @@ import {
   forecastSteps,
   pm25Band,
   placePm25At,
+  plainAirWords,
 } from './airQuality';
 import type { AirQualityData, AqPlaceSeries, Pm25Band } from './airQuality';
 import { ASH_LEVELS, ashDriftTracks, bearingDeg, compass16, distanceKm } from './ashDrift';
@@ -747,12 +748,16 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
   const name = shortPlaceName(worst.place.name);
   const value = pmText(worst.pm25);
   let first: string;
+  // Plain words with the unit, what the number means (band and WHO yardstick, as on the city card), and
+  // always "modelled" (a forecast, not a measurement).
+  const plain = plainAirWords(worst.pm25);
+  const meaning = plain ? ` That is ${plain.band}, ${plain.scale}.` : ` The WHO daily guideline is ${WHO_PM25_24H_UGM3} µg/m³.`;
   if (worst.pm25 < WHO_PM25_24H_UGM3) {
-    first = `${when}: modelled PM2.5 is low at all ${aq.places.length} tracked places; the highest is ${name} (${value} µg/m³, modelled).`;
+    first = `${when}: fine smoke (PM2.5) is low at all ${aq.places.length} places we track, modelled; the highest is ${name}, ${value} µg/m³${plain ? `, ${plain.scale}` : ''}.`;
   } else if (worst.pm25 < 35) {
-    first = `${when}: modelled PM2.5 is highest over ${name} (${value} µg/m³, modelled).`;
+    first = `${when}: the most fine smoke (PM2.5) is at ${name}, ${value} µg/m³, modelled.${meaning}`;
   } else {
-    first = `${when}: haze is worst over ${name} (${value} µg/m³, modelled).`;
+    first = `${when}: the worst haze is at ${name}, ${value} µg/m³ of fine smoke (PM2.5), modelled.${meaning}`;
   }
 
   // Second sentence: a modelled path reaching Singapore, else the low-level wind at the worst place.
@@ -760,19 +765,19 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
   const transport = offsetH === 0 ? transportSummaries(input) : [];
   const reaching = transport.find((t) => t.reachingCount > 0 && t.lead);
   if (reaching && reaching.lead) {
-    second = ` Modelled low-level winds carry air from ${reaching.lead.label} to Singapore in about ${hoursText(reaching.lead.arrivalHours ?? reaching.lead.hoursToClosest)}.`;
+    second = ` Winds carry air from ${reaching.lead.label} to Singapore in about ${hoursText(reaching.lead.arrivalHours ?? reaching.lead.hoursToClosest)} (modelled).`;
   } else {
     const w = windAt(input.wind925 ?? input.wind10m, worst.place.lat, worst.place.lon, timeISO);
     if (w && w.speedMs < 1) {
-      second = ' Low-level winds there are light (modelled).';
+      second = ' Winds there are light (modelled).';
     } else if (w) {
       const toSg = bearingDeg(worst.place.lat, worst.place.lon, SINGAPORE.lat, SINGAPORE.lon);
       const diff = Math.abs(((w.towardDeg - toSg + 540) % 360) - 180);
       const farKm = distanceKm(worst.place.lat, worst.place.lon, SINGAPORE.lat, SINGAPORE.lon);
       const towardSg = worst.place.id !== 'singapore' && diff <= 22.5 && farKm > 50;
       second = towardSg
-        ? ` Low-level winds there blow toward the ${compassWord(w.towardDeg)}, the direction of Singapore (modelled).`
-        : ` Low-level winds there blow toward the ${compassWord(w.towardDeg)} (modelled).`;
+        ? ` Winds there blow toward the ${compassWord(w.towardDeg)}, toward Singapore (modelled).`
+        : ` Winds there blow toward the ${compassWord(w.towardDeg)} (modelled).`;
     }
   }
   return {

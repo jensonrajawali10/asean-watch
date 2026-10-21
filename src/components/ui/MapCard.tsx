@@ -45,7 +45,7 @@ export interface MapCardProps {
   /** Overrides the default kind label, e.g. "OFFICIAL · MAGMA". */
   kindLabel?: string;
   facts?: readonly MapCardFact[];
-  /** One plain-language sentence of meaning. */
+  /** One plain-language sentence of meaning, shown first (before the numbers) for first-time visitors. */
   sentence?: ReactNode;
   /** Optional extra content (a button row, a tiny chart). Keep it short. */
   children?: ReactNode;
@@ -93,6 +93,7 @@ export function MapCard({
           </button>
         )}
       </header>
+      {sentence && <p className="mcard__sentence">{sentence}</p>}
       {facts && facts.length > 0 && (
         <dl className={`mcard__facts mcard__facts--${Math.min(facts.length, 3)}`}>
           {facts.slice(0, 3).map((f) => (
@@ -107,7 +108,6 @@ export function MapCard({
           ))}
         </dl>
       )}
-      {sentence && <p className="mcard__sentence">{sentence}</p>}
       {children && <div className="mcard__slot">{children}</div>}
       {(primaryAction || action || source) && (
         <footer className="mcard__foot">

@@ -6,6 +6,7 @@
 //   5. the other city labels (name and value, else the value alone, else nothing).
 // Every city circle is an obstacle for every label but its own. Pure and deterministic; tested.
 
+import { fullCityLabel } from './cityMarkers';
 /** Below this zoom fire badges are regions, in this plan (MapView); from it, the fires module's cluster badges. */
 export const REGIONAL_ZOOM = 5.2;
 
@@ -86,7 +87,7 @@ export function planRegionalLabels(cities: readonly PlanCity[], badges: readonly
       const x0 = c.x + c.r + 6;
       return { x0, y0: c.y - labelH / 2, x1: x0 + text.length * charPx, y1: c.y + labelH / 2 };
     };
-    const full = `${c.name}  ${c.value}`;
+    const full = fullCityLabel(c.name, c.value);
     const fb = at(full);
     if (c.force || free(fb, c.id)) {
       taken.push(fb);

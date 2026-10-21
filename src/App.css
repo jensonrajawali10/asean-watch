@@ -316,6 +316,12 @@
   color: var(--text-muted);
 }
 
+/* An official level below the top of its issuer's scale: the official ink, outlined, no emergency fill. */
+.official-chip--lower {
+  background: var(--panel);
+  color: var(--official);
+}
+
 .official-chip--estimate {
   border-color: var(--estimate);
   border-style: dashed;

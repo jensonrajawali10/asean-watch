@@ -7,6 +7,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { WarningIcon, LayersIcon } from './shell/icons';
+import { applyDetail, useDetailMode } from '../lib/detailMode';
 
 export type Theme = 'dark' | 'light';
 /** localStorage key; index.html's pre-paint script reads the same key. */
@@ -46,6 +47,12 @@ export interface AppHeaderProps {
 export default function AppHeader({ headline, timeLabel, timeISO, freshness, alerts, onAlerts, workspaceOpen, onWorkspace, children }: AppHeaderProps) {
   const ref = useRef<HTMLElement>(null);
   const [theme, setTheme] = useState<Theme>(readTheme);
+  // Simple view by default; "Show details" brings back the advanced parts (src/lib/detailMode.ts).
+  const detail = useDetailMode();
+  useLayoutEffect(() => {
+    document.documentElement.dataset.detail = detail;
+  }, [detail]);
+  const toggleDetail = () => applyDetail(detail === 'simple' ? 'full' : 'simple');
 
   // The attribute is always present (dark when the pre-paint script did not run).
   useLayoutEffect(() => {
@@ -75,10 +82,33 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
       <div className="topbar__left">
         <div className="brand">
           <h1 className="brand-name">ASEAN Watch</h1>
-          <p className="brand-tag">Haze, fires and volcanoes across South-east Asia, with official warnings relayed as issued.</p>
+          <p className="brand-line">Smoke forecast, fires and official warnings for South-east Asia</p>
+          <details className="brand-about">
+            <summary>What is this?</summary>
+            <p className="brand-tag">
+              A map of haze, fires and volcanoes across South-east Asia. Coloured circles are a computer forecast of fine smoke
+              (PM2.5) in the air; small orange squares are fires seen by NASA satellites; red pins are warnings from national
+              agencies, shown word for word. ASEAN Watch never issues warnings of its own.
+            </p>
+          </details>
         </div>
         <p className="headline" aria-live="polite">
           {headline}
+        </p>
+        {/* What the symbols mean, on first load, without opening anything (the map key has the detail). */}
+        <p className="headline-legend">
+          <span>
+            <i className="hl-sym hl-sym--circle" aria-hidden="true" /> Circles: fine smoke forecast (PM2.5, modelled)
+          </span>
+          <span>
+            <i className="hl-sym hl-sym--fire" aria-hidden="true" /> Orange squares: fires seen by NASA satellites
+          </span>
+          <span>
+            <i className="hl-sym hl-sym--volcano" aria-hidden="true" /> Triangles: volcanoes
+          </span>
+          <span>
+            <i className="hl-sym hl-sym--pin" aria-hidden="true" /> Red pins: official warnings
+          </span>
         </p>
         <p className="headline-meta">
           {timeLabel && <time dateTime={timeISO ?? undefined}>{timeLabel}</time>}
@@ -98,13 +128,29 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
       <div className="topbar__right">
         <button
           type="button"
+          className="detail-toggle"
+          aria-pressed={detail === 'full'}
+          onClick={toggleDetail}
+          title={detail === 'full' ? 'Back to the simple view' : 'Show the forecast timeline, fire counts, workspace links and theme'}
+        >
+          {detail === 'full' ? 'Simple view' : 'Show details'}
+        </button>
+        <button
+          type="button"
           className={`alerts-pill${alerts.urgent ? ' is-urgent' : ''}${alerts.count === 0 ? ' is-empty' : ''}`}
           onClick={onAlerts}
-          title={alerts.urgent ? 'A tsunami or evacuation-level message is in force. Open the official warnings.' : 'Open the official warnings'}
+          title={
+            alerts.urgent
+              ? `${alerts.count} ${alerts.label}, including a tsunami or evacuation-level message. Open the official warnings.`
+              : `${alerts.count} ${alerts.label}. Open the official warnings.`
+          }
         >
           <WarningIcon size={16} />
           <span className="alerts-pill__count">{alerts.count}</span>
-          <span className="alerts-pill__text">{alerts.urgent ? 'official alerts: urgent' : alerts.label}</span>
+          <span className="alerts-pill__text">
+            {/* The red pill already signals urgency; the words say what the alerts are, plus "urgent" when one is. */}
+            {alerts.urgent ? `${alerts.label} (incl. urgent)` : alerts.label}
+          </span>
         </button>
         <div className="theme-toggle" role="group" aria-label="Colour theme">
           <button type="button" aria-pressed={theme === 'dark'} onClick={() => choose('dark')}>

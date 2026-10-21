@@ -516,8 +516,8 @@ describe('BMKG InaTEWS tsunami parser', () => {
     // warnings adapter or the map (e.g. "0.5 to 3 m", "over 3 m", "under 0.5 m").
     expect((warningsModule as Record<string, unknown>).BMKG_TSUNAMI_GLOSS).toBeUndefined();
     for (const src of [warningsSource, mapViewSource]) {
-      expect(src).not.toMatch(/(?:over|under|above|below)\s+\d+(?:[.,]\d+)?\s*m/i);
-      expect(src).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:to|-|–)\s*\d+(?:[.,]\d+)?\s*m/);
+      expect(src).not.toMatch(/\b(?:over|under|above|below)\s+\d+(?:[.,]\d+)?\s*m\b/i);
+      expect(src).not.toMatch(/\d+(?:[.,]\d+)?\s*(?:to|-|–)\s*\d+(?:[.,]\d+)?\s*m\b/);
     }
   });
 
@@ -603,7 +603,8 @@ describe('JMA volcano parser', () => {
       expiresAt: null,
     });
     expect(warnings[1].level).toBe('活火山であることに留意（海底火山）');
-    expect(warnings[1].levelGloss).toBeNull();
+    // No alert levels for a submarine volcano: JMA's eruption forecast keyword (checked on jma.go.jp, 2026-10-20).
+    expect(warnings[1].levelGloss).toBe('JMA eruption forecast, no warning in force: note that this is an active volcano');
   });
 
   it('uses the fixed gloss table only, falling back to rank when the keyword differs', () => {
@@ -611,6 +612,10 @@ describe('JMA volcano parser', () => {
     expect(jmaVolcanoGloss('14', 'レベル４（高齢者等避難）')).toBe('JMA Volcanic Alert Level 4 of 5: elderly and others evacuate');
     expect(jmaVolcanoGloss('14', 'レベル４（避難準備）')).toBe('JMA Volcanic Alert Level 4 of 5');
     expect(jmaVolcanoGloss('22', '火口周辺危険')).toBeNull();
+    // Volcanoes without alert levels: matched on JMA's own words (forecast vs warning for the surrounding sea).
+    expect(jmaVolcanoGloss('35', '活火山であることに留意（海底火山）')).toBe('JMA eruption forecast, no warning in force: note that this is an active volcano');
+    expect(jmaVolcanoGloss('36', '周辺海域警戒')).toBe('JMA eruption warning for the sea around this submarine volcano');
+    expect(jmaVolcanoGloss('99', '噴火警報（周辺海域）')).toBe('JMA eruption warning for the sea around this submarine volcano');
     expect(jmaVolcanoGloss(null, 'x')).toBeNull();
   });
 });

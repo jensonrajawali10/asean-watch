@@ -10,7 +10,7 @@ describe('planRegionalLabels', () => {
   it('labels the worst cities before fire badges', () => {
     // The badge's first choice (above its point) is where the worst city's label goes.
     const plan = planRegionalLabels([city('Worst', 100, 100, 700)], [badge('Prov', 150, 130, 5000)], { topCities: 1 });
-    expect(plan.cities.get('Worst')).toBe('Worst  700');
+    expect(plan.cities.get('Worst')).toBe('Worst  700 µg/m³');
     expect(plan.badges).toHaveLength(1);
     expect(plan.badges[0].side).not.toBe('above');
   });
@@ -19,7 +19,7 @@ describe('planRegionalLabels', () => {
     // A low city whose label would sit where the badge goes loses its label, not the badge.
     const plan = planRegionalLabels([city('Top', 900, 900, 700), city('Low', 60, 110, 20)], [badge('Prov', 160, 128, 5000)], { topCities: 1 });
     expect(plan.badges[0]).toMatchObject({ id: 'Prov', side: 'above' });
-    expect(plan.cities.get('Low')).not.toBe('Low  20');
+    expect(plan.cities.get('Low')).not.toBe('Low  20 µg/m³');
   });
 
   it('nudges a badge to another side, or hides it when no side is free', () => {
@@ -38,7 +38,7 @@ describe('planRegionalLabels', () => {
     const pin = [{ x0: 105, y0: 90, x1: 400, y1: 110 }];
     const plan = planRegionalLabels([city('A', 100, 100, 50), city('B', 100, 300, 40, true)], [], { obstacles: pin });
     expect(plan.cities.has('A')).toBe(false);
-    expect(plan.cities.get('B')).toBe('B  40');
+    expect(plan.cities.get('B')).toBe('B  40 µg/m³');
   });
 
   it('falls back to the value alone where the name does not fit', () => {

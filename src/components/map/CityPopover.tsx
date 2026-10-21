@@ -6,9 +6,9 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import type { HazeReading } from '../../types';
-import { PM25_MEANING, WHO_PM25_24H_UGM3, describePm25, placePm25At } from '../../lib/airQuality';
+import { PM25_MEANING, UGM3_WORDS, WHO_PM25_24H_UGM3, describePm25, placePm25At, plainAirSentence } from '../../lib/airQuality';
 import type { AirQualityData, Pm25Band } from '../../lib/airQuality';
-import { AIR_QUALITY_OFFICIAL, COUNTRY_NAME, localTimeLabel, placeRef } from '../../lib/places';
+import { AIR_QUALITY_OFFICIAL, COUNTRY_NAME, localTimeLabel, noPsiNote, placeRef } from '../../lib/places';
 import type { WindGrid } from '../../lib/windField';
 import { sampleWind } from '../../lib/transport';
 import { MapCard } from '../ui/MapCard';
@@ -125,15 +125,18 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
       kind="modelled"
       onClose={onClose}
       facts={[
-        { label: 'PM2.5', value: d.valueText, unit: 'µg/m³', tone: bandTone(d.band), note: d.band ? d.band.label : at },
-        { label: 'vs WHO 24 h level', value: d.timesWho === null ? '—' : `${d.timesWho.toLocaleString('en-US')}×`, note: `of ${WHO_PM25_24H_UGM3} µg/m³` },
+        { label: 'Fine smoke (PM2.5)', value: d.valueText, unit: 'µg/m³', tone: bandTone(d.band), note: d.band ? d.band.label : at },
+        { label: 'Times the WHO daily guideline', value: d.timesWho === null ? '—' : `${d.timesWho.toLocaleString('en-US')}×`, note: `guideline: ${WHO_PM25_24H_UGM3} µg/m³ over 24 h` },
         spark
-          ? { label: snapshot ? 'Peak, 48 h of the run' : 'Peak, next 48 h', value: group(spark.peak.v), unit: 'µg/m³', note: localTimeLabel(isoOf(spark.peak.ms), where, { utc: false }) }
+          ? { label: snapshot ? 'Worst hour in the saved run' : 'Worst hour, next 48 h (forecast)', value: group(spark.peak.v), unit: 'µg/m³', note: localTimeLabel(isoOf(spark.peak.ms), where, { utc: false }) }
           : { label: 'Hour shown', value: at },
       ]}
       sentence={
         <>
-          {PM25_MEANING} <span className="city-card__sub">A forecast from a computer model for {at}, not a measurement.</span>
+          {plainAirSentence(name, value)}{' '}
+          <span className="city-card__sub">
+            A computer forecast for {at}, not a measurement. PM2.5 is {PM25_MEANING.charAt(0).toLowerCase() + PM25_MEANING.slice(1)} {UGM3_WORDS}
+          </span>
         </>
       }
       action={{ label: 'Open in workspace', onClick: onOpenWorkspace, title: 'Haze & air section: the full city table and transport' }}
@@ -147,6 +150,9 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
       {arriving && <p className="city-card__line">{arriving}</p>}
       {spark && (
         <figure className="city-card__spark">
+          <figcaption className="city-card__cap">
+            {snapshot ? 'Fine smoke over 48 hours of the saved forecast run' : 'Fine smoke forecast for the next 48 hours'}, µg/m³ (dot: the hour shown)
+          </figcaption>
           <svg
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
@@ -182,6 +188,7 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
           {localTimeLabel(neaHaze.observedAt, where, { utc: false })}
         </p>
       )}
+      {noPsiNote(place.country) && <p className="city-card__line city-card__muted">{noPsiNote(place.country)}</p>}
       <p className="city-card__line">
         Official readings and advice:{' '}
         {official ? (

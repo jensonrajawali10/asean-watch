@@ -220,9 +220,43 @@ export const AIR_QUALITY_OFFICIAL: Readonly<Record<string, OfficialLink>> = {
   // apims.doe.gov.my now redirects (301) to DOE's MyEQMS portal, which carries the API readings.
   MY: { label: 'APIMS, Department of Environment (DOE)', url: 'https://eqms.doe.gov.my/' },
   SG: { label: 'NEA haze updates', url: 'https://www.haze.gov.sg/' },
+  // Checked 2026-10-20: env.gov.bn resolves (HTTP 200) and posts "PSI Reading update for Brunei Darussalam".
+  BN: { label: 'PSI readings, JASTRe (Department of Environment, Parks and Recreation)', url: 'https://www.env.gov.bn/' },
+  // Checked 2026-10-20: cem.gov.vn resolves (HTTP 200) but shows automated clients a validation page; it is
+  // the Ministry of Agriculture and Environment's monitoring centre, which publishes VN_AQI.
+  VN: { label: 'VN_AQI, Centre for Environmental Monitoring (CEM)', url: 'https://cem.gov.vn/' },
+  // KH, LA, MM, TL: no official air-quality page could be verified on 2026-10-20, so no link (the card
+  // names the kind of agency instead of guessing a URL).
   TH: { label: 'Air4Thai, Pollution Control Department (PCD)', url: 'https://air4thai.pcd.go.th/webV3/' },
   PH: { label: 'EMB air quality', url: 'https://air.emb.gov.ph/' },
 };
+
+/**
+ * The index each country's official service publishes (ISPU, API, PSI...), by ISO country. Only the ones
+ * seen on the official service; absent means not verified. This map fetches only Singapore's PSI (NEA).
+ */
+export const AIR_QUALITY_INDEX: Readonly<Record<string, string>> = {
+  ID: 'ISPU',
+  MY: 'API (Air Pollutant Index)',
+  SG: 'PSI',
+  TH: 'AQI (Thailand)',
+  VN: 'VN_AQI',
+  BN: 'PSI',
+};
+
+/**
+ * Why a card shows no PSI, in plain words, or null for Singapore (whose NEA PSI the card shows).
+ * PSI is the index Singapore (and Brunei) publish; elsewhere each country has its own, behind its link.
+ */
+export function noPsiNote(country: string): string | null {
+  if (country === 'SG') return null;
+  const name = COUNTRY_NAME[country] ?? 'This country';
+  const index = AIR_QUALITY_INDEX[country] ?? null;
+  const linked = Boolean(AIR_QUALITY_OFFICIAL[country]);
+  if (index === 'PSI') return `${name} reports its own PSI${linked ? ' (official link below)' : ''}; this map does not fetch it.`;
+  if (index) return `Singapore reports PSI; ${name} reports ${index}${linked ? ' (official link below)' : ''}.`;
+  return `Singapore reports PSI; we found no official air-quality page for ${name}.`;
+}
 
 /** National tsunami warning services, by ISO country. */
 export const TSUNAMI_OFFICIAL: Readonly<Record<string, OfficialLink>> = {
@@ -254,6 +288,8 @@ export const COUNTRY_NAME: Readonly<Record<string, string>> = {
   JP: 'Japan',
   BN: 'Brunei',
   MM: 'Myanmar',
+  LA: 'Laos',
+  TL: 'Timor-Leste',
   TW: 'Taiwan',
   HK: 'Hong Kong',
   CN: 'China',

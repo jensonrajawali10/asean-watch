@@ -135,17 +135,20 @@ export function OfficialLevelChip({
   gloss,
   ended,
   authority = 'official',
+  lower = false,
 }: {
   level: string;
   gloss?: string | null;
   ended?: boolean;
   authority?: 'official' | 'aggregator';
+  /** Below the top of the issuer's own scale (officialScale): outlined, not the emergency fill. */
+  lower?: boolean;
 }) {
   const text = level?.trim() || 'Level not stated';
   return (
     <span className="official-level">
       <span
-        className={`official-chip${ended ? ' official-chip--ended' : ''}${authority === 'aggregator' ? ' official-chip--estimate' : ''}`}
+        className={`official-chip${ended ? ' official-chip--ended' : ''}${authority === 'aggregator' ? ' official-chip--estimate' : ''}${lower && !ended ? ' official-chip--lower' : ''}`}
         lang={undefined}
       >
         {text}

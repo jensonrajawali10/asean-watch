@@ -3,7 +3,8 @@
 
 .app {
   --taskbar-w: 56px;
-  --drawer-w: min(540px, calc(100vw - var(--taskbar-w)));
+  /* Leaves the map (and the headline card) at least 320 px beside the drawer on mid-size screens. */
+  --drawer-w: min(540px, max(360px, calc(100vw - var(--taskbar-w) - 320px)));
   --topbar-h: 72px;
   position: relative;
   height: 100vh;
@@ -175,9 +176,21 @@
 /* With the drawer open the top bar starts right of it; the headline box gives way to the right cluster. */
 .app[data-drawer='open'] .topbar {
   left: calc(var(--taskbar-w) + var(--drawer-w));
+  /* Little room beside the drawer: the buttons wrap under the headline instead of squeezing it into a
+     one-word column. */
+  flex-wrap: wrap;
 }
 
-.app[data-drawer='open'] .brand-tag {
+.app[data-drawer='open'] .topbar__left {
+  flex: 1 1 260px;
+  max-width: none;
+}
+
+.app[data-drawer='open'] .topbar__right {
+  margin-left: auto;
+}
+
+.app[data-drawer='open'] .brand-about {
   display: none;
 }
 
@@ -208,10 +221,32 @@
   white-space: nowrap;
 }
 
-.brand-tag {
+/* One plain line saying what the site is, always visible beside the name. */
+.brand-line {
   color: var(--text-muted);
   font-size: 12px;
-  line-height: 1.3;
+}
+
+.app[data-drawer='open'] .brand-line {
+  display: none;
+}
+
+/* "What is this?": the intro, one click away instead of always on screen. */
+.brand-about > summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.brand-about[open] {
+  flex-basis: 100%;
+}
+
+.brand-tag {
+  margin: 4px 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .headline {
@@ -746,7 +781,7 @@
     padding: 8px 12px;
   }
 
-  .brand-tag {
+  .brand-about:not([open]) .brand-tag {
     display: none;
   }
 
@@ -791,5 +826,158 @@
   .topbar,
   .taskbar__btn {
     transition: none;
+  }
+}
+
+/* ---------- Simple view (default) vs details: first-time visitors see the essentials ----------
+   <html data-detail="simple"> hides the advanced parts; "Show details" in the top bar brings them back. */
+.detail-toggle {
+  min-height: 34px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel-glass);
+  -webkit-backdrop-filter: var(--panel-filter);
+  backdrop-filter: var(--panel-filter);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.detail-toggle[aria-pressed='true'] {
+  background: var(--selected-bg);
+}
+
+:root[data-detail='simple'] .theme-toggle,
+:root[data-detail='simple'] .ws-button,
+:root[data-detail='simple'] .mcard__btn--link,
+:root[data-detail='simple'] .mv-fbadge,
+:root[data-detail='simple'] .hscrub__track,
+:root[data-detail='simple'] .hscrub__key,
+:root[data-detail='simple'] .hscrub__run {
+  display: none;
+}
+
+/* One navigation: the icon rail. The drawer's own row of section tabs duplicates it on wide screens. */
+@media (min-width: 768px) {
+  .ws-tabs {
+    display: none;
+  }
+}
+
+/* Beside an open drawer on mid-size screens the map strip is narrow: the map key would cover the top bar,
+   and the alerts pill shows its number only (its title still says what it counts). */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .app[data-drawer='open'] .mv-key {
+    display: none;
+  }
+
+  .app[data-drawer='open'] .alerts-pill__text {
+    display: none;
+  }
+}
+
+/* Rail hints: one plain line beside each icon on hover and keyboard focus (desktop rail only). */
+.taskbar__hint {
+  display: none;
+}
+
+@media (min-width: 768px) and (hover: hover), (min-width: 768px) and (pointer: fine) {
+  .taskbar__btn {
+    position: relative;
+  }
+
+  .taskbar__hint {
+    position: absolute;
+    z-index: 60;
+    top: 50%;
+    left: calc(100% + 8px);
+    width: max-content;
+    max-width: 240px;
+    padding: 6px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .taskbar__hint strong {
+    display: block;
+    color: var(--text);
+    font-weight: 650;
+  }
+
+  .taskbar__btn:hover .taskbar__hint,
+  .taskbar__btn:focus-visible .taskbar__hint {
+    display: block;
+  }
+}
+
+/* One-line legend under the headline: what the symbols mean before any click. */
+.headline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.headline-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.hl-sym {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+}
+
+.hl-sym--circle {
+  border-radius: 50%;
+  background: linear-gradient(90deg, #62b77a, #e3c95a 35%, #dc6262 70%, #a774c4);
+}
+
+.hl-sym--fire {
+  background: #f08c2e;
+}
+
+.hl-sym--volcano {
+  width: 0;
+  height: 0;
+  border-right: 6px solid transparent;
+  border-bottom: 10px solid var(--text);
+  border-left: 6px solid transparent;
+}
+
+.hl-sym--pin {
+  border-radius: 50% 50% 50% 0;
+  background: var(--official);
+  transform: rotate(-45deg);
+}
+
+.app[data-drawer='open'] .headline-legend {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .headline-legend {
+    display: none;
   }
 }

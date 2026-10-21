@@ -49,11 +49,14 @@ export default function Taskbar({ active, onOpen, onMap, alerts = null }: Taskba
                 className={`taskbar__btn${isActive ? ' is-active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
                 aria-label={badge ? `${s.label} (${badge.count} active official ${badge.count === 1 ? 'message' : 'messages'})` : s.label}
-                title={`${s.title}: ${s.hint}`}
+                aria-describedby={`${taskbarButtonId(s.id)}-hint`}
                 onClick={() => onOpen(s.id)}
               >
                 <Icon />
                 <span className="taskbar__label">{s.label}</span>
+                <span id={`${taskbarButtonId(s.id)}-hint`} className="taskbar__hint" role="tooltip">
+                  <strong>{s.title}</strong> {s.hint}
+                </span>
                 {badge && (
                   <span className={`taskbar__badge${badge.urgent ? ' is-urgent' : ''}`} aria-hidden="true">
                     {badge.count > 99 ? '99+' : badge.count}

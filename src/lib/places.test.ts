@@ -80,7 +80,7 @@ describe('localTimeLabel', () => {
 
 describe('official links', () => {
   it('are https and cover the countries in the brief', () => {
-    expect(Object.keys(AIR_QUALITY_OFFICIAL).sort()).toEqual(['ID', 'MY', 'PH', 'SG', 'TH']);
+    expect(Object.keys(AIR_QUALITY_OFFICIAL).sort()).toEqual(['BN', 'ID', 'MY', 'PH', 'SG', 'TH', 'VN']);
     expect(Object.keys(TSUNAMI_OFFICIAL).sort()).toEqual(['ID', 'JP', 'MY', 'PH', 'TH']);
     for (const l of [...Object.values(AIR_QUALITY_OFFICIAL), ...Object.values(TSUNAMI_OFFICIAL), ...Object.values(FLOOD_OFFICIAL)]) {
       expect(l.url).toMatch(/^https:\/\//);

@@ -102,6 +102,47 @@ export function describePm25(value: number): Pm25Description {
   return { band, timesWho, valueText: groupInt(value), sentence: `${PM25_MEANING} ${scale}`, scale };
 }
 
+/** What the band means for a reader, in plain words (lower case, after "the air is forecast to be"). */
+const BAND_WORDS: Record<Pm25Band['key'], string> = {
+  good: 'fairly clean',
+  moderate: 'a little smoky',
+  usg: 'smoky enough to bother sensitive people (children, older people, anyone with asthma)',
+  unhealthy: 'unhealthy for everyone',
+  'very-unhealthy': 'very unhealthy for everyone',
+  hazardous: 'hazardous for everyone',
+};
+
+/** What "µg/m³" means, in one plain line. */
+export const UGM3_WORDS = 'µg/m³ means micrograms of smoke in each cubic metre of air.';
+
+/**
+ * A PM2.5 value in plain words: how smoky (`band`, e.g. "hazardous for everyone") and how it compares with
+ * the WHO's daily guideline (`scale`, e.g. "about 119 times the WHO's daily guideline of 15 µg/m³").
+ * Null for a value with no band. No health advice of our own.
+ */
+export function plainAirWords(value: number): { band: string; scale: string; valueText: string } | null {
+  const d = describePm25(value);
+  if (!d.band || d.timesWho === null) return null;
+  const who = WHO_PM25_24H_UGM3;
+  const scale =
+    value < who * 0.95
+      ? `under the WHO's daily guideline of ${who} µg/m³`
+      : value < who * 1.05
+        ? `about the WHO's daily guideline of ${who} µg/m³`
+        : `about ${d.timesWho.toLocaleString('en-US')} times the WHO's daily guideline of ${who} µg/m³`;
+  return { band: BAND_WORDS[d.band.key], scale, valueText: d.valueText };
+}
+
+/**
+ * The first sentence of a city card, in plain words: how smoky the air is forecast to be and how far over
+ * the WHO's daily guideline. Says it is a forecast; gives no health advice of our own.
+ */
+export function plainAirSentence(name: string, value: number): string {
+  const w = plainAirWords(value);
+  if (!w) return `No forecast value for ${name} at this hour.`;
+  return `The air around ${name} is forecast to be ${w.band}: ${w.valueText} µg/m³ of fine smoke, ${w.scale}.`;
+}
+
 /** "PM2.5 23 µg/m³ (modelled)". */
 export function pm25Label(value: number): string {
   return `PM2.5 ${Math.round(value)} ${AQ_UNIT} (modelled)`;
@@ -141,6 +182,13 @@ export const AQ_PLACES: readonly AqPlace[] = [
   { id: 'phnom-penh', name: 'Phnom Penh', country: 'KH', lat: 11.5625, lon: 104.916, kind: 'city' },
   { id: 'manila', name: 'Manila', country: 'PH', lat: 14.6042, lon: 120.9822, kind: 'city' },
   { id: 'cebu', name: 'Cebu', country: 'PH', lat: 10.3167, lon: 123.8907, kind: 'city' },
+  // Capitals added 2026-10-20 so every ASEAN member has at least one point; verified the same way.
+  { id: 'ho-chi-minh-city', name: 'Ho Chi Minh City', country: 'VN', lat: 10.823, lon: 106.6297, kind: 'city' },
+  { id: 'bandar-seri-begawan', name: 'Bandar Seri Begawan', country: 'BN', lat: 4.8904, lon: 114.9401, kind: 'city' },
+  { id: 'vientiane', name: 'Vientiane', country: 'LA', lat: 17.9667, lon: 102.6, kind: 'city' },
+  { id: 'yangon', name: 'Yangon', country: 'MM', lat: 16.8053, lon: 96.1561, kind: 'city' },
+  { id: 'naypyidaw', name: 'Naypyidaw', country: 'MM', lat: 19.7366, lon: 96.2072, kind: 'city' },
+  { id: 'dili', name: 'Dili', country: 'TL', lat: -8.5586, lon: 125.5736, kind: 'city' },
   { id: 'dumai', name: 'Dumai (Riau peatlands)', country: 'ID', lat: 1.6671, lon: 101.4432, kind: 'fire-area' },
   { id: 'kayu-agung', name: 'Kayu Agung (Ogan Komering Ilir)', country: 'ID', lat: -3.392, lon: 104.8306, kind: 'fire-area' },
   { id: 'ketapang', name: 'Ketapang (West Kalimantan)', country: 'ID', lat: -1.8386, lon: 109.9773, kind: 'fire-area' },
@@ -439,6 +487,11 @@ export function resetAqCache(opts?: { keepStorage?: boolean }): void {
   }
 }
 
+/** True when a dataset carries exactly the current AQ_PLACES, in order. */
+export function samePlaces(data: Pick<AirQualityData, 'places'>): boolean {
+  return data.places.length === AQ_PLACES.length && data.places.every((p, i) => p.id === AQ_PLACES[i].id);
+}
+
 function readStored(now: number, maxAgeMs: number): { data: AirQualityData; at: number } | null {
   try {
     const raw = globalThis.localStorage?.getItem(AQ_CACHE_KEY);
@@ -446,7 +499,8 @@ function readStored(now: number, maxAgeMs: number): { data: AirQualityData; at: 
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed) || typeof parsed.at !== 'number' || now - parsed.at > maxAgeMs || parsed.at > now + 60_000) return null;
     const data = parseAirQuality(parsed.data, 'live');
-    return data ? { data, at: parsed.at } : null;
+    // A run saved before AQ_PLACES changed lacks the new places: ignore it, so the next load fetches them.
+    return data && samePlaces(data) ? { data, at: parsed.at } : null;
   } catch {
     return null;
   }

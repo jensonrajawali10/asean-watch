@@ -8,7 +8,7 @@ import type { WindGrid } from '../../lib/windField';
 import type { AshWindData } from '../../lib/ashDrift';
 import type { EruptionScenario } from '../../lib/eruptionScenario';
 import { EndedChip, ExternalLink, OfficialLevelChip } from '../Badges';
-import { isExpired } from '../../lib/warningsView';
+import { belowTopOfScale, isExpired } from '../../lib/warningsView';
 import { useNowMs } from '../../lib/useNowMs';
 import { formatUtc } from '../format';
 import { MapCard } from '../ui/MapCard';
@@ -18,6 +18,8 @@ import { clusterAt, regionalBadges } from '../../lib/fires';
 import type { FireSnapshot } from '../../lib/fires';
 import CityCard from './CityPopover';
 import { FireCard } from './FireCard';
+import { AreaAirQuality } from './AreaAirQuality';
+import './FireCard.css';
 import VolcanoCard from './VolcanoCard';
 import type { FirePick } from './fireLayers';
 import type { HazeHour } from './useHazeHour';
@@ -84,6 +86,8 @@ export default function MapCards(p: MapCardsProps) {
         snapshot={p.fireSnapshot}
         windGrid={p.wind925}
         smokeStartISO={p.hazeHour.timeISO || undefined}
+        airQuality={p.airQuality}
+        airTimeISO={p.hazeHour.timeISO || null}
         onOpenWorkspace={() => p.onOpenWorkspace('fires')}
         onClose={close}
       />
@@ -122,6 +126,7 @@ export default function MapCards(p: MapCardsProps) {
     const badge = regionalBadges(snap, '24h', 40).find((b) => b.name.toLowerCase() === name.toLowerCase()) ?? null;
     if (badge) return fireCard({ kind: 'fire-region', badge });
   }
+  const region = snap?.regions.find((r) => r.name.toLowerCase() === name.toLowerCase()) ?? null;
   return (
     <MapCard
       icon={<FireIcon size={18} />}
@@ -133,7 +138,14 @@ export default function MapCards(p: MapCardsProps) {
       sentence="No satellite fire cluster is listed here in the current snapshot. That is not an all-clear: cloud and smoke hide hotspots."
       action={{ label: 'Open in workspace', onClick: () => p.onOpenWorkspace('fires'), title: 'Fires section: counts and fire power by region' }}
       source="NASA FIRMS (VIIRS and MODIS)"
-    />
+    >
+      <AreaAirQuality
+        area={{ key: region?.key ?? '', name, centre: [incident.lat, incident.lon] }}
+        iso3={region?.iso3 ?? ''}
+        airQuality={p.airQuality}
+        timeISO={p.hazeHour.timeISO || null}
+      />
+    </MapCard>
   );
 }
 
@@ -166,7 +178,7 @@ function WarningCard({ w, onClose, onInspect, onOpenWorkspace }: { w: OfficialWa
       }
     >
       <div className="warning-card__level">
-        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={ended} authority={w.authority} />
+        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={ended} authority={w.authority} lower={!ended && !estimate && belowTopOfScale(w)} />
         <EndedChip warning={w} nowMs={nowMs} />
       </div>
       <p className="warning-card__headline" lang={lang}>

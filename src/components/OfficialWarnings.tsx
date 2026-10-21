@@ -5,7 +5,7 @@
 // Shared classes (.panel, .rail-panel, .panel-head, .drawer*, .fields, .official-*) are styled in
 // App.css; everything this file owns is prefixed ow- in OfficialWarnings.css.
 import './OfficialWarnings.css';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 /** APAC-wide lists start with this many items (newest first); "Show all" reveals the rest. */
@@ -17,8 +17,9 @@ import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
-import { emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
+import { belowTopOfScale, emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
+import { countsText, groupByHazard, HAZARD_GROUP_NAME, isSoutheastAsia, warningCounts } from './shell/alerts';
 
 // ---------------------------------------------------------------------------
 // Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
@@ -137,7 +138,27 @@ export default function OfficialWarningsPanel({
   // Long APAC-wide lists start capped (readable, and not hundreds of tab stops); "Show all" expands them.
   const [showAll, setShowAll] = useState(false);
   const capped = !showAll && n > LIST_CAP;
-  const shown = capped ? warnings.slice(0, LIST_CAP) : warnings;
+  // Grouped by hazard (tsunami, volcanoes, earthquakes, floods...), newest first within a group, so a reader
+  // sees what kind of message each is before reading it; the cap applies to the grouped order.
+  // Southeast Asia first (the site's region), then the wider Asia-Pacific (JMA, GeoNet, NWS, PTWC, GDACS
+  // elsewhere); each grouped by hazard with active alerts first.
+  const isActive = (w: OfficialWarning) => w.authority === 'official' && !isExpired(w, nowMs);
+  const regions = [
+    { key: 'sea', name: 'Southeast Asia', groups: groupByHazard(warnings.filter(isSoutheastAsia), isActive) },
+    { key: 'apac', name: 'Wider Asia-Pacific (Japan, New Zealand, US Pacific, Pacific-wide)', groups: groupByHazard(warnings.filter((w) => !isSoutheastAsia(w)), isActive) },
+  ].filter((r) => r.groups.length > 0);
+  const ordered = regions.flatMap((r) => r.groups.flatMap((g) => g.items));
+  const shown = capped ? ordered.slice(0, LIST_CAP) : ordered;
+  const shownIds = new Set(shown.map((w) => w.id));
+  const regionsShown = regions
+    .map((r) => ({
+      key: r.key,
+      name: r.name,
+      groups: r.groups
+        .map((g) => ({ hazard: g.hazard, total: g.items.length, active: g.active, items: g.items.filter((w) => shownIds.has(w.id)) }))
+        .filter((g) => g.items.length > 0),
+    }))
+    .filter((r) => r.groups.length > 0);
 
   // Keep the selected item in view when selection comes from elsewhere (map marker, detail link).
   useEffect(() => {
@@ -151,7 +172,9 @@ export default function OfficialWarningsPanel({
       <div className="panel-head">
         <h2 id="official-heading">
           Official warnings{' '}
-          <span className="panel-meta">{nearName ? `near ${nearName} (${n})` : `APAC (${n})`}</span>
+          <span className="panel-meta">
+            {nearName ? `near ${nearName}` : 'across APAC'} · {countsText(warningCounts(warnings, nowMs))}
+          </span>
         </h2>
         {nearName && onShowAll && (
           <button type="button" className="link-button head-action" onClick={onShowAll}>
@@ -160,20 +183,35 @@ export default function OfficialWarningsPanel({
         )}
       </div>
 
+      <p className="ow-relayed">Each message is the agency's own text, relayed as issued. Southeast Asia first, then the wider Asia-Pacific.</p>
       <div className="ow-scroll">
         {n === 0 ? (
           <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>
         ) : (
           <ul className="ow-list" ref={listRef}>
-            {shown.map((w) => (
-              <WarningItem
-                key={w.id}
-                w={w}
-                gauge={gaugeForWarning(w, gauges)}
-                selected={w.id === selectedWarningId}
-                onInspect={onInspect}
-                nowMs={nowMs}
-              />
+            {regionsShown.map((r) => (
+              <Fragment key={r.key}>
+                <li className="ow-region" aria-hidden="true">
+                  {r.name}
+                </li>
+                {r.groups.map((g) => (
+                  <Fragment key={`${r.key}-${g.hazard}`}>
+                    <li className="ow-group" aria-hidden="true">
+                      {HAZARD_GROUP_NAME[g.hazard]} <span className="panel-meta">({g.active} active, {g.total} in all)</span>
+                    </li>
+                    {g.items.map((w) => (
+                      <WarningItem
+                        key={w.id}
+                        w={w}
+                        gauge={gaugeForWarning(w, gauges)}
+                        selected={w.id === selectedWarningId}
+                        onInspect={onInspect}
+                        nowMs={nowMs}
+                      />
+                    ))}
+                  </Fragment>
+                ))}
+              </Fragment>
             ))}
           </ul>
         )}
@@ -229,7 +267,10 @@ function WarningItem({
 }) {
   const lang = w.language || undefined;
   const expired = isExpired(w, nowMs);
-  const variant = expired ? 'ow-item--ended' : w.authority === 'aggregator' ? 'ow-item--estimate' : 'ow-item--official';
+  // An official level below the top of its issuer's scale (e.g. DSDA Siaga 3 = 2nd lowest of 4) gets the
+  // official rail on a plain surface, not the emergency fill; its words stay verbatim (officialScale).
+  const scaled = !expired && w.authority === 'official' && belowTopOfScale(w);
+  const variant = expired ? 'ow-item--ended' : w.authority === 'aggregator' ? 'ow-item--estimate' : scaled ? 'ow-item--info' : 'ow-item--official';
   const headline = w.headline.trim();
   const area = w.areaDescription.trim();
   const instruction = w.instruction?.trim() ?? '';
@@ -247,7 +288,7 @@ function WarningItem({
       </div>
 
       <div className="ow-level">
-        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={expired} authority={w.authority} />
+        <OfficialLevelChip level={w.level} gloss={w.levelGloss} ended={expired} authority={w.authority} lower={scaled} />
         <EndedChip warning={w} nowMs={nowMs} />
       </div>
 
