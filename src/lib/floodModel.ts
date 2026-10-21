@@ -176,7 +176,8 @@ function spec(source: FloodSnapshot | null, opts?: { fetchImpl?: typeof fetch; t
     sourceId: 'open-meteo-flood',
     sourceName: 'Open-Meteo Flood API (GloFAS)',
     fetchImpl: opts?.fetchImpl,
-    timeoutMs: opts?.timeoutMs ?? 15000, // a cold relay fetches upstream first
+    // Above the relay's 20 s upstream budget plus a cold start; river flow is not on the first paint.
+    timeoutMs: opts?.timeoutMs ?? 25000,
     ttlMs: 60 * 60 * 1000, // daily model: an hour of reuse is plenty
     retrievedAtOf: (v: RiverDischargeSeries[]) => v[0]?.retrievedAt ?? isoNoMs(Date.now()),
     live: async (get: (url: string, kind: 'json' | 'text') => Promise<unknown>) => {

@@ -39,8 +39,11 @@ export const ASH_PAST_DAYS = 1;
 export const ASH_FORECAST_DAYS = 3;
 export const ASH_CACHE_TTL_MS = 30 * 60 * 1000;
 export const ASH_BACKOFF_MS = 5 * 60 * 1000;
-/** Client timeout for the relay (a cold relay fetches upstream first). */
-export const ASH_RELAY_TIMEOUT_MS = 15000;
+/**
+ * Client timeout for the relay: above its whole upstream budget (OPEN_METEO_UPSTREAM_TIMEOUT_MS, 20 s) plus
+ * a cold start, so a slow first fill is waited for. Not on the first paint (volcano card, scenario).
+ */
+export const ASH_RELAY_TIMEOUT_MS = 25000;
 
 export interface AshWindSeries {
   /** Smithsonian GVP id, e.g. "gvp-263250" (matches Incident.volcanoId). */
