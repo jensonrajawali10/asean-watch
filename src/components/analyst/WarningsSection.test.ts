@@ -62,3 +62,26 @@ describe('WarningsSection how-to-read key', () => {
     expect(html).toContain('a saved copy with the time it was');
   });
 });
+
+describe('WarningsSection live count', () => {
+  it('counts a feed fetched earlier in this visit (the 5-minute session copy) as live, not as a saved copy', () => {
+    const snap = loadWarningsSnapshot();
+    const feeds = snap.feeds.map((f, i) => ({ ...f, status: i === 0 ? ('live' as const) : i < 4 ? ('cached' as const) : ('snapshot' as const) }));
+    const noop = () => {};
+    const html = renderToStaticMarkup(
+      createElement(WarningsSection, {
+        warnings: snap.warnings,
+        allWarnings: snap.warnings,
+        elsewhere: [],
+        gauges: snap.gauges,
+        feeds,
+        nearName: null,
+        loading: false,
+        selectedWarningId: null,
+        onInspect: noop,
+      } as never),
+    );
+    expect(html).toContain('4 live');
+    expect(html).toContain(`${feeds.length - 4} from saved copies (not refreshed just now)`);
+  });
+});

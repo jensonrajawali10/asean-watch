@@ -42,12 +42,15 @@ const FEED_WHAT: Readonly<Record<string, string>> = {
   ptwc: 'Pacific tsunami messages',
 };
 
+/** Fetched from the agency during this visit: live now, or the 5-minute session copy of a live fetch. */
+const fetchedThisVisit = (f: WarningFeedStatus) => f.status === 'live' || f.status === 'cached';
+
 function sourcesFromFeeds(feeds: WarningFeedStatus[]): SectionSource[] {
   return feeds.map((f) => ({
     label: FEED_WHAT[f.feedId] ? `${f.issuer}: ${FEED_WHAT[f.feedId]}` : f.issuer,
     url: f.issuerUrl,
     retrievedAt: f.retrievedAt,
-    mode: f.status === 'live' ? 'LIVE' : f.status === 'unavailable' ? 'UNAVAILABLE' : 'SNAPSHOT',
+    mode: fetchedThisVisit(f) ? 'LIVE' : f.status === 'unavailable' ? 'UNAVAILABLE' : 'SNAPSHOT',
   }));
 }
 
@@ -56,7 +59,7 @@ export default function WarningsSection(p: WarningsSectionProps) {
   const active = activeOfficial(p.allWarnings, nowMs);
   const urgent = active.filter((w) => isUrgentWarning(w, nowMs)).length;
   const estimates = p.allWarnings.filter((w) => w.authority === 'aggregator').length;
-  const live = p.feeds.filter((f) => f.status === 'live').length;
+  const live = p.feeds.filter(fetchedThisVisit).length;
   const unavailable = p.feeds.filter((f) => f.status === 'unavailable');
   return (
     <AnalystSection
