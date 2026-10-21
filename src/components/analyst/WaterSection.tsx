@@ -230,7 +230,7 @@ export default function WaterSection(p: WaterSectionProps) {
   return (
     <AnalystSection
       id="water"
-      title="Water & tsunami"
+      title="Tsunami & floods"
       lede="Official tsunami messages first, relayed verbatim. Then the flood gauges the agencies publish, the raw IOC tide gauges, and the modelled GloFAS river flow. Raw gauges and model output are never warnings; the official word comes from BMKG, PTWC through national authorities, JMA, PHIVOLCS and the national flood agencies."
       sources={sources}
     >

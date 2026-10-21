@@ -19,7 +19,7 @@ const LINK_FOR: Partial<Record<ReportSection['id'], { target: SituationLinkTarge
   fires: { target: 'fires', label: 'Open Fires' },
   volcanoes: { target: 'volcanoes', label: 'Open Volcanoes' },
   warnings: { target: 'warnings', label: 'Open Official warnings' },
-  water: { target: 'water', label: 'Open Water & tsunami' },
+  water: { target: 'water', label: 'Open Tsunami & floods' },
   freshness: { target: 'sources', label: 'Open Sources & methods' },
 };
 

@@ -10,7 +10,7 @@ export const SECTIONS = [
   { id: 'fires', label: 'Fires', title: 'Fires', hint: 'Fires seen by satellites, by country and province' },
   { id: 'volcanoes', label: 'Volcanoes', title: 'Volcanoes', hint: 'Watched volcanoes and their official alert levels' },
   { id: 'warnings', label: 'Warnings', title: 'Official warnings', hint: 'Every alert from national agencies, word for word' },
-  { id: 'water', label: 'Water', title: 'Water & tsunami', hint: 'Tsunami messages, flood gauges, tides and river flow' },
+  { id: 'water', label: 'Tsunami', title: 'Tsunami & floods', hint: 'Tsunami messages, flood gauges, tides and river flow' },
   { id: 'report', label: 'Report', title: 'Report', hint: 'Make and download a written brief' },
   { id: 'sources', label: 'Sources', title: 'Sources & methods', hint: 'Where every number comes from, and its limits' },
   { id: 'layers', label: 'Layers', title: 'Layers', hint: 'Turn map layers on and off, with what each shows' },

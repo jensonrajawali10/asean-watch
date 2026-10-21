@@ -33,3 +33,14 @@ describe('Taskbar first-visit callout', () => {
     expect(html).not.toContain('rail-callout');
   });
 });
+
+describe('Taskbar labels', () => {
+  it('names the water section by what a newcomer looks for: tsunami (and floods in its title)', () => {
+    const water = SECTIONS.find((s) => s.id === 'water')!;
+    expect(water.label).toBe('Tsunami');
+    expect(water.title).toBe('Tsunami & floods');
+    const html = renderToStaticMarkup(createElement(Taskbar, { active: null, onOpen: () => {}, onMap: () => {} }));
+    expect(html).toContain('<span class="taskbar__label">Tsunami</span>');
+    expect(html).not.toContain('<span class="taskbar__label">Water</span>');
+  });
+});
