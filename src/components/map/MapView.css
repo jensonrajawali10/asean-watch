@@ -971,6 +971,15 @@
   outline: 1px solid rgb(0 0 0 / 25%);
 }
 
+.mv-key__wind {
+  justify-self: center;
+  width: 18px;
+  height: 2px;
+  margin-top: 9px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--text));
+}
+
 @media (max-width: 767px) {
   .mv-key:not(.is-closed) .mv-key__list li:nth-child(n + 3) {
     display: none;

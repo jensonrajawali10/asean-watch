@@ -27,6 +27,15 @@ function applyTheme(theme: Theme) {
   window.dispatchEvent(new CustomEvent<Theme>('aw:themechange', { detail: theme }));
 }
 
+/** The first-load legend: what each symbol on the map is (long on desktop, short on phones). */
+const HEADLINE_LEGEND = [
+  { sym: 'circle', long: 'Circles: fine smoke forecast (PM2.5, modelled)', short: 'Smoke forecast' },
+  { sym: 'fire', long: 'Orange squares: fires seen by NASA satellites', short: 'Fires (NASA)' },
+  { sym: 'volcano', long: 'Triangles: volcanoes', short: 'Volcanoes' },
+  { sym: 'pin', long: 'Red pins: official warnings', short: 'Warnings' },
+  { sym: 'wind', long: 'Streaks: wind (forecast)', short: 'Wind' },
+] as const;
+
 export interface AppHeaderProps {
   /** One live sentence built from the data, e.g. "Now: haze is worst over Palangka Raya (604 µg/m³, modelled)." */
   headline: string;
@@ -95,20 +104,18 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
         <p className="headline" aria-live="polite">
           {headline}
         </p>
-        {/* What the symbols mean, on first load, without opening anything (the map key has the detail). */}
+        {/* What the symbols mean, on first load, without opening anything (the map key has the detail).
+            Phones show the short words in one line; the long ones stay for screen readers there too. */}
         <p className="headline-legend">
-          <span>
-            <i className="hl-sym hl-sym--circle" aria-hidden="true" /> Circles: fine smoke forecast (PM2.5, modelled)
-          </span>
-          <span>
-            <i className="hl-sym hl-sym--fire" aria-hidden="true" /> Orange squares: fires seen by NASA satellites
-          </span>
-          <span>
-            <i className="hl-sym hl-sym--volcano" aria-hidden="true" /> Triangles: volcanoes
-          </span>
-          <span>
-            <i className="hl-sym hl-sym--pin" aria-hidden="true" /> Red pins: official warnings
-          </span>
+          {HEADLINE_LEGEND.map((item) => (
+            <span key={item.sym}>
+              <i className={`hl-sym hl-sym--${item.sym}`} aria-hidden="true" />
+              <span className="hl-long">{item.long}</span>
+              <span className="hl-short" aria-hidden="true">
+                {item.short}
+              </span>
+            </span>
+          ))}
         </p>
         <p className="headline-meta">
           {timeLabel && <time dateTime={timeISO ?? undefined}>{timeLabel}</time>}

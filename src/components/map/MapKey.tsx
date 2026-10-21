@@ -10,6 +10,7 @@ const MAP_KEY_ROWS = {
   pins: { name: 'Red pins', text: 'An official warning from a national agency (floods, tsunamis, volcanoes). Not a fire.' },
   volcanoes: { name: 'Triangles', text: 'Volcanoes. Click one for its official alert level.' },
   fires: { name: 'Orange squares', text: 'Fires seen by NASA satellites in the last 24 hours ("hotspots").' },
+  wind: { name: 'Streaks', text: 'The wind about 800 m up, the height that carries smoke. A forecast.' },
 } as const;
 
 /** Phones start with the key folded to its title (one tap opens it): open, it would cover most of the map. */
@@ -64,6 +65,12 @@ export default function MapKey() {
             <span className="mv-key__fire" aria-hidden="true" />
             <span>
               <strong>{MAP_KEY_ROWS.fires.name}</strong> {MAP_KEY_ROWS.fires.text}
+            </span>
+          </li>
+          <li>
+            <span className="mv-key__wind" aria-hidden="true" />
+            <span>
+              <strong>{MAP_KEY_ROWS.wind.name}</strong> {MAP_KEY_ROWS.wind.text}
             </span>
           </li>
         </ul>

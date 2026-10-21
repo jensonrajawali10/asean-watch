@@ -17,9 +17,11 @@ describe('AppHeader first-load legend', () => {
         onWorkspace: () => {},
       }),
     );
-    for (const t of ['Circles: fine smoke forecast (PM2.5, modelled)', 'Orange squares: fires seen by NASA satellites', 'Triangles: volcanoes', 'Red pins: official warnings']) {
+    for (const t of ['Circles: fine smoke forecast (PM2.5, modelled)', 'Orange squares: fires seen by NASA satellites', 'Triangles: volcanoes', 'Red pins: official warnings', 'Streaks: wind (forecast)']) {
       expect(html).toContain(t);
     }
+    // Phones show the short words; the long ones stay in the markup for screen readers.
+    for (const t of ['Smoke forecast', 'Fires (NASA)', 'Volcanoes', 'Warnings', 'Wind']) expect(html).toContain(`<span class="hl-short" aria-hidden="true">${t}</span>`);
   });
 });
 

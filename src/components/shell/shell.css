@@ -1072,12 +1072,40 @@
   transform: rotate(-45deg);
 }
 
+/* A wind streak: a short line that fades in, like the particle trails. */
+.hl-sym--wind {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--text));
+}
+
+.hl-short {
+  display: none;
+}
+
 .app[data-drawer='open'] .headline-legend {
   display: none;
 }
 
+/* Phones: the same legend in short words, on one or two lines. */
 @media (max-width: 767px) {
   .headline-legend {
-    display: none;
+    gap: 2px 10px;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
+  .headline-legend .hl-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .headline-legend .hl-short {
+    display: inline;
   }
 }
