@@ -18,7 +18,7 @@ import { findVolcano, loadFixtures } from '../lib/fixtures';
 import type { RealFixtures } from '../lib/fixtures';
 import { assessDrift, loadNeaSnapshot } from '../lib/nea';
 import { deriveReview, visibleObservations } from '../lib/reviewRules';
-import { loadWarningsSnapshot, warningsNear } from '../lib/warnings';
+import { loadWarningsSnapshot, partitionWarnings } from '../lib/warnings';
 import {
   AI_BRIEF_DAY_COUNT,
   AI_BRIEF_FALLBACK_BETA,
@@ -112,6 +112,8 @@ export function buildFactsFor(watchId: string, dayIndex: number): Facts | null {
   const review = deriveReview(visibleObservations(fx.observations, incident.id, dayIndex), incident.scenarioWindow);
   const nea = loadNeaSnapshot();
   const warnings = loadWarningsSnapshot();
+  // In force as relayed in the snapshot (not ended by the issuer); no clock, so the facts stay deterministic.
+  const split = partitionWarnings(warnings.warnings, incident.lat, incident.lon, NEAR_KM);
   const input: BriefingInput = {
     incident,
     volcano: findVolcano(fx.volcanoes, incident.volcanoId),
@@ -120,7 +122,8 @@ export function buildFactsFor(watchId: string, dayIndex: number): Facts | null {
     issues: fx.issues,
     nea,
     drift: nea ? assessDrift(incident, nea) : null,
-    warnings: warningsNear(warnings.warnings, incident.lat, incident.lon, NEAR_KM),
+    warnings: split.near,
+    otherTsunami: split.elsewhere.filter((w) => w.authority === 'official' && w.hazard === 'tsunami' && !w.ended),
     warningFeeds: warnings.feeds,
     dataAsOf: fx.snapshot?.retrievedAt || null,
     stepCount: fx.replaySteps.length || undefined,

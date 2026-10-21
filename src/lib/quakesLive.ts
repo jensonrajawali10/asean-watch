@@ -9,10 +9,9 @@
 //   https://data.bmkg.go.id/DataMKG/TEWS/gempaterkini.json   ("Coordinates" is "lat,lon")
 //   https://bmkg-content-inatews.storage.googleapis.com/datagempa.json   (point.coordinates is "lon,lat")
 // Snapshot: data/quakes-snapshot.json (scripts/capture-quakes-snapshot.mjs, npm run refresh:quakes).
-import snapshotJson from '../../data/quakes-snapshot.json';
 import type { ConnectorStatus, QuakeEvent } from '../types';
 import { isRecord, isoNoMs, loadLiveFirst, normLon, num, snapshotOnly, str, toIsoUtc, type LiveLoadSpec } from './liveLoad';
-import { wibToUtc } from './warnings';
+import { bmkgOriginUtc, wibToUtc } from './warnings';
 
 /** APAC / Western Pacific box. Longitudes run east from 90°E across the dateline to 150°W (210°). */
 export const QUAKE_BOX = { minLat: -50, maxLat: 60, minLon: 90, maxLon: 210 } as const;
@@ -149,9 +148,12 @@ export function parseBmkgDatagempa(raw: unknown, meta: ParseMeta): QuakeEvent[] 
   const mag = num(info.magnitude);
   const sent = isRecord(raw) ? raw.sent : null;
   const eventId = str(info.eventid);
-  // Origin time: eventid is YYYYMMDDhhmmss in WIB (UTC+7), matching info.date/info.time.
+  // Origin time from info.date/info.time (WIB, UTC+7). eventid is NOT the origin in general: it equals it
+  // in "felt" messages, but in InaTEWS tsunami messages (PD-1..PD-4) it is the send time, hours later.
+  // eventid (YYYYMMDDhhmmss WIB), then the send time, are used only when date/time are missing.
   const m = eventId ? /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(eventId) : null;
-  const timeISO = m ? wibToUtc(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}WIB`) : wibToUtc(sent);
+  const timeISO =
+    bmkgOriginUtc(info.date, info.time) ?? (m ? wibToUtc(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}WIB`) : wibToUtc(sent));
   if (lat == null || lon == null || mag === null || !timeISO) return [];
   return [
     {
@@ -198,7 +200,20 @@ export interface QuakesSnapshot {
   capturedAt: string;
   feeds: Record<string, SnapshotFeed | undefined>;
 }
-export const BUNDLED_QUAKES_SNAPSHOT = snapshotJson as unknown as QuakesSnapshot;
+// The bundled snapshot is a fallback (and the first view until the live answer arrives), so it is its own
+// same-origin chunk, not part of the entry chunk. Content-hashed: works offline once the app is loaded.
+let bundledP: Promise<QuakesSnapshot | null> | null = null;
+/** The bundled HISTORICAL quakes snapshot (memoised dynamic import); null when its chunk cannot be loaded. */
+export function bundledQuakesSnapshot(): Promise<QuakesSnapshot | null> {
+  bundledP ??= import('../../data/quakes-snapshot.json').then(
+    (m) => m.default as unknown as QuakesSnapshot,
+    () => {
+      bundledP = null; // a failed chunk load can be retried
+      return null;
+    },
+  );
+  return bundledP;
+}
 
 interface Parsed {
   events: QuakeEvent[];
@@ -264,11 +279,11 @@ export async function loadQuakes(opts?: {
   /** Override the bundled snapshot (null = none). For tests. */
   snapshot?: QuakesSnapshot | null;
 }): Promise<QuakesResult> {
-  const source = opts?.snapshot === undefined ? BUNDLED_QUAKES_SNAPSHOT : opts.snapshot;
+  const source = opts?.snapshot === undefined ? await bundledQuakesSnapshot() : opts.snapshot;
   return assemble(await Promise.all(specs(source, opts).map((s) => loadLiveFirst(s))));
 }
 
 /** The bundled snapshot only (HISTORICAL), for first paint and offline. */
-export function loadQuakesSnapshot(source: QuakesSnapshot | null = BUNDLED_QUAKES_SNAPSHOT): QuakesResult {
+export function loadQuakesSnapshot(source: QuakesSnapshot | null): QuakesResult {
   return assemble(specs(source).map((s) => snapshotOnly(s)));
 }

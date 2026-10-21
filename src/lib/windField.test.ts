@@ -14,6 +14,10 @@ import {
 } from './windField';
 import { sampleWind } from './transport';
 
+// The bundled snapshots are lazy chunks (loaded with await).
+const WIND925 = await loadWindSnapshot('925hPa');
+const WIND10 = await loadWindSnapshot('10m');
+
 describe('windFromToUV (meteorological FROM convention)', () => {
   it('converts the cardinal directions', () => {
     expect(windFromToUV(0, 10)).toEqual({ u: 0, v: -10 }); // from N blows south
@@ -60,7 +64,7 @@ describe('loadWindField', () => {
   afterEach(() => resetWindCache());
 
   it('the bundled snapshot is a valid historical grid over the spec', () => {
-    const g = loadWindSnapshot();
+    const g = WIND10;
     expect(g).not.toBeNull();
     expect(g!.dataMode).toBe('historical');
     expect(g!.lats).toEqual(gridAxes().lats);
@@ -120,10 +124,10 @@ describe('925 hPa level (particle wind)', () => {
   });
 
   it('has its own bundled snapshot and per-level live cache', async () => {
-    const g = loadWindSnapshot('925hPa');
+    const g = WIND925;
     expect(g).not.toBeNull();
     expect(g!.level).toBe('925 hPa');
-    expect(loadWindSnapshot()!.level).toBe('10 m');
+    expect(WIND10!.level).toBe('10 m');
     const failing = (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch;
     const r = await loadWindField({ fetchImpl: failing, level: '925hPa' });
     expect(r.status).toBe('snapshot');
@@ -133,7 +137,7 @@ describe('925 hPa level (particle wind)', () => {
 
 describe('windSlice / sampleSlice', () => {
   it('agrees with transport sampleWind inside the grid and returns null outside', () => {
-    const g = loadWindSnapshot('925hPa')!;
+    const g = WIND925!;
     const t = new Date((Date.parse(g.times[3]) + Date.parse(g.times[4])) / 2).toISOString();
     const slice = windSlice(g, t);
     for (const [lat, lon] of [

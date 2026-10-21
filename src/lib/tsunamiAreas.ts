@@ -17,7 +17,7 @@
 //   "Kota Tidore Kepulauan") also matches, but only when no exact name does.
 // - Two or more equally good candidates: not placed ("ambiguous"). No candidate: not placed.
 import type { OfficialWarning, OfficialWarningArea } from '../types';
-import { isExpired } from './warningsView';
+import { isExpired } from './warningExpiry';
 import centroidsJson from '../../data/idn-adm2-centroids.json';
 
 export interface DistrictCentre {

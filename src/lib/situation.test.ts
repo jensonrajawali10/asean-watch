@@ -5,10 +5,10 @@ import type { AirQualityData, AqPlaceSeries } from './airQuality';
 import { loadAshWindSnapshot } from './ashDrift';
 import { loadFireSnapshot } from './fires';
 import { loadFixtures } from './fixtures';
-import { loadFloodModelSnapshot } from './floodModel';
+import { bundledFloodSnapshot, loadFloodModelSnapshot } from './floodModel';
 import { loadNeaSnapshot } from './nea';
 import { loadPtwcSnapshot } from './ptwc';
-import { loadQuakesSnapshot } from './quakesLive';
+import { bundledQuakesSnapshot, loadQuakesSnapshot } from './quakesLive';
 import {
   SITUATION_DISCLAIMER,
   activeOfficial,
@@ -33,6 +33,13 @@ import type { HotspotSource } from './transport';
 import { loadWarningsSnapshot } from './warnings';
 import { loadWindSnapshot } from './windField';
 import type { WindGrid } from './windField';
+const FLOOD_SNAP = await bundledFloodSnapshot();
+const QUAKES_SNAP = await bundledQuakesSnapshot();
+
+// The bundled snapshots are lazy chunks (loaded with await).
+const WIND925 = await loadWindSnapshot('925hPa');
+const WIND10 = await loadWindSnapshot('10m');
+const AQ_SNAP = await loadAqSnapshot();
 
 // ---------------------------------------------------------------------------
 // Synthetic builders
@@ -473,17 +480,17 @@ describe('situationReport on the bundled snapshots', () => {
   const w = loadWarningsSnapshot();
   const p = loadPtwcSnapshot();
   const input: SituationInput = {
-    airQuality: loadAqSnapshot(),
-    wind10m: loadWindSnapshot('10m'),
-    wind925: loadWindSnapshot('925hPa'),
+    airQuality: AQ_SNAP,
+    wind10m: WIND10,
+    wind925: WIND925,
     hazeSources: hazeSourcesFromFixtures(fx),
     hotspotSnapshot: fx.snapshot,
     nea: loadNeaSnapshot(),
     warnings: [...w.warnings, ...p.warnings],
     warningFeeds: [...w.feeds, p.status],
     ashWind: loadAshWindSnapshot(),
-    riverFlow: loadFloodModelSnapshot(),
-    quakes: loadQuakesSnapshot(),
+    riverFlow: loadFloodModelSnapshot(FLOOD_SNAP),
+    quakes: loadQuakesSnapshot(QUAKES_SNAP),
   };
 
   it('builds a full report with a snapshot headline', () => {
@@ -524,7 +531,7 @@ describe('firesSummaryFromSnapshot (the fires module snapshot)', () => {
   it('feeds the fire section, the change line and the transport sources', () => {
     if (!snap) return;
     const fires = firesSummaryFromSnapshot(snap);
-    const r = situationReport({ airQuality: null, wind925: loadWindSnapshot('925hPa'), fires });
+    const r = situationReport({ airQuality: null, wind925: WIND925, fires });
     const sec = r.sections.find((x) => x.id === 'fires');
     expect(sec?.figures[0].label).toBe('Hotspots, last 24 h');
     expect(r.whatChanged.some((l) => l.startsWith('Hotspots in the last 24 h:'))).toBe(true);

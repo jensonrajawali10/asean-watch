@@ -5,12 +5,15 @@ import { FIRE_LINKS, FIRMS_ACKNOWLEDGEMENT, loadFireSnapshot } from '../../lib/f
 import { loadWindSnapshot } from '../../lib/windField';
 import { FiresSection } from './FiresSection';
 
+// The bundled snapshots are lazy chunks (loaded with await).
+const WIND925 = await loadWindSnapshot('925hPa');
+
 const snap = loadFireSnapshot()!;
 const noop = () => {};
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/'/g, '&#x27;').replace(/"/g, '&quot;');
 
 describe('FiresSection', () => {
-  const html = renderToStaticMarkup(createElement(FiresSection, { snapshot: snap, onFlyTo: noop, windGrid: loadWindSnapshot('925hPa') }));
+  const html = renderToStaticMarkup(createElement(FiresSection, { snapshot: snap, onFlyTo: noop, windGrid: WIND925 }));
 
   it('has the tables, clusters, week-over-week, sensor mix, methods and links', () => {
     for (const heading of ['By country', 'By Indonesian province (approximate)', 'Top clusters', 'Week over week', 'Sensor mix', 'Methods and caveats']) {

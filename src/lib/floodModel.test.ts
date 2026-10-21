@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetConnectorCaches } from './liveLoad';
 import {
-  BUNDLED_FLOOD_SNAPSHOT,
+  bundledFloodSnapshot,
   FLOOD_MODEL_NOTE,
   floodApiUrl,
   loadFloodModel,
@@ -11,6 +11,9 @@ import {
   pickBestCell,
   RIVER_POINTS,
 } from './floodModel';
+
+// The bundled snapshot is a lazy chunk.
+const BUNDLED_FLOOD_SNAPSHOT = (await bundledFloodSnapshot())!;
 
 // Trimmed real Open-Meteo Flood API cells from data/flood-snapshot.json (2026-10-14):
 // the first 25 cells around Phnom Penh, as returned (a minor channel next to the Mekong mainstream).
@@ -80,7 +83,7 @@ describe('loadFloodModel', () => {
     const snap = await loadFloodModel({ fetchImpl: down });
     expect(snap.status.status).toBe('snapshot');
     expect(snap.series).toHaveLength(4);
-    expect(loadFloodModelSnapshot().series[0].dataMode).toBe('historical');
+    expect(loadFloodModelSnapshot(BUNDLED_FLOOD_SNAPSHOT).series[0].dataMode).toBe('historical');
 
     resetConnectorCaches();
     const none = await loadFloodModel({ fetchImpl: down, snapshot: null });

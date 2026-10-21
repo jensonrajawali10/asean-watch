@@ -23,6 +23,8 @@
 import snapshotJson from '../../data/warnings-snapshot.json';
 import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
+import { idnDistrictIndex, placeTsunamiAreas } from './tsunamiAreas';
+import { isExpired } from './warningExpiry';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -43,6 +45,10 @@ export interface GaugeReading {
   datum: string;
   /** Issuer's own situation or status text, verbatim; null when none. */
   situation: string | null;
+  /** Issuer's numeric situation level (ThaiWater situation_level 1-5); absent or null when none. */
+  situationLevel?: number | null;
+  /** Our plain-English gloss of the level, from a fixed reviewed table (never the issuer's words); null when none. */
+  situationGloss?: string | null;
   /** Issuer's thresholds in the same unit and datum as `value`. */
   thresholds?: Record<string, number> | null;
   sourceUrl: string;
@@ -220,7 +226,8 @@ const DSDA_GLOSS: Record<string, string> = {
   '4': 'Siaga 4 is the LEAST severe of DSDA’s four levels (Siaga 1 is the most severe)',
 };
 
-const BMKG_LEVEL_RANK: Record<string, number> = { AWAS: 3, SIAGA: 2, WASPADA: 1 };
+/** BMKG InaTEWS per-area levels, most severe first (AWAS > SIAGA > WASPADA). Used for ordering only. */
+export const BMKG_LEVEL_RANK: Record<string, number> = { AWAS: 3, SIAGA: 2, WASPADA: 1 };
 
 // ---------------------------------------------------------------------------
 // Feed identities
@@ -315,12 +322,20 @@ function expired(expiresAt: string | null, retrievedAt: string): boolean {
 // Parsers (pure)
 
 /** BMKG quake origin from <date>15-08-26</date><time>04:58:24 WIB</time> (two-digit year) -> epoch ms. */
-function bmkgOriginMs(date: string | null, time: string | null): number | null {
-  const d = /^(\d{2})-(\d{2})-(\d{2,4})$/.exec(date ?? '');
-  const t = /^(\d{2}):(\d{2})(?::(\d{2}))?\s*WIB$/i.exec(time ?? '');
+/**
+ * A BMKG quake's origin time from its <date>/<time> (or datagempa info.date/info.time) fields, e.g.
+ * "15-08-26" + "04:58:24 WIB" -> ISO 8601 UTC. Null when either is missing or unreadable.
+ */
+export function bmkgOriginUtc(date: unknown, time: unknown): string | null {
+  const d = /^(\d{2})-(\d{2})-(\d{2,4})$/.exec(typeof date === 'string' ? date.trim() : '');
+  const t = /^(\d{2}):(\d{2})(?::(\d{2}))?\s*WIB$/i.exec(typeof time === 'string' ? time.trim() : '');
   if (!d || !t) return null;
   const year = d[3].length === 2 ? 2000 + Number(d[3]) : Number(d[3]);
-  const iso = localToUtc(year, +d[2], +d[1], +t[1], +t[2], t[3] ? +t[3] : 0, 7);
+  return localToUtc(year, +d[2], +d[1], +t[1], +t[2], t[3] ? +t[3] : 0, 7);
+}
+
+function bmkgOriginMs(date: string | null, time: string | null): number | null {
+  const iso = bmkgOriginUtc(date, time);
   return iso ? Date.parse(iso) : null;
 }
 
@@ -476,12 +491,65 @@ export function parseBmkgGempa(raw: unknown, meta: ParseMeta): FeedParseResult {
   return { warnings: [warning], gauges: [], note: 'Latest BMKG earthquake information message.' };
 }
 
-/** JMA tsunami: the latest product in list.json, one warning per forecast area. */
-export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult {
+/** JMA bosai tsunami products that carry a forecast per coastal area (warnings/advisories/forecasts; tsunami information). */
+const JMA_FORECAST_PRODUCT = /_VTSE(41|51)_/;
+/** At most this many events (newest first) have their newest forecast product fetched. */
+export const JMA_MAX_EVENTS = 5;
+
+/**
+ * From JMA's list.json, the newest forecast product (VTSE41/VTSE51) of each event (`eid`), newest event
+ * first, at most JMA_MAX_EVENTS. Products without a per-area forecast (e.g. VTSE52 offshore observations)
+ * are skipped, so they never replace an event's forecast; one event never replaces another.
+ */
+export function jmaNewestForecastPerEvent(list: unknown): Record<string, unknown>[] {
+  const items = Array.isArray(list) ? list.filter(isRecord) : [];
+  const newest = new Map<string, Record<string, unknown>>();
+  for (const it of items) {
+    const json = str(it.json);
+    if (!json || !JMA_FORECAST_PRODUCT.test(json)) continue;
+    const eid = str(it.eid) ?? json;
+    const prev = newest.get(eid);
+    if (!prev || (str(it.rdt) ?? '') > (str(prev.rdt) ?? '')) newest.set(eid, it);
+  }
+  return [...newest.values()].sort((a, b) => (str(b.rdt) ?? '').localeCompare(str(a.rdt) ?? '')).slice(0, JMA_MAX_EVENTS);
+}
+
+interface JmaDetail {
+  detail: Record<string, unknown>;
+  url: string;
+}
+
+/**
+ * The detail documents in a JMA raw payload. Current shape: { list, details: [{ url, detail }] } (one per
+ * event). Older snapshots: { list, detail, detailUrl } (the single newest product). If two documents are
+ * for the same EventID, only the newest ReportDateTime is kept: JMA's newest forecast replaces the older one.
+ */
+function jmaDetails(raw: Record<string, unknown>, fallbackUrl: string): JmaDetail[] {
+  const out: JmaDetail[] = [];
+  if (Array.isArray(raw.details)) {
+    for (const d of raw.details) {
+      if (isRecord(d) && isRecord(d.detail)) out.push({ detail: d.detail, url: str(d.url) ?? fallbackUrl });
+    }
+  } else if (isRecord(raw.detail)) {
+    out.push({ detail: raw.detail, url: str(raw.detailUrl) ?? fallbackUrl });
+  }
+  const head = (d: JmaDetail) => (isRecord(d.detail.Head) ? d.detail.Head : {});
+  const reportMs = (d: JmaDetail) => {
+    const iso = toUtcIso(head(d).ReportDateTime);
+    return iso ? Date.parse(iso) : Number.NEGATIVE_INFINITY;
+  };
+  const byEvent = new Map<string, JmaDetail>();
+  out.forEach((d, i) => {
+    const key = str(head(d).EventID) ?? `#${i}`;
+    const prev = byEvent.get(key);
+    if (!prev || reportMs(d) > reportMs(prev)) byEvent.set(key, d);
+  });
+  return [...byEvent.values()].sort((a, b) => reportMs(b) - reportMs(a));
+}
+
+/** One warning per forecast area of one JMA detail document. */
+function parseJmaDetail(detail: Record<string, unknown>, detailUrl: string, meta: ParseMeta): OfficialWarning[] {
   const feed = FEEDS.jmaTsunami;
-  if (!isRecord(raw) || !Array.isArray(raw.list)) throw new Error('not a JMA tsunami list');
-  const detail = isRecord(raw.detail) ? raw.detail : null;
-  if (!detail) return { warnings: [], gauges: [], note: 'JMA lists no tsunami message. Not an all-clear; check JMA directly.' };
   const head = isRecord(detail.Head) ? detail.Head : {};
   const body = isRecord(detail.Body) ? detail.Body : {};
   const forecast = isRecord(body.Tsunami) && isRecord(body.Tsunami.Forecast) ? body.Tsunami.Forecast : {};
@@ -491,7 +559,6 @@ export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult 
   const expiresAt = toUtcIso(head.ValidDateTime);
   const cancelled = str(head.InfoType) === '取消';
   const title = str(head.enTitle) ? `${str(head.enTitle)} (${str(head.Title) ?? ''})` : (str(head.Title) ?? 'JMA tsunami information');
-  const detailUrl = str(raw.detailUrl) ?? feed.url;
   const warnings: OfficialWarning[] = [];
   for (const item of items) {
     if (!isRecord(item) || !isRecord(item.Area)) continue;
@@ -525,12 +592,30 @@ export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult 
       }),
     );
   }
+  return warnings;
+}
+
+/**
+ * JMA tsunami: the newest forecast product of each event in list.json (jmaNewestForecastPerEvent), one
+ * warning per forecast area. An event's older products are not shown: its newest forecast replaces them.
+ */
+export function parseJmaTsunami(raw: unknown, meta: ParseMeta): FeedParseResult {
+  const feed = FEEDS.jmaTsunami;
+  if (!isRecord(raw) || !Array.isArray(raw.list)) throw new Error('not a JMA tsunami list');
+  const details = jmaDetails(raw, feed.url);
+  const missing = Array.isArray(raw.details) ? raw.details.filter((d) => !isRecord(d) || !isRecord(d.detail)).length : 0;
+  const missingNote = missing > 0 ? ` ${missing} event product${missing === 1 ? '' : 's'} could not be fetched: check JMA directly.` : '';
+  if (details.length === 0) {
+    return { warnings: [], gauges: [], note: `JMA lists no tsunami message. Not an all-clear; check JMA directly.${missingNote}` };
+  }
+  const warnings = details.flatMap((d) => parseJmaDetail(d.detail, d.url, meta));
   const open = warnings.filter((w) => !w.ended).length;
-  return {
-    warnings,
-    gauges: [],
-    note: `Latest JMA product ${str(head.enTitle) ?? str(head.Title) ?? ''} issued ${issuedAt ?? 'at an unknown time'}: ${warnings.length} areas, ${open} not ended or expired.`,
-  };
+  const products = details.map((d) => {
+    const head = isRecord(d.detail.Head) ? d.detail.Head : {};
+    return `${str(head.enTitle) ?? str(head.Title) ?? ''} issued ${toUtcIso(head.ReportDateTime) ?? 'at an unknown time'}`;
+  });
+  const lead = details.length === 1 ? `Latest JMA product ${products[0]}` : `Newest JMA forecast for each of ${details.length} events (${products.join('; ')})`;
+  return { warnings, gauges: [], note: `${lead}: ${warnings.length} areas, ${open} not ended or expired.${missingNote}` };
 }
 
 /** JMA volcano warnings in force (warning.json) joined to volcano_list.json for English names and coordinates. */
@@ -837,6 +922,7 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
   }
   const gauges: GaugeReading[] = [];
   const warnings: OfficialWarning[] = [];
+  let withoutText = 0;
   for (const r of rows) {
     if (!isRecord(r) || !isRecord(r.station)) continue;
     const st = r.station;
@@ -851,6 +937,7 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
     const name = [code, str(names.en) ?? str(names.th)].filter((x): x is string => x !== null && x !== '').join(' ');
     const level = num(r.situation_level);
     const situation = level !== null ? (situationText.get(level) ?? null) : null;
+    const situationGloss = level !== null ? (THAIWATER_GLOSS[level] ?? null) : null;
     const datum = msl !== null ? 'MSL' : 'local gauge datum';
     const thresholds: Record<string, number> = {};
     for (const [k, field] of [['minBank', 'min_bank'], ['leftBank', 'left_bank'], ['rightBank', 'right_bank'], ['criticalLevelMsl', 'critical_level_msl']] as const) {
@@ -868,12 +955,18 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
       unit: 'm',
       datum,
       situation,
+      situationLevel: level,
+      situationGloss,
       thresholds: Object.keys(thresholds).length > 0 ? thresholds : null,
       sourceUrl: feed.url,
       dataMode: meta.dataMode,
       retrievedAt: meta.retrievedAt,
     });
-    if (level === null || level < THAIWATER_RELAY_MIN_LEVEL || !situation) continue;
+    if (level === null || level < THAIWATER_RELAY_MIN_LEVEL) continue;
+    // ThaiWater's situation text comes from its `scale` table. If that table is missing or changed, the
+    // gauge is still relayed (never dropped silently) under its numeric level, and the note says so.
+    if (!situation) withoutText += 1;
+    const levelLabel = situation ?? `ThaiWater situation_level ${level}`;
     // diff_wl_bank is an unsigned amount; the direction is only in ThaiWater's own text:
     // "ล้นตลิ่ง" (overflowing the bank) or "ต่ำกว่าตลิ่ง" (below the bank). Relay both verbatim.
     const diff = str(r.diff_wl_bank);
@@ -896,13 +989,13 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
         authority: 'official',
         hazard: 'flood',
         product: `ThaiWater water level situation${agency ? ` (${agency} gauge)` : ''}`,
-        level: situation,
-        levelGloss: THAIWATER_GLOSS[level] ?? null,
+        level: levelLabel,
+        levelGloss: situationGloss,
         headline:
           `${name}: water level ${value} m ${datum}, ${bankText}, discharge ` +
           `${discharge !== null ? `${discharge} m³/s` : 'not reported'} (ThaiWater ${str(r.waterlevel_datetime) ?? ''} ICT)`,
         areaDescription: [nameOf(geo.amphoe_name), nameOf(geo.province_name), basin].filter((x): x is string => x !== null).join(', '),
-        areas: [{ name, level: situation, lat: loc.lat, lon: loc.lon }],
+        areas: [{ name, level: levelLabel, lat: loc.lat, lon: loc.lon }],
         location: loc,
         issuedAt: observedAt,
         expiresAt: null,
@@ -916,7 +1009,11 @@ export function parseThaiWater(raw: unknown, meta: ParseMeta): FeedParseResult {
   return {
     warnings,
     gauges,
-    note: `${gauges.length} ThaiWater gauges read; ${warnings.length} at situation level ${THAIWATER_RELAY_MIN_LEVEL} or above relayed.`,
+    note:
+      `${gauges.length} ThaiWater gauges read; ${warnings.length} at situation level ${THAIWATER_RELAY_MIN_LEVEL} or above relayed.` +
+      (withoutText > 0
+        ? ` ${withoutText} of them without ThaiWater's situation text (its scale table was missing from the response): check ThaiWater directly.`
+        : ''),
   };
 }
 
@@ -1045,11 +1142,41 @@ export function parsePubFlood(raw: unknown, meta: ParseMeta): FeedParseResult {
 // ---------------------------------------------------------------------------
 // Proximity and ordering
 
-/** Smallest distance from a point to a warning's location or any of its areas with coordinates; null when it has none. */
+type LatLon = { lat: number; lon: number };
+
+/**
+ * The points a warning is matched on. A tsunami message that names its warned areas is matched on those
+ * areas only, never on the quake epicentre in `location`: the issuer warned those coasts, so a watch
+ * next to a warned district is matched even when the epicentre is far away, and a watch next to the
+ * epicentre is not matched when its coast was not warned. Areas without coordinates of their own are
+ * placed where possible (BMKG InaTEWS districts at their geoBoundaries centres, see tsunamiAreas.ts);
+ * `unplaced` counts the named areas that could not be placed.
+ */
+export function warningMatchPoints(w: OfficialWarning): { points: LatLon[]; unplaced: number } {
+  const own = (a: OfficialWarningArea) => validLatLon(a.lat, a.lon);
+  if (w.hazard === 'tsunami' && w.areas.length > 0) {
+    const points: LatLon[] = [];
+    const needPlacing: OfficialWarningArea[] = [];
+    for (const a of w.areas) {
+      const p = own(a);
+      if (p) points.push(p);
+      else needPlacing.push(a);
+    }
+    if (needPlacing.length === 0) return { points, unplaced: 0 };
+    if (!w.id.startsWith(`${FEEDS.bmkgInatews.id}:`)) return { points, unplaced: needPlacing.length };
+    const placement = placeTsunamiAreas(needPlacing, idnDistrictIndex());
+    return { points: [...points, ...placement.placed.map((p) => ({ lat: p.lat, lon: p.lon }))], unplaced: placement.unplaced.length };
+  }
+  const points = [w.location, ...w.areas.map(own)].filter((p): p is LatLon => p !== null);
+  return { points, unplaced: 0 };
+}
+
+/**
+ * Smallest distance from a point to the places a warning names (warningMatchPoints: its location or
+ * areas; for a tsunami message with named areas, those areas only); null when none has coordinates.
+ */
 export function warningDistanceKm(w: OfficialWarning, lat: number, lon: number): number | null {
-  const points = [w.location, ...w.areas.map((a) => validLatLon(a.lat, a.lon))].filter(
-    (p): p is { lat: number; lon: number } => p !== null,
-  );
+  const { points } = warningMatchPoints(w);
   if (points.length === 0) return null;
   return Math.min(...points.map((p) => haversineKm(lat, lon, p.lat, p.lon)));
 }
@@ -1060,6 +1187,37 @@ export function warningsNear(warnings: OfficialWarning[], lat: number, lon: numb
     const d = warningDistanceKm(w, lat, lon);
     return d !== null && d <= radiusKm;
   });
+}
+
+/** An official tsunami message that is still in force (not ended; with nowMs, not past its expiry). */
+function activeOfficialTsunami(w: OfficialWarning, nowMs?: number): boolean {
+  if (w.authority !== 'official' || w.hazard !== 'tsunami') return false;
+  return nowMs === undefined ? !w.ended : !isExpired(w, nowMs);
+}
+
+/**
+ * Splits warnings for a selected place:
+ * - `near`: warnings whose location or named areas lie within radiusKm (warningsNear);
+ * - `elsewhere`: everything else that must still be shown, i.e. warnings with no coordinates at all,
+ *   and every official tsunami message still in force that is not near. A tsunami message is never
+ *   dropped: one whose warned areas are far away, or only partly placed, is listed here in full.
+ * Both lists keep the input order. Without nowMs, "in force" means not ended by the issuer.
+ */
+export function partitionWarnings(
+  warnings: readonly OfficialWarning[],
+  lat: number,
+  lon: number,
+  radiusKm: number,
+  nowMs?: number,
+): { near: OfficialWarning[]; elsewhere: OfficialWarning[] } {
+  const near: OfficialWarning[] = [];
+  const elsewhere: OfficialWarning[] = [];
+  for (const w of warnings) {
+    const d = warningDistanceKm(w, lat, lon);
+    if (d !== null && d <= radiusKm) near.push(w);
+    else if (d === null || activeOfficialTsunami(w, nowMs)) elsewhere.push(w);
+  }
+  return { near, elsewhere };
 }
 
 /** issuedAt descending, nulls last; then issuer and id for a stable order. */
@@ -1106,10 +1264,13 @@ const SPECS: FeedSpec[] = [
     fetchRaw: async (get) => {
       const list = await get(FEEDS.jmaTsunami.url, 'json');
       const items = Array.isArray(list) ? list.filter(isRecord) : [];
-      const latest = [...items].sort((a, b) => (str(b.rdt) ?? '').localeCompare(str(a.rdt) ?? ''))[0];
-      if (!latest || !str(latest.json)) return { list: items, detail: null };
-      const detailUrl = `https://www.jma.go.jp/bosai/tsunami/data/${str(latest.json)}`;
-      return { list: items, detail: await get(detailUrl, 'json'), detailUrl };
+      const urls = jmaNewestForecastPerEvent(items).map((it) => `https://www.jma.go.jp/bosai/tsunami/data/${str(it.json)}`);
+      const settled = await Promise.allSettled(urls.map((url) => get(url, 'json')));
+      // One event's detail failing must not hide the others; only when every detail fails does the feed fail.
+      const firstFailure = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (firstFailure && settled.every((r) => r.status === 'rejected')) throw firstFailure.reason;
+      const details = settled.map((r, i) => ({ url: urls[i], detail: r.status === 'fulfilled' ? r.value : null }));
+      return { list: items, details };
     },
   },
   {
@@ -1151,8 +1312,9 @@ export const BUNDLED_WARNINGS_SNAPSHOT = snapshotJson as unknown as WarningsSnap
 function snapshotFeed(id: string, source: WarningsSnapshot | null): SnapshotFeed | null {
   const f = source?.feeds?.[id];
   if (!f || f.raw === null || f.raw === undefined || typeof f.retrievedAt !== 'string') return null;
-  // The script stores JMA tsunami as { list, detail }; the detail URL is the second captured URL.
-  if (id === FEEDS.jmaTsunami.id && isRecord(f.raw) && Array.isArray(f.urls) && f.urls[1]) {
+  // Older snapshots store JMA tsunami as { list, detail }; the detail URL is the second captured URL.
+  // Current ones store { list, details: [{ url, detail }] }, which carries its own URLs.
+  if (id === FEEDS.jmaTsunami.id && isRecord(f.raw) && !Array.isArray(f.raw.details) && Array.isArray(f.urls) && f.urls[1]) {
     return { ...f, raw: { ...f.raw, detailUrl: f.urls[1] } };
   }
   return f;

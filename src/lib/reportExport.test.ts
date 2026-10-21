@@ -4,10 +4,10 @@ import { loadAqSnapshot } from './airQuality';
 import { loadAshWindSnapshot } from './ashDrift';
 import { loadFixtures } from './fixtures';
 import realMeta from '../../data/real/meta.json';
-import { loadFloodModelSnapshot } from './floodModel';
+import { bundledFloodSnapshot, loadFloodModelSnapshot } from './floodModel';
 import { loadNeaSnapshot } from './nea';
 import { loadPtwcSnapshot } from './ptwc';
-import { loadQuakesSnapshot } from './quakesLive';
+import { bundledQuakesSnapshot, loadQuakesSnapshot } from './quakesLive';
 import {
   DEFAULT_EXPORT_SECTIONS,
   EXPORT_SECTIONS,
@@ -26,6 +26,13 @@ import { buildSourceCatalogue, groupSources } from './sourceCatalogue';
 import { hazeSourcesFromFixtures } from './transport';
 import { loadWarningsSnapshot } from './warnings';
 import { loadWindSnapshot } from './windField';
+const FLOOD_SNAP = await bundledFloodSnapshot();
+const QUAKES_SNAP = await bundledQuakesSnapshot();
+
+// The bundled snapshots are lazy chunks (loaded with await).
+const WIND925 = await loadWindSnapshot('925hPa');
+const WIND10 = await loadWindSnapshot('10m');
+const AQ_SNAP = await loadAqSnapshot();
 
 const fx = loadFixtures();
 const ws = loadWarningsSnapshot();
@@ -58,17 +65,17 @@ const TRICKY: OfficialWarning = {
 const FEEDS: WarningFeedStatus[] = [...ws.feeds, ptwc.status];
 
 const input: SituationInput = {
-  airQuality: loadAqSnapshot(),
-  wind10m: loadWindSnapshot('10m'),
-  wind925: loadWindSnapshot('925hPa'),
+  airQuality: AQ_SNAP,
+  wind10m: WIND10,
+  wind925: WIND925,
   hazeSources: hazeSourcesFromFixtures(fx),
   hotspotSnapshot: fx.snapshot,
   nea: loadNeaSnapshot(),
   warnings: [...ws.warnings, ...ptwc.warnings, TRICKY],
   warningFeeds: FEEDS,
   ashWind: loadAshWindSnapshot(),
-  riverFlow: loadFloodModelSnapshot(),
-  quakes: loadQuakesSnapshot(),
+  riverFlow: loadFloodModelSnapshot(FLOOD_SNAP),
+  quakes: loadQuakesSnapshot(QUAKES_SNAP),
 };
 
 const report = situationReport(input);

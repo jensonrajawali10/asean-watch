@@ -18,8 +18,8 @@ import { buildBriefing, briefingFilename, downloadText } from './lib/briefing';
 import type { BriefingInput } from './lib/briefing';
 import { assessDrift, loadNeaContext } from './lib/nea';
 import type { NeaLoadResult } from './lib/nea';
-import { warningDistanceKm, warningsNear } from './lib/warnings';
-import { NEAR_KM, mergeWarnings } from './lib/warningsView';
+import { partitionWarnings } from './lib/warnings';
+import { NEAR_KM, isExpired, mergeWarnings } from './lib/warningsView';
 import { useOfficialWarnings } from './lib/useOfficialWarnings';
 import { useNowMs } from './lib/useNowMs';
 import type { HazeTransportView, MapViewProps } from './components/map/MapView';
@@ -28,9 +28,9 @@ import type { MapHotspot } from './components/map/mapGeometry';
 import { loadWindField, PARTICLE_WIND_LEVEL } from './lib/windField';
 import { loadAshWind } from './lib/ashDrift';
 import type { AshWindData } from './lib/ashDrift';
-import { loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
+import { bundledQuakesSnapshot, loadQuakes, loadQuakesSnapshot } from './lib/quakesLive';
 import type { QuakesResult } from './lib/quakesLive';
-import { loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
+import { bundledFloodSnapshot, loadFloodModel, loadFloodModelSnapshot } from './lib/floodModel';
 import type { FloodModelResult } from './lib/floodModel';
 import type { WindGrid, WindLoadResult } from './lib/windField';
 import { loadAirQuality } from './lib/airQuality';
@@ -56,7 +56,6 @@ import { officialVolcanoLevel } from './components/map/volcanoLevels';
 import type { OfficialVolcanoLevel } from './components/map/volcanoLevels';
 import MapCards from './components/map/MapCards';
 import { buildEruptionScenario } from './lib/eruptionScenario';
-import { buildPlumeLayers } from './components/map/plumeLayers';
 import EruptionScenarioPanel from './components/analyst/EruptionScenarioPanel';
 import VolcanoesSection from './components/analyst/VolcanoesSection';
 import WarningsSection from './components/analyst/WarningsSection';
@@ -73,7 +72,6 @@ import { firesSummaryFromSnapshot, headline as situationHeadline } from './lib/s
 import type { SituationInput } from './lib/situation';
 import { loadFireSnapshot } from './lib/fires';
 import type { FireSnapshot } from './lib/fires';
-import { buildFireLayers } from './components/map/fireLayers';
 import type { FirePick } from './components/map/fireLayers';
 import { firePoint, fireSelectionId, resolveFirePick } from './components/map/fireSelection';
 import type { MapLayerContext } from './components/map/MapView';
@@ -83,7 +81,15 @@ import './App.css';
 import './components/shell/shell.css';
 
 /** MapLibre + deck.gl are large: the map loads as its own chunk so the shell paints first. */
-const MapView = lazy(() => import('./components/map/MapView'));
+// Both downloads start at module evaluation, not after the first render. The deck.gl layer builders are a
+// dynamic import so deck.gl stays out of the entry chunk and off the first paint.
+const mapViewModule = import('./components/map/MapView');
+const MapView = lazy(() => mapViewModule);
+type DeckLayersModule = typeof import('./components/map/deckLayers');
+const deckLayersModule: Promise<DeckLayersModule | null> = import('./components/map/deckLayers').catch((err: unknown) => {
+  console.error('Map layer code could not be loaded:', err);
+  return null;
+});
 
 // ---------------------------------------------------------------------------
 // Snapshot data: loaded and validated once per page load.
@@ -174,6 +180,7 @@ const RULES_BY_WATCH: Record<string, string[]> = (() => {
 
 /** The FIRMS whole-region snapshot (fires module): the Fires chip's heat grid, the fire cards and section. */
 const FIRE_SNAP: FireSnapshot | null = loadFireSnapshot();
+const NO_RIVER_SERIES: FloodModelResult['series'] = [];
 const FIRES_SUMMARY = (() => {
   try {
     return FIRE_SNAP ? firesSummaryFromSnapshot(FIRE_SNAP) : null;
@@ -347,6 +354,17 @@ export default function App() {
   const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
   /** Shared page clock (every 5 minutes, on visible, on online): warning expiry and the quake layer's 24 h. */
   const nowMs = useNowMs();
+  /** The deck.gl layer builders, once their chunk is in (the map draws no fire or plume layers before). */
+  const [deckLayers, setDeckLayers] = useState<DeckLayersModule | null>(null);
+  useEffect(() => {
+    let live = true;
+    void deckLayersModule.then((m) => {
+      if (live) setDeckLayers(m);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   /** Modelled 10 m wind field (Open-Meteo, live or snapshot) for the haze paths; null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
   const transport = useMemo(() => buildTransport(windResult), [windResult]);
@@ -356,8 +374,21 @@ export default function App() {
   /** Modelled pressure-level winds at the volcano summits (live or snapshot); null until loaded. */
   const [ashWind, setAshWind] = useState<AshWindData | null>(null);
   /** Connector layers: bundled snapshot first, replaced by the live load when it settles. */
-  const [quakes, setQuakes] = useState<QuakesResult>(() => loadQuakesSnapshot());
-  const [riverFlow, setRiverFlow] = useState<FloodModelResult>(() => loadFloodModelSnapshot());
+  // Null until the bundled snapshot chunk (moments after first paint) or the live answer arrives.
+  const [quakes, setQuakes] = useState<QuakesResult | null>(null);
+  const [riverFlow, setRiverFlow] = useState<FloodModelResult | null>(null);
+  useEffect(() => {
+    let live = true;
+    void bundledQuakesSnapshot().then((s) => {
+      if (live) setQuakes((prev) => prev ?? loadQuakesSnapshot(s));
+    });
+    void bundledFloodSnapshot().then((s) => {
+      if (live) setRiverFlow((prev) => prev ?? loadFloodModelSnapshot(s));
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
 
@@ -463,22 +494,21 @@ export default function App() {
     () => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }],
     [warningsResult.feeds, ptwc],
   );
-  /** Warnings near the selected area, or every warning when nothing is selected. */
-  const nearWarnings = useMemo<OfficialWarning[]>(() => {
-    if (!incident) return allWarnings;
+  /**
+   * Warnings near the selected area (or every warning when nothing is selected), and the ones listed apart:
+   * no coordinates published (e.g. JMA tsunami areas), or an official tsunami message in force whose warned
+   * areas are not near (never dropped; see partitionWarnings).
+   */
+  const { nearWarnings, elsewhereWarnings } = useMemo<{ nearWarnings: OfficialWarning[]; elsewhereWarnings: OfficialWarning[] }>(() => {
+    if (!incident) return { nearWarnings: allWarnings, elsewhereWarnings: [] };
     try {
-      return warningsNear(allWarnings, incident.lat, incident.lon, NEAR_KM);
+      const { near, elsewhere } = partitionWarnings(allWarnings, incident.lat, incident.lon, NEAR_KM, nowMs);
+      return { nearWarnings: near, elsewhereWarnings: elsewhere };
     } catch (err) {
       console.error('Official warnings could not be filtered by distance:', err);
-      return [];
+      return { nearWarnings: [], elsewhereWarnings: allWarnings };
     }
-  }, [allWarnings, incident]);
-
-  /** Warnings with no coordinates at all (e.g. JMA tsunami areas): never "near" anything, so listed apart. */
-  const elsewhereWarnings = useMemo<OfficialWarning[]>(() => {
-    if (!incident) return [];
-    return allWarnings.filter((w) => warningDistanceKm(w, incident.lat, incident.lon) === null);
-  }, [allWarnings, incident]);
+  }, [allWarnings, incident, nowMs]);
 
   const inspectedWarning = useMemo(
     () => (inspectedWarningId ? (allWarnings.find((w) => w.id === inspectedWarningId) ?? null) : null),
@@ -621,6 +651,7 @@ export default function App() {
       nea,
       drift,
       warnings: nearWarnings,
+      otherTsunami: elsewhereWarnings.filter((w) => w.authority === 'official' && w.hazard === 'tsunami' && !isExpired(w, nowMs)),
       warningFeeds: allFeeds,
       dataAsOf: DATA_AS_OF,
       stepCount: STEPS.length || undefined,
@@ -663,8 +694,10 @@ export default function App() {
   );
   const plumeLayers = useCallback(
     (timeMs: number, ctx: MapLayerContext) =>
-      buildPlumeLayers(scenario, timeMs, { theme: ctx.theme, visible: true, showTrail: true, showFootprint: true, showPlaces: true }),
-    [scenario],
+      deckLayers
+        ? deckLayers.buildPlumeLayers(scenario, timeMs, { theme: ctx.theme, visible: true, showTrail: true, showFootprint: true, showPlaces: true })
+        : [],
+    [scenario, deckLayers],
   );
 
   /** "Play ash scenario": the plume follows the one timeline, so the scrubber goes back to now and plays. */
@@ -816,7 +849,9 @@ export default function App() {
   /** The fires module's heat grid and badges, through MapView's layer seam. */
   const fireLayers = useCallback(
     (ctx: MapLayerContext) =>
-      buildFireLayers({
+      !deckLayers
+        ? []
+        : deckLayers.buildFireLayers({
         snapshot: FIRE_SNAP,
         theme: ctx.theme,
         zoom: ctx.zoom,
@@ -830,7 +865,7 @@ export default function App() {
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
-    [layers.fires, selectedClusterId, selectFire],
+    [layers.fires, selectedClusterId, selectFire, deckLayers],
   );
 
   let section: ReactNode = null;
@@ -1053,7 +1088,7 @@ export default function App() {
     scenarioLayers: scenario ? plumeLayers : null,
     scenarioInfo: scenario ? { startMs: scenario.startMs, bounds: scenario.bounds } : null,
     quakes,
-    riverFlow: riverFlow.series,
+    riverFlow: riverFlow?.series ?? NO_RIVER_SERIES,
   };
 
   const freshness =

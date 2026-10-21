@@ -85,6 +85,16 @@ function eachPosition(geometry: Geometry | null, visit: (p: Position) => void): 
   }
 }
 
+/**
+ * The ASEAN member states' extent: featureBounds of the `asean` features in data/region.geojson
+ * (mapGeometry.test.ts checks it against the file). A constant so the map's first view does not need
+ * the 313 kB region geometry, which is loaded only for the offline basemap.
+ */
+export const ASEAN_BOUNDS: Bounds = [
+  [92.181, -10.91],
+  [140.976, 28.516],
+];
+
 /** Bounding box of the given features; null when there are no coordinates. */
 export function featureBounds(features: readonly Feature[]): Bounds | null {
   let w = Infinity;

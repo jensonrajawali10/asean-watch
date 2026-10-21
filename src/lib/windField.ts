@@ -8,8 +8,6 @@
 // lower boundary layer that carries a regional smoke plume; the default for the animated particles).
 // Variable names verified live 2026-10-14: wind_speed_925hPa / wind_direction_925hPa, unit m/s.
 // The 925 hPa snapshot is data/wind925-snapshot.json (scripts/capture-wind-snapshot.mjs 925hPa).
-import snapshotJson from '../../data/wind-snapshot.json';
-import snapshot925Json from '../../data/wind925-snapshot.json';
 
 export const WIND_GRID_SPEC = { minLat: -6, maxLat: 8, minLon: 95, maxLon: 120, stepDeg: 1 } as const;
 export const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -205,8 +203,32 @@ export function parseWindGrid(raw: unknown, dataMode: WindGrid['dataMode']): Win
   };
 }
 
-export function loadWindSnapshot(level: WindLevel = '10m'): WindGrid | null {
-  const g = parseWindGrid((level === '925hPa' ? snapshot925Json : snapshotJson) as unknown, 'historical');
+// The bundled snapshots are fallbacks only, so they are not in the entry chunk: each is its own
+// same-origin chunk (content-hashed, works offline once the app is loaded), fetched in parallel with the
+// live request by loadWindField and awaited only on the fallback path.
+const snapshotChunks: Partial<Record<WindLevel, Promise<unknown>>> = {};
+function snapshotChunk(level: WindLevel): Promise<unknown> {
+  snapshotChunks[level] ??= (
+    level === '925hPa' ? import('../../data/wind925-snapshot.json') : import('../../data/wind-snapshot.json')
+  ).then(
+    (m) => m.default as unknown,
+    (err: unknown) => {
+      delete snapshotChunks[level]; // a failed chunk load can be retried
+      throw err;
+    },
+  );
+  return snapshotChunks[level];
+}
+
+/** The bundled HISTORICAL wind grid at `level`, or null when it is missing, malformed or cannot be loaded. */
+export async function loadWindSnapshot(level: WindLevel = '10m'): Promise<WindGrid | null> {
+  let raw: unknown;
+  try {
+    raw = await snapshotChunk(level);
+  } catch {
+    return null;
+  }
+  const g = parseWindGrid(raw, 'historical');
   // A snapshot of another level must never stand in for this one.
   return g && g.level === WIND_LEVELS[level].label ? g : null;
 }
@@ -227,8 +249,8 @@ export function resetWindCache(): void {
   backoffUntil = 0;
 }
 
-function snapshotResult(message: string, level: WindLevel): WindLoadResult {
-  const grid = loadWindSnapshot(level);
+async function snapshotResult(message: string, level: WindLevel): Promise<WindLoadResult> {
+  const grid = await loadWindSnapshot(level);
   return grid
     ? { grid, status: 'snapshot', message }
     : {
@@ -246,18 +268,18 @@ async function loadLive(level: WindLevel, timeoutMs: number, fetchImpl: typeof f
     const res = await fetchImpl(buildWindUrl(axes.lats, axes.lons, 3, level), { signal: controller.signal });
     if (res.status === 429) {
       backoffUntil = now() + WIND_BACKOFF_MS;
-      return snapshotResult('Open-Meteo rate limit reached; showing the bundled wind snapshot.', level);
+      return await snapshotResult('Open-Meteo rate limit reached; showing the bundled wind snapshot.', level);
     }
-    if (!res.ok) return snapshotResult(`Open-Meteo returned HTTP ${res.status}; showing the bundled wind snapshot.`, level);
+    if (!res.ok) return await snapshotResult(`Open-Meteo returned HTTP ${res.status}; showing the bundled wind snapshot.`, level);
     const json: unknown = await res.json();
     const retrievedAt = new Date(now()).toISOString().replace(/\.\d{3}Z$/, 'Z');
     const grid = normaliseOpenMeteoWind(json, axes, retrievedAt, 'live', level);
-    if (!grid) return snapshotResult('Open-Meteo response was not in the expected shape; showing the bundled wind snapshot.', level);
+    if (!grid) return await snapshotResult('Open-Meteo response was not in the expected shape; showing the bundled wind snapshot.', level);
     memoryCache[level] = { grid, at: now() };
     return { grid, status: 'live', message: null };
   } catch (err) {
     const why = controller.signal.aborted ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err);
-    return snapshotResult(`Open-Meteo unavailable (${why}); showing the bundled wind snapshot.`, level);
+    return await snapshotResult(`Open-Meteo unavailable (${why}); showing the bundled wind snapshot.`, level);
   } finally {
     clearTimeout(timer);
   }
@@ -272,12 +294,14 @@ export async function loadWindField(opts?: {
 }): Promise<WindLoadResult> {
   const now = opts?.now ?? Date.now;
   const level: WindLevel = opts?.level ?? '10m';
+  // Start the fallback chunk now, alongside the live request; it is awaited only if needed.
+  void snapshotChunk(level).catch(() => undefined);
   try {
     const cached = memoryCache[level];
     if (cached && now() - cached.at < WIND_CACHE_TTL_MS) return { grid: cached.grid, status: 'cached', message: null };
-    if (now() < backoffUntil) return snapshotResult('Open-Meteo rate limit backoff in effect; showing the bundled wind snapshot.', level);
+    if (now() < backoffUntil) return await snapshotResult('Open-Meteo rate limit backoff in effect; showing the bundled wind snapshot.', level);
     const fetchImpl = opts?.fetchImpl ?? (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
-    if (!fetchImpl) return snapshotResult('No fetch available; showing the bundled wind snapshot.', level);
+    if (!fetchImpl) return await snapshotResult('No fetch available; showing the bundled wind snapshot.', level);
     let p = inflight[level];
     if (!p) {
       p = loadLive(level, opts?.timeoutMs ?? 8000, fetchImpl, now).finally(() => {
@@ -287,7 +311,7 @@ export async function loadWindField(opts?: {
     }
     return await p;
   } catch (err) {
-    return snapshotResult(`Wind load failed (${err instanceof Error ? err.message : String(err)}); showing the bundled wind snapshot.`, level);
+    return await snapshotResult(`Wind load failed (${err instanceof Error ? err.message : String(err)}); showing the bundled wind snapshot.`, level);
   }
 }
 

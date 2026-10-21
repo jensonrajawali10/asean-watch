@@ -12,7 +12,15 @@ const MAX_BYTES = 512 * 1024;
 export const PTWC_RATE_LIMIT_MAX = 30;
 export const PTWC_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 export const PTWC_UPSTREAM_CACHE_MS = 60 * 1000;
-const UPSTREAM_TIMEOUT_MS = 8000;
+/**
+ * One overall upstream budget for the Atom feed plus its CAP document. It stays well under the client's
+ * timeout (PTWC_CLIENT_TIMEOUT_MS in src/lib/ptwc.ts), so a slow tsunami.gov still gets an answer to the
+ * client instead of the client giving up and showing the HISTORICAL snapshot. When the Atom feed used
+ * most of it, the CAP is skipped: the Atom entry still carries the category, time and region.
+ */
+export const PTWC_UPSTREAM_BUDGET_MS = 7000;
+/** The CAP document is only requested when at least this much of the budget is left. */
+export const PTWC_MIN_CAP_BUDGET_MS = 1000;
 
 export interface PtwcPayload {
   atomUrl: string;
@@ -26,6 +34,8 @@ export interface PtwcContext {
   clientIp: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /** Override PTWC_UPSTREAM_BUDGET_MS (tests). */
+  budgetMs?: number;
 }
 
 /** The CAP link in the Atom feed, if it is on the allow-listed host and path; https enforced. */
@@ -90,11 +100,11 @@ function json(status: number, body: unknown, extra: Record<string, string> = {})
   });
 }
 
-async function fetchText(fetchImpl: typeof fetch, url: string): Promise<string> {
+async function fetchText(fetchImpl: typeof fetch, url: string, timeoutMs: number): Promise<string> {
   const res = await fetchImpl(url, {
     redirect: 'error',
     headers: { accept: 'application/xml, text/xml, */*' },
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    signal: AbortSignal.timeout(Math.max(1, Math.round(timeoutMs))),
   });
   if (!res.ok) throw new Error(`upstream HTTP ${res.status}`);
   const text = await res.text();
@@ -114,13 +124,16 @@ export async function handlePtwcRequest(request: Request, ctx: PtwcContext): Pro
 
     if (!upstream || now() - upstream.at >= PTWC_UPSTREAM_CACHE_MS || now() < upstream.at) {
       const fetchImpl = ctx.fetchImpl ?? fetch;
-      const atom = await fetchText(fetchImpl, PTWC_ATOM_URL);
+      const budget = ctx.budgetMs ?? PTWC_UPSTREAM_BUDGET_MS;
+      const started = Date.now();
+      const atom = await fetchText(fetchImpl, PTWC_ATOM_URL, budget);
       if (!/<feed[\s>]/i.test(atom)) throw new Error('upstream is not an Atom feed');
       const capUrl = capUrlFromAtom(atom);
       let cap: string | null = null;
-      if (capUrl) {
+      const left = budget - (Date.now() - started);
+      if (capUrl && left >= Math.min(PTWC_MIN_CAP_BUDGET_MS, budget / 2)) {
         try {
-          cap = (await fetchText(fetchImpl, capUrl)).replace(/<Signature\b[\s\S]*?<\/Signature>/, '');
+          cap = (await fetchText(fetchImpl, capUrl, left)).replace(/<Signature\b[\s\S]*?<\/Signature>/, '');
         } catch {
           cap = null; // the Atom entry still carries the category, time and region
         }

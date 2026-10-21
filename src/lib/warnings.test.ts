@@ -26,6 +26,8 @@ import {
   parseDsda,
   parseGdacs,
   parseGeonetVal,
+  jmaNewestForecastPerEvent,
+  JMA_MAX_EVENTS,
   parseJmaTsunami,
   parseJmaVolcano,
   parseMagmaSnapshot,
@@ -205,6 +207,13 @@ const JMA_DETAIL = {
   },
 };
 const JMA_DETAIL_URL = `https://www.jma.go.jp/bosai/tsunami/data/${JMA_LIST[0].json}`;
+/** The older event's newest forecast (same document shape; its own EventID, time and areas). */
+const JMA_DETAIL_OLD = {
+  ...JMA_DETAIL,
+  Head: { ...JMA_DETAIL.Head, ReportDateTime: JMA_LIST[1].rdt, ValidDateTime: '2026-10-01T14:00:00+09:00', EventID: JMA_LIST[1].eid },
+  Body: { ...JMA_DETAIL.Body, Tsunami: { Forecast: { Item: [JMA_DETAIL.Body.Tsunami.Forecast.Item[0]] } } },
+};
+const JMA_DETAIL_OLD_URL = `https://www.jma.go.jp/bosai/tsunami/data/${JMA_LIST[1].json}`;
 
 const JMA_WARNING = [
   {
@@ -768,6 +777,7 @@ function replies(): Map<string, Reply> {
     [FEEDS.bmkgGempa.url, { body: GEMPA }],
     [FEEDS.jmaTsunami.url, { body: JMA_LIST }],
     [JMA_DETAIL_URL, { body: JMA_DETAIL }],
+    [JMA_DETAIL_OLD_URL, { body: JMA_DETAIL_OLD }],
     [FEEDS.jmaVolcano.url, { body: JMA_WARNING }],
     ['https://www.jma.go.jp/bosai/volcano/const/volcano_list.json', { body: JMA_VOLCANO_LIST }],
     [FEEDS.geonet.url, { body: GEONET }],
@@ -879,9 +889,9 @@ describe('loadOfficialWarnings', () => {
     const { fn, calls } = fakeFetch();
     const [a, b] = await Promise.all([loadOfficialWarnings({ fetchImpl: fn }), loadOfficialWarnings({ fetchImpl: fn })]);
     expect(b).toBe(a);
-    expect(calls).toHaveLength(12);
+    expect(calls).toHaveLength(13);
     const c = await loadOfficialWarnings({ fetchImpl: fn });
-    expect(calls).toHaveLength(12);
+    expect(calls).toHaveLength(13);
     expect(statusOf(c.feeds, 'bmkg-inatews').status).toBe('cached');
     expect(statusOf(c.feeds, 'bmkg-inatews').retrievedAt).toBe(statusOf(a.feeds, 'bmkg-inatews').retrievedAt);
     expect(c.warnings.filter((w) => !w.id.startsWith('magma')).every((w) => w.dataMode === 'live')).toBe(true);
@@ -1145,5 +1155,131 @@ describe('MAGMA level list parser', () => {
       message: 'Official feed unavailable: check PVMBG (Badan Geologi) via MAGMA Indonesia directly',
     });
     expect(r.warnings.some((w) => w.id.startsWith('magma'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// JMA: only the newest forecast of each event (QC finding M5)
+
+describe('JMA tsunami: newest forecast per event', () => {
+  const LIVE_JMA: ParseMeta = { dataMode: 'live', retrievedAt: '2026-10-10T00:00:00Z' };
+  const BUNDLED_JMA_LIST = (BUNDLED_WARNINGS_SNAPSHOT.feeds['jma-tsunami'].raw as { list: Record<string, string>[] }).list;
+  /** A product of the newer event that carries no per-area forecast (offshore observations, VTSE52). */
+  const OBSERVATION = { ...JMA_LIST[0], rdt: '2026-10-10T03:50:00+09:00', ttl: '沖合の津波観測に関する情報', json: '20261010035000_20261010025608_VTSE52_0.json' };
+  /** A later forecast of the newer event (same eid). */
+  const UPDATE = { ...JMA_LIST[0], rdt: '2026-10-10T04:10:00+09:00', json: '20261010041000_20261010025608_VTSE41_0.json' };
+
+  it('picks the newest VTSE41/VTSE51 product of each event in the bundled list, newest event first', () => {
+    const picked = jmaNewestForecastPerEvent(BUNDLED_JMA_LIST);
+    const forecasts = BUNDLED_JMA_LIST.filter((it) => /_VTSE(41|51)_/.test(it.json));
+    const eids = [...new Set(forecasts.map((it) => it.eid))];
+    const expected = eids
+      .map((eid) => forecasts.filter((it) => it.eid === eid).sort((a, b) => b.rdt.localeCompare(a.rdt))[0])
+      .sort((a, b) => b.rdt.localeCompare(a.rdt))
+      .slice(0, JMA_MAX_EVENTS);
+    expect(picked).toEqual(expected);
+    expect(new Set(picked.map((it) => it.eid)).size).toBe(picked.length);
+  });
+
+  it('skips products without a forecast and keeps one product per event', () => {
+    const picked = jmaNewestForecastPerEvent([OBSERVATION, ...JMA_LIST, UPDATE]);
+    expect(picked.map((it) => it.json)).toEqual([UPDATE.json, JMA_LIST[1].json]);
+  });
+
+  it('caps the number of events', () => {
+    const many = Array.from({ length: JMA_MAX_EVENTS + 3 }, (_, i) => ({ ...JMA_LIST[0], eid: `e${i}`, rdt: `2026-10-${String(10 + i).padStart(2, '0')}T00:00:00+09:00`, json: `x_e${i}_VTSE41_0.json` }));
+    const picked = jmaNewestForecastPerEvent(many);
+    expect(picked).toHaveLength(JMA_MAX_EVENTS);
+    expect(picked[0].eid).toBe(`e${JMA_MAX_EVENTS + 2}`);
+  });
+
+  it('parses every event: one event never replaces another', () => {
+    const raw = { list: JMA_LIST, details: [{ url: JMA_DETAIL_URL, detail: JMA_DETAIL }, { url: JMA_DETAIL_OLD_URL, detail: JMA_DETAIL_OLD }] };
+    const { warnings, note } = parseJmaTsunami(raw, LIVE_JMA);
+    const n = JMA_DETAIL.Body.Tsunami.Forecast.Item.length + JMA_DETAIL_OLD.Body.Tsunami.Forecast.Item.length;
+    expect(warnings).toHaveLength(n);
+    expect(new Set(warnings.map((w) => w.id.split(':')[1]))).toEqual(new Set([JMA_LIST[0].eid, JMA_LIST[1].eid]));
+    expect(warnings.filter((w) => w.sourceUrl === JMA_DETAIL_OLD_URL)).toHaveLength(JMA_DETAIL_OLD.Body.Tsunami.Forecast.Item.length);
+    expect(note).toContain('2 events');
+  });
+
+  it('two products of one event: only the newest is shown', () => {
+    const newer = { ...JMA_DETAIL, Head: { ...JMA_DETAIL.Head, ReportDateTime: UPDATE.rdt }, Body: { ...JMA_DETAIL.Body, Tsunami: { Forecast: { Item: [JMA_DETAIL.Body.Tsunami.Forecast.Item[1]] } } } };
+    const raw = { list: [...JMA_LIST, UPDATE], details: [{ url: JMA_DETAIL_URL, detail: JMA_DETAIL }, { url: 'u2', detail: newer }] };
+    const { warnings } = parseJmaTsunami(raw, LIVE_JMA);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ sourceUrl: 'u2', issuedAt: '2026-10-09T19:10:00Z' });
+  });
+
+  it('live: a newer observation-only product does not wipe the forecast, and both events load', async () => {
+    const { fn, calls } = fakeFetch({ [FEEDS.jmaTsunami.url]: { body: [OBSERVATION, ...JMA_LIST] } });
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    const jma = r.warnings.filter((w) => w.id.startsWith('jma-tsunami:'));
+    expect(jma.length).toBe(JMA_DETAIL.Body.Tsunami.Forecast.Item.length + JMA_DETAIL_OLD.Body.Tsunami.Forecast.Item.length);
+    expect(calls.some((u) => u.includes('VTSE52'))).toBe(false);
+    expect(statusOf(r.feeds, 'jma-tsunami').status).toBe('live');
+  });
+
+  it('live: one event detail failing keeps the other and says so', async () => {
+    const { fn } = fakeFetch({ [JMA_DETAIL_OLD_URL]: new Error('HTTP 503') });
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    const jma = r.warnings.filter((w) => w.id.startsWith('jma-tsunami:'));
+    expect(jma).toHaveLength(JMA_DETAIL.Body.Tsunami.Forecast.Item.length);
+    const status = statusOf(r.feeds, 'jma-tsunami');
+    expect(status.status).toBe('live');
+    expect(status.message).toContain('1 event product could not be fetched: check JMA directly.');
+  });
+
+  it('the bundled snapshot (older { list, detail } shape) still parses', () => {
+    const snap = loadWarningsSnapshot();
+    expect(snap.warnings.some((w) => w.id.startsWith('jma-tsunami:'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ThaiWater gauge labels (QC finding L2), on the bundled snapshot
+
+describe('ThaiWater situation labels', () => {
+  const RAW_TW = BUNDLED_WARNINGS_SNAPSHOT.feeds.thaiwater.raw as Record<string, unknown>;
+  const META_TW: ParseMeta = { dataMode: 'historical', retrievedAt: BUNDLED_WARNINGS_SNAPSHOT.feeds.thaiwater.retrievedAt as string };
+  const withScale = parseThaiWater(RAW_TW, META_TW);
+  const { scale: _scale, ...noScaleRaw } = RAW_TW;
+  const withoutScale = parseThaiWater(noScaleRaw, META_TW);
+
+  it('the snapshot has gauges at level 5 or above (so the case is real)', () => {
+    expect(withScale.warnings.length).toBeGreaterThan(0);
+    expect(withScale.note).not.toContain('scale table');
+  });
+
+  it('without the scale table, level-5 gauges are still relayed, labelled by their numeric level, and the note says so', () => {
+    expect(withoutScale.warnings.map((w) => w.id)).toEqual(withScale.warnings.map((w) => w.id));
+    for (const w of withoutScale.warnings) {
+      expect(w.level).toMatch(/^ThaiWater situation_level \d$/);
+      expect(w.levelGloss).toMatch(/ThaiWater situation level \d of 5/);
+    }
+    expect(withoutScale.note).toContain(`${withoutScale.warnings.length} of them without ThaiWater's situation text`);
+    expect(withoutScale.note).toContain('check ThaiWater directly');
+  });
+
+  it("with the scale table the level is ThaiWater's own text, verbatim", () => {
+    const rows = (RAW_TW.scale as { data: { scale: { trans: string; situation: string }[] } }).data.scale;
+    const texts = new Set(rows.map((r) => r.situation.trim()));
+    for (const w of withScale.warnings) expect(texts.has(w.level)).toBe(true);
+  });
+
+  it('every gauge carries its numeric level and our fixed gloss beside the verbatim text', () => {
+    const rows = ((RAW_TW.waterlevel_data as { data: { situation_level: unknown }[] }).data ?? []).length;
+    expect(withScale.gauges.length).toBeGreaterThan(0);
+    expect(withScale.gauges.length).toBeLessThanOrEqual(rows);
+    for (const g of withScale.gauges) {
+      if (g.situationLevel === null || g.situationLevel === undefined) {
+        expect(g.situationGloss).toBeNull();
+        continue;
+      }
+      expect(g.situationGloss).toContain(`ThaiWater situation level ${g.situationLevel} of 5`);
+      expect(g.situationGloss).not.toBe(g.situation);
+    }
+    expect(withoutScale.gauges.map((g) => g.situationGloss)).toEqual(withScale.gauges.map((g) => g.situationGloss));
+    expect(withoutScale.gauges.every((g) => g.situation === null)).toBe(true);
   });
 });

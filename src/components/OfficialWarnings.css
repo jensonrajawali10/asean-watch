@@ -72,6 +72,23 @@
   background: var(--official-bg);
 }
 
+/* Official information product that is not a warning (PTWC Tsunami Information Statement): the official
+   rail, but the plain surface, so it never reads like an active warning. Its text stays verbatim. */
+.ow-item--info {
+  border-color: var(--border);
+  border-left: 4px solid var(--official-border);
+  background: var(--panel);
+}
+
+/* A plain-language note we add under a relayed message (e.g. PTWC's "for national authorities"). */
+.ow-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--text);
+}
+
 /* Aggregator impact estimate (GDACS): dashed grey rail, plain surface; visibly not a warning. */
 .ow-item--estimate {
   border-color: var(--border);

@@ -1,6 +1,8 @@
 // Water & tsunami section of the analyst workspace (docs/UX_V3.md section 3.6). Official first (PTWC and
 // BMKG InaTEWS, verbatim), then the relayed flood gauges, then the raw tide gauges and the MODELLED GloFAS
 // river flow, each with its map toggle. Summarised from the data App already loads; nothing is fetched here.
+import { useState } from 'react';
+import type { ReactNode } from 'react';
 import type { OfficialWarning, RiverDischargeSeries, SeaLevelStation } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
 import type { PtwcResult } from '../../lib/ptwc';
@@ -15,6 +17,7 @@ import { formatUtc, formatValue } from '../format';
 import type { MapLayerState } from '../map/layerCatalog';
 import { AnalystSection, AnalystSubhead, KeyFigure } from './AnalystSection';
 import type { SectionSource } from './AnalystSection';
+import { BMKG_AREAS_PREVIEW, bmkgAreasBySeverity, isPtwcInformation } from './waterView';
 
 export interface WaterSectionProps {
   ptwc: PtwcResult;
@@ -22,7 +25,8 @@ export interface WaterSectionProps {
   gauges: GaugeReading[];
   tideStations: SeaLevelStation[];
   tideListRetrievedAt: string | null;
-  riverFlow: FloodModelResult;
+  /** Null until the bundled snapshot or the live run has loaded (moments after first paint). */
+  riverFlow: FloodModelResult | null;
   layers: MapLayerState;
   onLayersChange: (patch: Partial<MapLayerState>) => void;
   onInspectWarning: (id: string) => void;
@@ -53,6 +57,16 @@ export default function WaterSection(p: WaterSectionProps) {
   const tsunami = selectTsunamiAreaWarnings(p.warnings, nowMs);
   const bmkg = tsunami.inForce ?? tsunami.latest;
   const bmkgEnded = bmkg ? isExpired(bmkg, nowMs) : false;
+  const [showAllAreas, setShowAllAreas] = useState(false);
+  const bmkgAreas = bmkg ? bmkgAreasBySeverity(bmkg.areas) : [];
+  const areasShown = showAllAreas ? bmkgAreas : bmkgAreas.slice(0, BMKG_AREAS_PREVIEW);
+  const ptwcInfo = ptwcWarning ? isPtwcInformation(ptwcWarning.level) : false;
+  /** Other official tsunami messages in force (JMA, NWS, PTWC...), by issuer, for the status strip. */
+  const otherActive = new Map<string, number>();
+  for (const w of [...p.warnings, ...(ptwcWarning ? [ptwcWarning] : [])]) {
+    if (w.authority !== 'official' || w.hazard !== 'tsunami' || isExpired(w, nowMs) || w.id === tsunami.inForce?.id) continue;
+    otherActive.set(w.issuer, (otherActive.get(w.issuer) ?? 0) + 1);
+  }
   const relayedGauges = p.gauges.filter((g) => g.situation !== null || gaugeAboveThreshold(g));
   const otherGauges = p.gauges.length - relayedGauges.length;
   const recentStations = p.tideStations.filter((s) => s.lastTimeISO && Date.now() - Date.parse(s.lastTimeISO) < 48 * 3600000).length;
@@ -62,27 +76,16 @@ export default function WaterSection(p: WaterSectionProps) {
     { label: 'NOAA/NWS Pacific Tsunami Warning Center', url: 'https://www.tsunami.gov/', mode: p.ptwc.status.status === 'live' ? 'LIVE' : 'SNAPSHOT', retrievedAt: p.ptwc.status.retrievedAt },
     { label: 'BMKG InaTEWS tsunami messages', url: 'https://inatews.bmkg.go.id/', mode: 'OFFICIAL' },
     { label: 'IOC Sea Level Station Monitoring Facility (VLIZ)', url: 'https://www.ioc-sealevelmonitoring.org/', mode: 'MEASURED', retrievedAt: p.tideListRetrievedAt, licence: 'DOI 10.14284/482' },
-    { label: 'GloFAS river discharge via Open-Meteo Flood API', url: 'https://open-meteo.com/en/docs/flood-api', mode: 'MODELLED', retrievedAt: p.riverFlow.status.retrievedAt, licence: 'CC BY 4.0' },
+    { label: 'GloFAS river discharge via Open-Meteo Flood API', url: 'https://open-meteo.com/en/docs/flood-api', mode: 'MODELLED', retrievedAt: p.riverFlow?.status.retrievedAt ?? null, licence: 'CC BY 4.0' },
     { label: 'ThaiWater (HII), DSDA Jakarta Posko Banjir, PUB Singapore flood alerts', mode: 'OFFICIAL' },
   ];
 
-  return (
-    <AnalystSection
-      id="water"
-      title="Water & tsunami"
-      lede="Official tsunami messages first, relayed verbatim. Then the flood gauges the agencies publish, the raw IOC tide gauges, and the modelled GloFAS river flow. Raw gauges and model output are never warnings; the official word comes from BMKG, PTWC through national authorities, JMA, PHIVOLCS and the national flood agencies."
-      sources={sources}
-    >
-      <div className="an-figures">
-        <KeyFigure label="BMKG tsunami message" value={tsunami.inForce ? 'In force' : 'None in force'} note={tsunami.latest ? `last: ${formatUtc(tsunami.latest.issuedAt)}` : 'no message with areas on file'} />
-        <KeyFigure label="Flood gauges relayed" value={String(relayedGauges.length)} note={`${otherGauges} more below threshold`} />
-        <KeyFigure label="Tide gauges (APAC)" value={String(p.tideStations.length)} note={`${recentStations} reported in the last 48 h at list capture`} />
-        <KeyFigure label="River points (modelled)" value={String(p.riverFlow.series.length)} note={p.riverFlow.status.status === 'live' ? 'live GloFAS run' : 'saved GloFAS run'} />
-      </div>
-
+  // Official tsunami messages first; an in-force BMKG message comes before PTWC's latest product.
+  const ptwcBlock: ReactNode = (
+    <>
       <AnalystSubhead>PTWC: latest product</AnalystSubhead>
       {ptwcWarning ? (
-        <div className={`ow-item ${ptwcEnded ? 'ow-item--ended' : 'ow-item--official'}`}>
+        <div className={`ow-item ${ptwcEnded ? 'ow-item--ended' : ptwcInfo ? 'ow-item--info' : 'ow-item--official'}`}>
           <div className="ow-eyebrow">
             <OfficialTag issuer={ptwcWarning.issuer} authority="official" />
             <ModeBadge mode={ptwcWarning.dataMode} time={ptwcWarning.dataMode === 'historical' ? ptwcWarning.retrievedAt : null} />
@@ -93,7 +96,7 @@ export default function WaterSection(p: WaterSectionProps) {
           </div>
           <p className="ow-headline">{ptwcWarning.headline}</p>
           <p className="ow-meta">{ptwcWarning.issuedAt ? <>Issued {formatUtc(ptwcWarning.issuedAt)}</> : <>No issue time published</>}</p>
-          <p className="ow-meta">{p.ptwc.note}</p>
+          <p className="ow-note">{p.ptwc.note}</p>
           <div className="ow-actions">
             <button type="button" className="link-button" onClick={() => p.onInspectWarning(ptwcWarning.id)}>
               Details
@@ -106,7 +109,10 @@ export default function WaterSection(p: WaterSectionProps) {
       ) : (
         <p className="an-note an-note--official">{p.ptwc.status.message ?? 'Official feed unavailable: check the Pacific Tsunami Warning Center directly'}</p>
       )}
-
+    </>
+  );
+  const bmkgBlock: ReactNode = (
+    <>
       <AnalystSubhead>BMKG InaTEWS: tsunami warning areas</AnalystSubhead>
       {bmkg ? (
         <>
@@ -119,35 +125,80 @@ export default function WaterSection(p: WaterSectionProps) {
               <OfficialLevelChip level={bmkg.level} gloss={bmkg.levelGloss} ended={bmkgEnded} />
               <EndedChip warning={bmkg} nowMs={nowMs} />
             </div>
-            <p className="ow-headline" lang="id">
-              {bmkg.headline}
-            </p>
             <p className="ow-meta">
               Issued {formatUtc(bmkg.issuedAt)} · {bmkg.areas.length} named areas
               {bmkg.observations?.length ? ` · ${bmkg.observations.length} observed heights` : ''}
             </p>
-            <div className="an-table-wrap">
-              <table className="an-table">
-                <caption>Areas as named by BMKG, with their verbatim per-area level.</caption>
-                <thead>
-                  <tr>
-                    <th>Area</th>
-                    <th>Province</th>
-                    <th>Level (verbatim)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bmkg.areas.slice(0, 40).map((a, i) => (
-                    <tr key={`${a.name}-${i}`}>
-                      <td lang="id">{a.name}</td>
-                      <td lang="id">{a.province ?? '—'}</td>
-                      <td lang="id">{a.level ?? 'not stated'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {bmkg.areas.length > 40 && <p className="an-muted">{bmkg.areas.length - 40} more in the message details.</p>}
-            </div>
+            {bmkgEnded ? (
+              <details className="an-ended-details">
+                <summary>Show this ended message verbatim and its {bmkg.areas.length} named areas</summary>
+                <p className="ow-headline" lang="id">
+                  {bmkg.headline}
+                </p>
+                <div className="an-table-wrap">
+                  <table className="an-table an-tsunami-areas">
+                    <caption>Areas as named by BMKG with their verbatim per-area level, most severe level first (our ordering).</caption>
+                    <thead>
+                      <tr>
+                        <th>Area</th>
+                        <th>Province</th>
+                        <th>Level (verbatim)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {areasShown.map((a, i) => (
+                        <tr key={`${a.name}-${i}`}>
+                          <td lang="id">{a.name}</td>
+                          <td lang="id">{a.province ?? '—'}</td>
+                          <td lang="id" className={`an-bmkg-level an-bmkg-level--${(a.level ?? '').trim().toLowerCase() || 'none'}`}>
+                            {a.level ?? 'not stated'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bmkgAreas.length > BMKG_AREAS_PREVIEW && (
+                    <button type="button" className="link-button an-show-all" aria-expanded={showAllAreas} onClick={() => setShowAllAreas((v) => !v)}>
+                      {showAllAreas ? 'Show the most severe only' : `Show all ${bmkgAreas.length} named areas`}
+                    </button>
+                  )}
+                </div>
+              </details>
+            ) : (
+              <>
+                <p className="ow-headline" lang="id">
+                  {bmkg.headline}
+                </p>
+                <div className="an-table-wrap">
+                  <table className="an-table an-tsunami-areas">
+                    <caption>Areas as named by BMKG with their verbatim per-area level, most severe level first (our ordering).</caption>
+                    <thead>
+                      <tr>
+                        <th>Area</th>
+                        <th>Province</th>
+                        <th>Level (verbatim)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {areasShown.map((a, i) => (
+                        <tr key={`${a.name}-${i}`}>
+                          <td lang="id">{a.name}</td>
+                          <td lang="id">{a.province ?? '—'}</td>
+                          <td lang="id" className={`an-bmkg-level an-bmkg-level--${(a.level ?? '').trim().toLowerCase() || 'none'}`}>
+                            {a.level ?? 'not stated'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bmkgAreas.length > BMKG_AREAS_PREVIEW && (
+                    <button type="button" className="link-button an-show-all" aria-expanded={showAllAreas} onClick={() => setShowAllAreas((v) => !v)}>
+                      {showAllAreas ? 'Show the most severe only' : `Show all ${bmkgAreas.length} named areas`}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
             <div className="ow-actions">
               <button type="button" className="link-button" onClick={() => p.onInspectWarning(bmkg.id)}>
                 Details
@@ -172,6 +223,64 @@ export default function WaterSection(p: WaterSectionProps) {
         </>
       ) : (
         <p className="an-note an-note--official">No BMKG InaTEWS message with warning areas is on file. This is not an all-clear: check BMKG directly.</p>
+      )}
+    </>
+  );
+
+  return (
+    <AnalystSection
+      id="water"
+      title="Water & tsunami"
+      lede="Official tsunami messages first, relayed verbatim. Then the flood gauges the agencies publish, the raw IOC tide gauges, and the modelled GloFAS river flow. Raw gauges and model output are never warnings; the official word comes from BMKG, PTWC through national authorities, JMA, PHIVOLCS and the national flood agencies."
+      sources={sources}
+    >
+      <div className={`an-tsunami-status ${tsunami.inForce ? 'an-tsunami-status--active' : ''}`} role="status">
+        <span className="an-tsunami-status__label">BMKG InaTEWS tsunami message</span>
+        {tsunami.inForce ? (
+          <>
+            <span className="an-tsunami-status__head">
+              In force: <OfficialLevelChip level={tsunami.inForce.level} gloss={tsunami.inForce.levelGloss} ended={false} />
+            </span>
+            <span className="an-tsunami-status__meta">
+              Issued {formatUtc(tsunami.inForce.issuedAt)} · {tsunami.inForce.areas.length} named areas · follow BMKG and local authorities
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="an-tsunami-status__head">None in force in the loaded feed</span>
+            <span className="an-tsunami-status__meta">
+              {tsunami.latest ? `Last message with areas: ${formatUtc(tsunami.latest.issuedAt)}, ended. ` : ''}Not an all-clear: check BMKG directly.
+            </span>
+          </>
+        )}
+        {otherActive.size > 0 && (
+          <span className="an-tsunami-status__others">
+            Other official tsunami messages in force:{' '}
+            {[...otherActive.entries()].map(([issuer, n]) => `${issuer} (${n})`).join(', ')}. Listed in Warnings.
+          </span>
+        )}
+      </div>
+
+      <div className="an-figures">
+        <KeyFigure label="Flood gauges relayed" value={String(relayedGauges.length)} note={`${otherGauges} more below threshold`} />
+        <KeyFigure label="Tide gauges (APAC)" value={String(p.tideStations.length)} note={`${recentStations} reported in the last 48 h at list capture`} />
+        <KeyFigure
+          label="River points (modelled)"
+          value={p.riverFlow ? String(p.riverFlow.series.length) : '…'}
+          note={!p.riverFlow ? 'loading GloFAS run' : p.riverFlow.status.status === 'live' ? 'live GloFAS run' : 'saved GloFAS run'}
+        />
+      </div>
+
+      {tsunami.inForce ? (
+        <>
+          {bmkgBlock}
+          {ptwcBlock}
+        </>
+      ) : (
+        <>
+          {ptwcBlock}
+          {bmkgBlock}
+        </>
       )}
 
       <AnalystSubhead>Flood gauges relayed by their agencies</AnalystSubhead>
@@ -217,7 +326,9 @@ export default function WaterSection(p: WaterSectionProps) {
 
       <AnalystSubhead>River flow (modelled, GloFAS)</AnalystSubhead>
       <p className="an-note">{FLOOD_MODEL_NOTE}</p>
-      {p.riverFlow.series.length > 0 ? (
+      {!p.riverFlow ? (
+        <p className="an-muted">Loading the GloFAS river model…</p>
+      ) : p.riverFlow.series.length > 0 ? (
         <div className="an-table-wrap">
           <table className="an-table">
             <caption>
