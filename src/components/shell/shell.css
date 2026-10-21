@@ -980,13 +980,16 @@
   }
 }
 
-/* Beside an open drawer on mid-size screens the map strip is narrow: the map key would cover the top bar,
-   and the alerts pill shows its number only (its title still says what it counts). */
-@media (min-width: 768px) and (max-width: 1199px) {
+/* Beside an open drawer the map strip is narrow: the map key would cover its middle (the drawer's Layers
+   section explains every layer), and on mid-size screens the alerts pill shows its number only (its title
+   still says what it counts). */
+@media (min-width: 768px) {
   .app[data-drawer='open'] .mv-key {
     display: none;
   }
+}
 
+@media (min-width: 768px) and (max-width: 1199px) {
   .app[data-drawer='open'] .alerts-pill__text {
     display: none;
   }
