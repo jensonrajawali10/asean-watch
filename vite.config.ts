@@ -121,7 +121,12 @@ function relayDevApi(path: string, modulePath: string, exportName: string): Plug
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), aiBriefDevApi(), relayDevApi('/api/dsda', '/src/lib/dsdaProxy.ts', 'handleDsdaRequest')],
+  plugins: [
+    react(),
+    aiBriefDevApi(),
+    relayDevApi('/api/dsda', '/src/lib/dsdaProxy.ts', 'handleDsdaRequest'),
+    relayDevApi('/api/open-meteo', '/src/lib/openMeteoProxy.ts', 'handleOpenMeteoRequest'),
+  ],
   // Bundled geometry and real-data snapshots are intentional: the app must work offline.
   build: {
     chunkSizeWarningLimit: 1600,

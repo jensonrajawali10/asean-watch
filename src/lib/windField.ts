@@ -2,12 +2,15 @@
 // Grid: 1° over lat -6..8, lon 95..120 (15 x 26 = 390 points, one multi-location request; verified live
 // 2026-10-13 08:32 UTC: HTTP 200, ~0.9 MB, ~3 s). Wind at 10 m: peat smoke is a surface (boundary-layer)
 // plume, so 10 m is the drift wind for haze, and it is the level NEA measures in Singapore.
-// loadWindField(): live first (timeout, in-flight dedupe, memory cache), then the bundled snapshot
-// data/wind-snapshot.json (dataMode "historical"). Never throws.
+// loadWindField(): live first through the same-origin relay /api/open-meteo?feed=wind (src/lib/openMeteoRelay.ts;
+// timeout, in-flight dedupe, memory cache, backoff), then the bundled snapshot data/wind-snapshot.json
+// (dataMode "historical"). Never throws.
 // Two levels: '10m' (default; the trajectory logic in transport.ts) and '925hPa' (about 750 m, the
 // lower boundary layer that carries a regional smoke plume; the default for the animated particles).
 // Variable names verified live 2026-10-14: wind_speed_925hPa / wind_direction_925hPa, unit m/s.
 // The 925 hPa snapshot is data/wind925-snapshot.json (scripts/capture-wind-snapshot.mjs 925hPa).
+
+import { fetchOpenMeteoRelay, OpenMeteoRelayError, type OpenMeteoRelayPayload } from './openMeteoRelay';
 
 export const WIND_GRID_SPEC = { minLat: -6, maxLat: 8, minLon: 95, maxLon: 120, stepDeg: 1 } as const;
 export const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -24,6 +27,13 @@ export const WIND_LEVELS: Record<WindLevel, { speedVar: string; dirVar: string; 
 export const PARTICLE_WIND_LEVEL: WindLevel = '925hPa';
 export const WIND_CACHE_TTL_MS = 30 * 60 * 1000;
 export const WIND_BACKOFF_MS = 5 * 60 * 1000;
+/**
+ * The levels the relay asks for in ONE request. Open-Meteo counts a multi-location request once per
+ * location whatever its variables (up to 10), so batching both levels halves the cost of the grid.
+ */
+export const WIND_RELAY_LEVELS: readonly WindLevel[] = ['10m', '925hPa'];
+/** Client timeout for the relay: above a cold relay's upstream fetch of the 390-point grid. */
+export const WIND_RELAY_TIMEOUT_MS = 15000;
 
 export interface WindGrid {
   /** Ascending latitudes (degrees). */
@@ -79,14 +89,15 @@ export function gridAxes(spec: { minLat: number; maxLat: number; minLon: number;
   return { lats: axis(spec.minLat, spec.maxLat), lons: axis(spec.minLon, spec.maxLon) };
 }
 
-/** The one multi-location request: points in row-major order (lat outer, lon inner). */
+/** The one multi-location request: points in row-major order (lat outer, lon inner), one or more levels. */
 export function buildWindUrl(
   lats: number[] = gridAxes().lats,
   lons: number[] = gridAxes().lons,
   forecastDays = 3,
-  level: WindLevel = '10m',
+  level: WindLevel | readonly WindLevel[] = '10m',
 ): string {
-  const { speedVar, dirVar } = WIND_LEVELS[level];
+  const levels: readonly WindLevel[] = typeof level === 'string' ? [level] : level;
+  const vars = levels.flatMap((l) => [WIND_LEVELS[l].speedVar, WIND_LEVELS[l].dirVar]).join(',');
   const la: number[] = [];
   const lo: number[] = [];
   for (const lat of lats) for (const lon of lons) {
@@ -95,7 +106,7 @@ export function buildWindUrl(
   }
   return (
     `${OPEN_METEO_FORECAST_URL}?latitude=${la.join(',')}&longitude=${lo.join(',')}` +
-    `&hourly=${speedVar},${dirVar}&wind_speed_unit=ms&past_days=1&forecast_days=${forecastDays}&timezone=GMT`
+    `&hourly=${vars}&wind_speed_unit=ms&past_days=1&forecast_days=${forecastDays}&timezone=GMT`
   );
 }
 
@@ -234,11 +245,13 @@ export async function loadWindSnapshot(level: WindLevel = '10m'): Promise<WindGr
 }
 
 // ---------------------------------------------------------------------------
-// Live loading with cache, in-flight dedupe and backoff (pattern from nea.ts). Caches are per level;
-// the rate-limit backoff is shared (Open-Meteo limits per client, not per variable).
+// Live loading through the relay, with cache, in-flight dedupe and backoff (pattern from nea.ts). One
+// relay answer carries both levels, so concurrent loads of the two levels share one request. Caches are
+// per level; the backoff is shared.
 
 const inflight: Partial<Record<WindLevel, Promise<WindLoadResult>>> = {};
 const memoryCache: Partial<Record<WindLevel, { grid: WindGrid; at: number }>> = {};
+let relayInflight: Promise<OpenMeteoRelayPayload> | null = null;
 let backoffUntil = 0;
 
 export function resetWindCache(): void {
@@ -246,6 +259,7 @@ export function resetWindCache(): void {
     delete inflight[k];
     delete memoryCache[k];
   }
+  relayInflight = null;
   backoffUntil = 0;
 }
 
@@ -260,28 +274,40 @@ async function snapshotResult(message: string, level: WindLevel): Promise<WindLo
       };
 }
 
-async function loadLive(level: WindLevel, timeoutMs: number, fetchImpl: typeof fetch, now: () => number): Promise<WindLoadResult> {
-  const axes = gridAxes();
+/** The relay's wind answer (both levels), shared by concurrent callers; it owns its own timeout. */
+function windRelay(timeoutMs: number, fetchImpl: typeof fetch): Promise<OpenMeteoRelayPayload> {
+  if (relayInflight) return relayInflight;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const p = fetchOpenMeteoRelay('wind', fetchImpl, controller.signal)
+    .catch((err: unknown) => {
+      throw controller.signal.aborted ? new Error(`timed out after ${timeoutMs} ms`) : err;
+    })
+    .finally(() => {
+      clearTimeout(timer);
+      relayInflight = null;
+    });
+  relayInflight = p;
+  return p;
+}
+
+async function loadLive(level: WindLevel, timeoutMs: number, fetchImpl: typeof fetch, now: () => number): Promise<WindLoadResult> {
   try {
-    const res = await fetchImpl(buildWindUrl(axes.lats, axes.lons, 3, level), { signal: controller.signal });
-    if (res.status === 429) {
-      backoffUntil = now() + WIND_BACKOFF_MS;
-      return await snapshotResult('Open-Meteo rate limit reached; showing the bundled wind snapshot.', level);
-    }
-    if (!res.ok) return await snapshotResult(`Open-Meteo returned HTTP ${res.status}; showing the bundled wind snapshot.`, level);
-    const json: unknown = await res.json();
-    const retrievedAt = new Date(now()).toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const grid = normaliseOpenMeteoWind(json, axes, retrievedAt, 'live', level);
+    const payload = await windRelay(timeoutMs, fetchImpl);
+    const grid = normaliseOpenMeteoWind(payload.raw, gridAxes(), payload.retrievedAt, 'live', level);
     if (!grid) return await snapshotResult('Open-Meteo response was not in the expected shape; showing the bundled wind snapshot.', level);
+    // A copy the relay serves because Open-Meteo is failing is shown, but not cached here.
+    if (payload.stale) return { grid, status: 'cached', message: `Open-Meteo is not answering; showing the model run retrieved ${payload.retrievedAt}.` };
     memoryCache[level] = { grid, at: now() };
     return { grid, status: 'live', message: null };
   } catch (err) {
-    const why = controller.signal.aborted ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err);
+    if (err instanceof OpenMeteoRelayError && (err.status === 429 || err.status === 503)) {
+      backoffUntil = now() + Math.min(err.retryAfterMs ?? WIND_BACKOFF_MS, WIND_BACKOFF_MS);
+      return await snapshotResult(`Open-Meteo is busy (${err.message}); showing the bundled wind snapshot.`, level);
+    }
+    if (err instanceof OpenMeteoRelayError) return await snapshotResult(`The Open-Meteo relay returned HTTP ${err.status}; showing the bundled wind snapshot.`, level);
+    const why = err instanceof Error ? err.message : String(err);
     return await snapshotResult(`Open-Meteo unavailable (${why}); showing the bundled wind snapshot.`, level);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -304,7 +330,7 @@ export async function loadWindField(opts?: {
     if (!fetchImpl) return await snapshotResult('No fetch available; showing the bundled wind snapshot.', level);
     let p = inflight[level];
     if (!p) {
-      p = loadLive(level, opts?.timeoutMs ?? 8000, fetchImpl, now).finally(() => {
+      p = loadLive(level, opts?.timeoutMs ?? WIND_RELAY_TIMEOUT_MS, fetchImpl, now).finally(() => {
         delete inflight[level];
       });
       inflight[level] = p;

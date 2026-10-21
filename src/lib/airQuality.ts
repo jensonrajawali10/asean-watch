@@ -3,8 +3,10 @@
 // One multi-location request: the 1° wind grid (WIND_GRID_SPEC, 390 points, row-major lat outer) followed
 // by AQ_PLACES. Verified live 2026-10-14 07:10 UTC: HTTP 200, CORS *, ~1 MB, ~1.8 s, hourly pm2_5 in
 // "μg/m³", no nulls. past_days=1 and forecast_days=3 so the scrubber's now −24 h … +48 h is always covered.
-// loadAirQuality(): memory cache → localStorage cache → live → stale cache → bundled snapshot
+// loadAirQuality(): memory cache → localStorage cache → live (through the same-origin relay
+// /api/open-meteo?feed=aq, src/lib/openMeteoRelay.ts) → stale cache → bundled snapshot
 // data/aq-snapshot.json (dataMode "historical", stored every 3 h). Never throws.
+import { fetchOpenMeteoRelay, OpenMeteoRelayError } from './openMeteoRelay';
 import { gridAxes, sampleRegular, timeWeights } from './windField';
 
 export const AQ_API_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
@@ -20,6 +22,8 @@ export const AQ_CACHE_TTL_MS = 30 * 60 * 1000;
 /** A stored live response older than this is not used as a fallback. */
 export const AQ_STALE_MAX_MS = 6 * 60 * 60 * 1000;
 export const AQ_BACKOFF_MS = 5 * 60 * 1000;
+/** Client timeout for the relay: above a cold relay's upstream fetch of the grid and places. */
+export const AQ_RELAY_TIMEOUT_MS = 15000;
 export const AQ_CACHE_KEY = 'asean-watch:aq:v1';
 /** Scrubber window around "now" and its step. */
 export const SCRUB_PAST_H = 24;
@@ -528,20 +532,21 @@ async function loadLive(timeoutMs: number, fetchImpl: typeof fetch, now: () => n
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(buildAqUrl(axes, AQ_PLACES), { signal: controller.signal });
-    if (res.status === 429) {
-      backoffUntil = now() + AQ_BACKOFF_MS;
-      return await fallbackResult('Open-Meteo air-quality rate limit reached.', now());
-    }
-    if (!res.ok) return await fallbackResult(`Open-Meteo air quality returned HTTP ${res.status}.`, now());
-    const json: unknown = await res.json();
-    const retrievedAt = new Date(now()).toISOString().replace(/\.\d{3}Z$/, 'Z');
-    const data = normaliseOpenMeteoAq(json, axes, AQ_PLACES, retrievedAt, 'live');
+    // The relay fetches buildAqUrl(gridAxes(), AQ_PLACES) and returns Open-Meteo's answer as received.
+    const payload = await fetchOpenMeteoRelay('aq', fetchImpl, controller.signal);
+    const data = normaliseOpenMeteoAq(payload.raw, axes, AQ_PLACES, payload.retrievedAt, 'live');
     if (!data) return await fallbackResult('Open-Meteo air-quality response was not in the expected shape.', now());
+    // A copy the relay serves because Open-Meteo is failing is shown, but not cached here.
+    if (payload.stale) return { data, status: 'cached', message: `Open-Meteo is not answering. Showing the model run retrieved ${payload.retrievedAt}.` };
     memoryCache = { data, at: now() };
     writeStored(data, now());
     return { data, status: 'live', message: null };
   } catch (err) {
+    if (err instanceof OpenMeteoRelayError && (err.status === 429 || err.status === 503)) {
+      backoffUntil = now() + Math.min(err.retryAfterMs ?? AQ_BACKOFF_MS, AQ_BACKOFF_MS);
+      return await fallbackResult(`Open-Meteo air quality is busy (${err.message}).`, now());
+    }
+    if (err instanceof OpenMeteoRelayError) return await fallbackResult(`The Open-Meteo relay returned HTTP ${err.status}.`, now());
     const why = controller.signal.aborted ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err);
     return await fallbackResult(`Open-Meteo air quality unavailable (${why}).`, now());
   } finally {
@@ -565,7 +570,7 @@ export async function loadAirQuality(opts?: { timeoutMs?: number; fetchImpl?: ty
     const fetchImpl = opts?.fetchImpl ?? (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
     if (!fetchImpl) return await fallbackResult('No fetch available.', now());
     if (!inflight) {
-      inflight = loadLive(opts?.timeoutMs ?? 10_000, fetchImpl, now).finally(() => {
+      inflight = loadLive(opts?.timeoutMs ?? AQ_RELAY_TIMEOUT_MS, fetchImpl, now).finally(() => {
         inflight = null;
       });
     }
