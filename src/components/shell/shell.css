@@ -453,6 +453,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.alerts-pill__short {
+  display: none;
+}
+
+.headline-local {
+  color: var(--text);
+}
+
 .alerts-pill.is-empty {
   color: var(--text-muted);
 }
@@ -895,6 +903,10 @@
 
   .alerts-pill__text {
     display: none;
+  }
+
+  .alerts-pill__short {
+    display: inline;
   }
 
   .ws-drawer {

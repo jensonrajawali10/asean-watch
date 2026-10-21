@@ -8,6 +8,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { WarningIcon, LayersIcon } from './shell/icons';
 import { applyDetail, useDetailMode } from '../lib/detailMode';
+import { localTimeLabel } from './localTime';
 
 export type Theme = 'dark' | 'light';
 /** localStorage key; index.html's pre-paint script reads the same key. */
@@ -123,6 +124,7 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
           {timeLabel && (
             <span>
               Map shows <time dateTime={timeISO ?? undefined}>{timeLabel}</time>
+              {localTimeLabel(timeISO) && <span className="headline-local"> ({localTimeLabel(timeISO)})</span>}
             </span>
           )}
           {freshness && (
@@ -165,6 +167,10 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
         >
           <WarningIcon size={16} />
           <span className="alerts-pill__count">{alerts.count}</span>
+          {/* Phones hide the long words: the number still says what it counts. */}
+          <span className="alerts-pill__short" aria-hidden="true">
+            {alerts.count === 1 ? 'alert' : 'alerts'}
+          </span>
           <span className="alerts-pill__text">
             {/* The red pill already signals urgency; the words say what the alerts are, plus "urgent" when one is. */}
             {alerts.urgent ? `${alerts.label} (incl. urgent)` : alerts.label}

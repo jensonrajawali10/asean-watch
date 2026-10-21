@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import AppHeader from './AppHeader';
+import { localTimeLabel } from './localTime';
 
 describe('AppHeader first-load legend', () => {
   it('says what each symbol means without opening anything, and that the circles are modelled', () => {
@@ -65,5 +66,34 @@ describe('AppHeader time and freshness', () => {
     expect(render('LIVE')).toMatch(/>LIVE<span class="fresh-chip__run"> · fetched 21 Oct 12:55 UTC<\/span>/);
     expect(render('SNAPSHOT')).toMatch(/>SNAPSHOT<span class="fresh-chip__run"> · saved 21 Oct 12:55 UTC<\/span>/);
     expect(render('LIVE')).toContain('Not an official warning service: follow your national agency.');
+  });
+});
+
+describe('localTimeLabel', () => {
+  it("gives the map hour on the visitor's own clock, with its weekday (which can differ from the UTC day)", () => {
+    expect(localTimeLabel('2026-10-21T12:00:00Z', 'Asia/Makassar')).toBe('Wed 8:00 pm your time');
+    expect(localTimeLabel('2026-10-21T21:00:00Z', 'Asia/Jakarta')).toBe('Thu 4:00 am your time');
+    expect(localTimeLabel('2026-10-21T12:00:00Z', 'UTC')).toBe('Wed 12:00 pm your time');
+    expect(localTimeLabel(null)).toBeNull();
+    expect(localTimeLabel('not a time')).toBeNull();
+    expect(localTimeLabel('2026-10-21T12:00:00Z', 'Not/AZone')).toBeNull();
+  });
+});
+
+describe('AppHeader alerts pill on phones', () => {
+  it('carries a short word after the number for the phone layout', () => {
+    const html = renderToStaticMarkup(
+      createElement(AppHeader, {
+        headline: 'x',
+        timeLabel: null,
+        timeISO: null,
+        freshness: null,
+        alerts: { count: 47, urgent: false, label: 'official alerts in force: floods' },
+        onAlerts: () => {},
+        workspaceOpen: false,
+        onWorkspace: () => {},
+      }),
+    );
+    expect(html).toContain('<span class="alerts-pill__count">47</span><span class="alerts-pill__short" aria-hidden="true">alerts</span>');
   });
 });
