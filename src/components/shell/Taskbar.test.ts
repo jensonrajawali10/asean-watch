@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import Taskbar from './Taskbar';
+import { RAIL_HINT_TEXT, RAIL_HINT_TITLE, railHintShown } from './railHint';
 import { SECTIONS } from './workspace';
 
 describe('Taskbar hints', () => {
@@ -12,5 +13,23 @@ describe('Taskbar hints', () => {
       expect(html).toContain(`aria-describedby="taskbar-${s.id}-hint"`);
     }
     expect(html).toContain('Fires seen by satellites');
+  });
+});
+
+describe('Taskbar first-visit callout', () => {
+  it('says what the rail buttons open on a first visit, with the map in front', () => {
+    const html = renderToStaticMarkup(createElement(Taskbar, { active: null, onOpen: () => {}, onMap: () => {} }));
+    expect(html).toContain('class="rail-callout"');
+    expect(html).toContain(RAIL_HINT_TITLE);
+    expect(html).toContain(RAIL_HINT_TEXT);
+    expect(html).toContain('Got it');
+  });
+
+  it('is gone once dismissed, and while a section is open', () => {
+    expect(railHintShown(false, null)).toBe(true);
+    expect(railHintShown(true, null)).toBe(false);
+    expect(railHintShown(false, 'warnings')).toBe(false);
+    const html = renderToStaticMarkup(createElement(Taskbar, { active: 'haze', onOpen: () => {}, onMap: () => {} }));
+    expect(html).not.toContain('rail-callout');
   });
 });

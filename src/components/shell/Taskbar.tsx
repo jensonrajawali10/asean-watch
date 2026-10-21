@@ -1,7 +1,12 @@
 // The slim icon rail on the left edge of map mode (docs/UX_V3.md section 2). Map closes the workspace;
 // every other icon opens its section in the drawer. Always visible; a horizontal bar on phones (shell.css).
 // Each button carries its name for assistive tech and a tooltip for everyone else.
+// First visit (desktop): a one-time callout beside the rail says what the buttons open, because hover hints
+// do not show in a still view and the rail read as decoration. It goes away for good on "Got it" or as soon
+// as any section is opened.
+import { useEffect, useState } from 'react';
 import { MapIcon, SECTION_ICONS } from './icons';
+import { markRailHintSeen, RAIL_HINT_TEXT, RAIL_HINT_TITLE, railHintSeen, railHintShown } from './railHint';
 import { SECTIONS } from './workspace';
 import type { SectionId } from './workspace';
 
@@ -20,6 +25,12 @@ export function taskbarButtonId(section: SectionId | 'map'): string {
 }
 
 export default function Taskbar({ active, onOpen, onMap, alerts = null }: TaskbarProps) {
+  const [seen, setSeen] = useState(() => (typeof window === 'undefined' ? false : railHintSeen()));
+  // Opening any section (from the rail, the alerts pill or a card) counts as having found the rail.
+  if (!seen && active !== null) setSeen(true);
+  useEffect(() => {
+    if (seen) markRailHintSeen();
+  }, [seen]);
   return (
     <nav className="taskbar" aria-label="Workspace sections">
       <ul className="taskbar__list">
@@ -67,6 +78,16 @@ export default function Taskbar({ active, onOpen, onMap, alerts = null }: Taskba
           );
         })}
       </ul>
+      {railHintShown(seen, active) && (
+        <aside className="rail-callout" aria-label="What the buttons on the left open">
+          <p>
+            <strong>{RAIL_HINT_TITLE}</strong> {RAIL_HINT_TEXT}
+          </p>
+          <button type="button" className="rail-callout__ok" onClick={() => setSeen(true)}>
+            Got it
+          </button>
+        </aside>
+      )}
     </nav>
   );
 }

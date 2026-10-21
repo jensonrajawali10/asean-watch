@@ -86,10 +86,110 @@
 }
 
 .taskbar__label {
+  color: var(--text);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.1;
+}
+
+/* Desktop rail: each icon sits on a small tile, so the rail reads as buttons even in a still view. */
+@media (min-width: 768px) {
+  .taskbar__btn > svg {
+    box-sizing: content-box;
+    padding: 4px 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    transition:
+      border-color 120ms ease-out,
+      background-color 120ms ease-out;
+  }
+
+  .taskbar__btn:hover > svg {
+    border-color: var(--accent-edge-hover);
+    background: var(--selected-bg);
+  }
+
+  .taskbar__btn.is-active > svg {
+    border-color: var(--accent);
+    background: var(--selected-bg);
+  }
+}
+
+/* First-visit callout beside the rail (Taskbar.tsx), below the headline card. Desktop only. */
+.rail-callout {
+  display: none;
+}
+
+@media (min-width: 768px) and (min-height: 600px) {
+  .rail-callout {
+    position: absolute;
+    z-index: 55;
+    top: calc(var(--header-offset, 180px) + 20px);
+    left: calc(100% + 14px);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 250px;
+    padding: 10px 12px;
+    border: 1px solid var(--accent-edge);
+    border-radius: var(--radius);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    color: var(--text-muted);
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  /* The arrow points at the rail. */
+  .rail-callout::before {
+    content: '';
+    position: absolute;
+    top: 18px;
+    left: -7px;
+    width: 12px;
+    height: 12px;
+    border-bottom: 1px solid var(--accent-edge);
+    border-left: 1px solid var(--accent-edge);
+    background: var(--panel);
+    transform: rotate(45deg);
+  }
+
+  .rail-callout p {
+    margin: 0;
+  }
+
+  .rail-callout strong {
+    display: block;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .rail-callout__ok {
+    min-height: 28px;
+    padding: 2px 12px;
+    border: 1px solid var(--accent-edge);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .rail-callout__ok:hover {
+    border-color: var(--accent-edge-hover);
+  }
+
+  .rail-callout__ok:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
 }
 
 .taskbar__badge {
