@@ -119,7 +119,7 @@ The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). The UX rules 
 
 ## Architecture
 
-There is no database. The site is static, with two Vercel functions. `api/ai-brief.ts` calls the Claude API for the grounded summary, keeping the key server-side. `api/ptwc.ts` proxies PTWC's feed. The UI is a full-screen MapLibre and deck.gl map (`src/components/map/`), a taskbar and workspace drawer (`src/components/shell/`) and the workspace sections (`src/components/analyst/`). Data flow:
+There is no database. The site is static, with three Vercel functions. `api/ai-brief.ts` calls the Claude API for the grounded summary, keeping the key server-side. `api/ptwc.ts` proxies PTWC's feed. `api/dsda.ts` relays Jakarta DSDA's floodgate XML, because browsers reject DSDA's certificate; it keeps TLS verification on, so the app shows the HISTORICAL snapshot until DSDA fixes the certificate. The UI is a full-screen MapLibre and deck.gl map (`src/components/map/`), a taskbar and workspace drawer (`src/components/shell/`) and the workspace sections (`src/components/analyst/`). Data flow:
 
 ```
 refresh scripts → data/real/*.json, data/watches.json (snapshot, bundled at build)

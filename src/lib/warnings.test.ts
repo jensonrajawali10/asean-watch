@@ -5,6 +5,7 @@ import { dataGovSgBackoffUntil, markDataGovSgRateLimited, resetNeaCache } from '
 import { deriveReview } from './reviewRules';
 import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from './magmaLevels';
 import * as warningsModule from './warnings';
+import { DSDA_RELAY_PATH, DSDA_XML_URL } from './dsdaRelay';
 import warningsSource from './warnings.ts?raw';
 import mapViewSource from '../components/map/MapView.tsx?raw';
 import {
@@ -34,6 +35,7 @@ import {
   parseNwsAlerts,
   parsePubFlood,
   parseThaiWater,
+  relayedDsda,
   resetWarningsCache,
   warningsNear,
   wibToUtc,
@@ -789,7 +791,7 @@ function replies(): Map<string, Reply> {
     [FEEDS.nws.url, { body: NWS_EMPTY }],
     [FEEDS.gdacs.url, { body: GDACS }],
     [FEEDS.thaiwater.url, { body: THAIWATER }],
-    [FEEDS.dsda.url, { text: DSDA_XML }],
+    [DSDA_RELAY_PATH, { body: { available: true, url: DSDA_XML_URL, retrievedAt: '2026-10-13T07:15:00Z', xml: DSDA_XML } }],
     [FEEDS.pub.url, { body: PUB_EMPTY }],
   ]);
 }
@@ -920,6 +922,38 @@ describe('loadOfficialWarnings', () => {
     const r3 = await loadOfficialWarnings({ fetchImpl: third.fn });
     expect(third.calls.some((u) => u.startsWith(FEEDS.gdacs.url))).toBe(true);
     expect(statusOf(r3.feeds, 'gdacs').status).toBe('live');
+  });
+
+  it('reads Jakarta DSDA through the same-origin relay, never from the browser directly', async () => {
+    const { fn, calls } = fakeFetch();
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    expect(calls).toContain(DSDA_RELAY_PATH);
+    expect(calls.some((u) => u.includes('dsdadki.web.id'))).toBe(false);
+    const s = statusOf(r.feeds, 'dsda-jakarta');
+    expect(s.status).toBe('live');
+    // The time the relay fetched the XML upstream, not the time the browser read the relay.
+    expect(s.retrievedAt).toBe('2026-10-13T07:15:00Z');
+    expect(r.gauges.filter((g) => g.id.startsWith('dsda-jakarta:')).every((g) => g.retrievedAt === '2026-10-13T07:15:00Z')).toBe(true);
+  });
+
+  it("shows the relay reason beside the HISTORICAL snapshot while DSDA's certificate is untrusted", async () => {
+    const { fn } = fakeFetch({
+      [DSDA_RELAY_PATH]: { body: { available: false, url: DSDA_XML_URL, checkedAt: '2026-10-21T12:00:00Z', reason: 'certificate', message: 'x' } },
+    });
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    const s = statusOf(r.feeds, 'dsda-jakarta');
+    expect(s.status).toBe('snapshot');
+    expect(s.message).toMatch(
+      /^Live feed unavailable \(DSDA's website shows a security certificate that cannot be verified, so its data cannot be trusted in transit\); showing the bundled snapshot captured \S+Z\. Check Dinas Sumber Daya Air DKI Jakarta \(Posko Banjir DSDA\) directly for current messages\.$/,
+    );
+    expect(r.gauges.filter((g) => g.id.startsWith('dsda-jakarta:')).every((g) => g.dataMode === 'historical')).toBe(true);
+  });
+
+  it('relayedDsda: only the fixed reasons reach the visitor', () => {
+    expect(() => relayedDsda({ available: false, reason: 'certificate', message: 'upstream detail' })).toThrow(/^DSDA's website shows a security certificate/);
+    expect(() => relayedDsda({ available: false, reason: 'made-up', message: 'upstream detail' })).toThrow('the DSDA relay did not return floodgate data');
+    expect(() => relayedDsda('<xml/>')).toThrow('the DSDA relay answer was not in the expected shape');
+    expect(relayedDsda({ available: true, retrievedAt: '2026-10-21T12:00:00Z', xml: '<x/>' })).toMatchObject({ raw: '<x/>', retrievedAt: '2026-10-21T12:00:00Z' });
   });
 
   it('PUB shares the data.gov.sg backoff with the NEA layer, both ways', async () => {

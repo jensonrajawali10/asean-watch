@@ -78,9 +78,50 @@ function aiBriefDevApi(): Plugin {
   }
 }
 
+/** A GET relay handler as exported by src/lib/*Proxy.ts (loaded through Vite SSR). */
+type RelayHandler = (request: Request, ctx: { clientIp: string }) => Promise<Response>
+
+/**
+ * Local dev only: mounts a same-origin GET relay (the same handler as its Vercel Function in api/) so
+ * `vite dev` reads the same relayed feeds as production instead of falling back to the snapshots.
+ */
+function relayDevApi(path: string, modulePath: string, exportName: string): Plugin {
+  return {
+    name: `asean-watch:relay-dev-api:${path}`,
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(path, (req, res) => {
+        void (async () => {
+          try {
+            const headers = new Headers()
+            for (const [name, value] of Object.entries(req.headers)) {
+              if (Array.isArray(value)) value.forEach((v) => headers.append(name, v))
+              else if (value !== undefined) headers.set(name, value)
+            }
+            const request = new Request(new URL(req.originalUrl ?? path, `http://${req.headers.host ?? 'localhost'}`), {
+              method: req.method ?? 'GET',
+              headers,
+            })
+            const mod = (await server.ssrLoadModule(modulePath)) as Record<string, RelayHandler>
+            const response = await mod[exportName](request, { clientIp: req.socket.remoteAddress ?? 'local' })
+            res.statusCode = response.status
+            response.headers.forEach((value, name) => res.setHeader(name, value))
+            res.end(Buffer.from(await response.arrayBuffer()))
+          } catch (err) {
+            server.config.logger.error(`${path} dev middleware: ${err instanceof Error ? err.message : String(err)}`)
+            res.statusCode = 500
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.end(JSON.stringify({ error: 'internal_error' }))
+          }
+        })()
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), aiBriefDevApi()],
+  plugins: [react(), aiBriefDevApi(), relayDevApi('/api/dsda', '/src/lib/dsdaProxy.ts', 'handleDsdaRequest')],
   // Bundled geometry and real-data snapshots are intentional: the app must work offline.
   build: {
     chunkSizeWarningLimit: 1600,

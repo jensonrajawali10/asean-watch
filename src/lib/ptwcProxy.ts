@@ -5,6 +5,10 @@
 // The client sends no URL and no parameters (any query string is refused). Same-site requests only,
 // a per-IP rate limit, a 60 s upstream cache and short cache headers. It returns the two documents
 // as received; parsing happens in src/lib/ptwc.ts.
+import { clientIpFrom, json, makeRateLimiter, sameSite } from './proxyCommon';
+
+export { clientIpFrom };
+
 export const PTWC_ATOM_URL = 'https://www.tsunami.gov/events/xml/PHEBAtom.xml';
 export const PTWC_ALLOWED_HOST = 'www.tsunami.gov';
 const CAP_PATH = /^\/events\/PHEB\/\d{4}\/\d{2}\/\d{2}\/[0-9A-Za-z]+\/\d+\/[0-9A-Za-z]+\/PHEBCAP\.xml$/;
@@ -58,46 +62,12 @@ export function capUrlFromAtom(atom: string): string | null {
   return null;
 }
 
-const hits = new Map<string, number[]>();
+const limiter = makeRateLimiter(PTWC_RATE_LIMIT_MAX, PTWC_RATE_LIMIT_WINDOW_MS);
 let upstream: { at: number; payload: PtwcPayload } | null = null;
 
 export function resetPtwcProxyState(): void {
-  hits.clear();
+  limiter.reset();
   upstream = null;
-}
-
-function rateLimit(ip: string, now: number): number {
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < PTWC_RATE_LIMIT_WINDOW_MS);
-  if (recent.length >= PTWC_RATE_LIMIT_MAX) {
-    hits.set(ip, recent);
-    return Math.max(1, Math.ceil((PTWC_RATE_LIMIT_WINDOW_MS - (now - recent[0])) / 1000));
-  }
-  recent.push(now);
-  hits.set(ip, recent);
-  if (hits.size > 5000) hits.clear();
-  return 0;
-}
-
-/** Same-site only: Sec-Fetch-Site (when sent) must be same-origin/none; Origin (when sent) must match Host. */
-function sameSite(request: Request): boolean {
-  const site = request.headers.get('sec-fetch-site');
-  if (site && site !== 'same-origin' && site !== 'none') return false;
-  const origin = request.headers.get('origin');
-  if (!origin) return true;
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-  if (!host) return false;
-  try {
-    return new URL(origin).host.toLowerCase() === host.split(',')[0].trim().toLowerCase();
-  } catch {
-    return false;
-  }
-}
-
-function json(status: number, body: unknown, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'x-content-type-options': 'nosniff', ...extra },
-  });
 }
 
 async function fetchText(fetchImpl: typeof fetch, url: string, timeoutMs: number): Promise<string> {
@@ -119,7 +89,7 @@ export async function handlePtwcRequest(request: Request, ctx: PtwcContext): Pro
     const url = new URL(request.url);
     if (url.search !== '') return json(400, { error: 'bad_request', message: 'This endpoint takes no parameters.' });
     if (!sameSite(request)) return json(403, { error: 'forbidden', message: 'Cross-site requests are not accepted.' });
-    const retryAfter = rateLimit(ctx.clientIp || 'unknown', now());
+    const retryAfter = limiter.check(ctx.clientIp || 'unknown', now());
     if (retryAfter > 0) return json(429, { error: 'rate_limited', retryAfterSeconds: retryAfter }, { 'retry-after': String(retryAfter) });
 
     if (!upstream || now() - upstream.at >= PTWC_UPSTREAM_CACHE_MS || now() < upstream.at) {
@@ -144,10 +114,4 @@ export async function handlePtwcRequest(request: Request, ctx: PtwcContext): Pro
   } catch (err) {
     return json(502, { error: 'upstream_unavailable', message: err instanceof Error ? err.message : 'upstream failed' }, { 'cache-control': 'no-store' });
   }
-}
-
-export function clientIpFrom(headers: Headers, fallback = 'unknown'): string {
-  const fwd = headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0].trim() || fallback;
-  return headers.get('x-real-ip')?.trim() || fallback;
 }
