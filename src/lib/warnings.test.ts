@@ -6,6 +6,7 @@ import { deriveReview } from './reviewRules';
 import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from './magmaLevels';
 import * as warningsModule from './warnings';
 import { DSDA_RELAY_PATH, DSDA_XML_URL } from './dsdaRelay';
+import { sgRelayUrl } from './sgRelay';
 import warningsSource from './warnings.ts?raw';
 import mapViewSource from '../components/map/MapView.tsx?raw';
 import {
@@ -792,7 +793,7 @@ function replies(): Map<string, Reply> {
     [FEEDS.gdacs.url, { body: GDACS }],
     [FEEDS.thaiwater.url, { body: THAIWATER }],
     [DSDA_RELAY_PATH, { body: { available: true, url: DSDA_XML_URL, retrievedAt: '2026-10-13T07:15:00Z', xml: DSDA_XML } }],
-    [FEEDS.pub.url, { body: PUB_EMPTY }],
+    [sgRelayUrl('flood-alerts'), { body: { available: true, feed: 'flood-alerts', retrievedAt: '2026-10-13T07:30:00Z', stale: false, raw: PUB_EMPTY } }],
   ]);
 }
 
@@ -960,15 +961,39 @@ describe('loadOfficialWarnings', () => {
     markDataGovSgRateLimited('rate limited');
     const { fn, calls } = fakeFetch();
     const r = await loadOfficialWarnings({ fetchImpl: fn });
-    expect(calls.includes(FEEDS.pub.url)).toBe(false);
+    expect(calls.includes(sgRelayUrl('flood-alerts'))).toBe(false);
     expect(statusOf(r.feeds, 'pub-flood').message).toContain('data.gov.sg rate limited; retrying live after');
 
+    // The relay says data.gov.sg is throttling it: the shared backoff starts.
     resetNeaCache();
     resetWarningsCache();
     expect(dataGovSgBackoffUntil()).toBeNull();
-    const limited = fakeFetch({ [FEEDS.pub.url]: { status: 429 } });
-    await loadOfficialWarnings({ fetchImpl: limited.fn });
+    const throttled = { available: false, feed: 'flood-alerts', checkedAt: '2026-10-13T07:30:00Z', reason: 'rate_limited', message: 'x' };
+    const limited = fakeFetch({ [sgRelayUrl('flood-alerts')]: { body: throttled } });
+    const r2 = await loadOfficialWarnings({ fetchImpl: limited.fn });
     expect(dataGovSgBackoffUntil()).not.toBeNull();
+    expect(statusOf(r2.feeds, 'pub-flood').status).toBe('snapshot');
+    expect(statusOf(r2.feeds, 'pub-flood').message).toContain('Live feed unavailable (data.gov.sg rate limited; retrying live after');
+
+    // The relay's own per-IP limit (HTTP 429) counts as passing too.
+    resetNeaCache();
+    resetWarningsCache();
+    await loadOfficialWarnings({ fetchImpl: fakeFetch({ [sgRelayUrl('flood-alerts')]: { status: 429 } }).fn });
+    expect(dataGovSgBackoffUntil()).not.toBeNull();
+  });
+
+  it('PUB flood alerts come through the data.gov.sg relay with its fetch time, never from data.gov.sg directly', async () => {
+    const { fn, calls } = fakeFetch();
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    expect(calls).toContain(sgRelayUrl('flood-alerts'));
+    expect(calls.some((u) => u.includes('data.gov.sg'))).toBe(false);
+    expect(statusOf(r.feeds, 'pub-flood')).toMatchObject({ status: 'live', retrievedAt: '2026-10-13T07:30:00Z' });
+
+    // A relay answer for another feed, or of the wrong shape, is not accepted as PUB data.
+    resetWarningsCache();
+    const wrong = fakeFetch({ [sgRelayUrl('flood-alerts')]: { body: { available: true, feed: 'psi', retrievedAt: '2026-10-13T07:30:00Z', stale: false, raw: PUB_EMPTY } } });
+    const r2 = await loadOfficialWarnings({ fetchImpl: wrong.fn });
+    expect(statusOf(r2.feeds, 'pub-flood').status).not.toBe('live');
   });
 });
 

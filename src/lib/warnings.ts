@@ -26,6 +26,7 @@
 import snapshotJson from '../../data/warnings-snapshot.json';
 import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
 import { DSDA_REASON_TEXT, DSDA_RELAY_PATH, type DsdaUnavailableReason } from './dsdaRelay';
+import { SgUnavailable, sgRelayUrl, unwrapSgRelay } from './sgRelay';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
 import { idnDistrictIndex, placeTsunamiAreas } from './tsunamiAreas';
 import { isExpired } from './warningExpiry';
@@ -1285,6 +1286,12 @@ export function relayedDsda(payload: unknown): Relayed {
   throw new Error(reason ? DSDA_REASON_TEXT[reason] : 'the DSDA relay did not return floodgate data');
 }
 
+/** The data.gov.sg relay's answer (src/lib/sgRelay.ts) for PUB flood alerts -> data.gov.sg's body. */
+function relayedSg(payload: unknown): Relayed {
+  const { raw, retrievedAt } = unwrapSgRelay(payload, 'flood-alerts');
+  return new Relayed(raw, retrievedAt);
+}
+
 function isoDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
@@ -1332,7 +1339,8 @@ const SPECS: FeedSpec[] = [
   { key: 'thaiwater', parse: parseThaiWater, fetchRaw: (get) => get(FEEDS.thaiwater.url, 'json') },
   // Through the same-origin relay (api/dsda.ts): DSDA's certificate is not trusted by browsers.
   { key: 'dsda', parse: parseDsda, fetchRaw: async (get) => relayedDsda(await get(DSDA_RELAY_PATH, 'json')) },
-  { key: 'pub', parse: parsePubFlood, fetchRaw: (get) => get(FEEDS.pub.url, 'json'), dataGovSg: true },
+  // Through the same-origin relay (api/sg.ts): data.gov.sg's keyless limit is a few requests a second.
+  { key: 'pub', parse: parsePubFlood, fetchRaw: async (get) => relayedSg(await get(sgRelayUrl('flood-alerts'), 'json')), dataGovSg: true },
 ];
 
 /** Snapshot feed ids differ from FEEDS keys only for the JMA tsunami detail URL field. */
@@ -1501,6 +1509,7 @@ class HttpFailure extends Error {
 /** Readable reason and whether it should start a backoff (429, CORS-less 429 / offline, timeout). */
 function classify(err: unknown, timeoutMs: number): { reason: string; transient: boolean } {
   if (err instanceof HttpFailure) return { reason: err.message, transient: err.status === 429 };
+  if (err instanceof SgUnavailable) return { reason: err.message, transient: err.transient };
   if (err instanceof Error && err.name === 'AbortError') return { reason: `timed out after ${timeoutMs} ms`, transient: true };
   if (err instanceof TypeError) return { reason: 'rate limited or offline', transient: true };
   if (err instanceof Error) return { reason: err.message, transient: false };

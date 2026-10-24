@@ -9,6 +9,7 @@ import {
   NEA_CACHE_TTL_MS,
   NEA_ENDPOINTS,
   NEA_RANGE_KM,
+  NEA_RELAY_FEEDS,
   NEA_SOURCE_NAME,
   NEA_SOURCE_URL,
   angleDiff,
@@ -24,6 +25,7 @@ import {
   type NeaRawResponses,
 } from './nea';
 import { deriveReview } from './reviewRules';
+import { sgRelayUrl, type SgFeed } from './sgRelay';
 
 // ---------------------------------------------------------------------------
 // Trimmed copies of real NEA v2 responses (2026-10-13), plus deliberately bad station values.
@@ -186,7 +188,10 @@ function incidentById(id: string): Incident {
 
 type Reply = { body?: unknown; status?: number } | Error | 'never' | 'abortable';
 
-/** Fake fetch keyed by endpoint URL. */
+/**
+ * Fake same-origin relay (/api/sg?feed=…) keyed by endpoint. A body is data.gov.sg's answer, which the
+ * relay wraps with the time it fetched it (the fake clock's now); a status is the relay's own answer.
+ */
 function fakeFetch(replies: Partial<Record<keyof typeof NEA_ENDPOINTS, Reply>>): typeof fetch {
   const defaults: Record<keyof typeof NEA_ENDPOINTS, Reply> = {
     windDirection: { body: RAW_WIND_DIRECTION },
@@ -194,13 +199,14 @@ function fakeFetch(replies: Partial<Record<keyof typeof NEA_ENDPOINTS, Reply>>):
     psi: { body: RAW_PSI },
     pm25: { body: RAW_PM25 },
   };
-  const byUrl = new Map<string, Reply>();
+  const byUrl = new Map<string, { feed: SgFeed; reply: Reply }>();
   for (const key of Object.keys(NEA_ENDPOINTS) as Array<keyof typeof NEA_ENDPOINTS>) {
-    byUrl.set(NEA_ENDPOINTS[key], replies[key] ?? defaults[key]);
+    byUrl.set(sgRelayUrl(NEA_RELAY_FEEDS[key]), { feed: NEA_RELAY_FEEDS[key], reply: replies[key] ?? defaults[key] });
   }
   return ((url: string, init?: RequestInit) => {
-    const reply = byUrl.get(String(url));
-    if (reply === undefined) return Promise.reject(new Error(`unexpected url ${String(url)}`));
+    const route = byUrl.get(String(url));
+    if (route === undefined) return Promise.reject(new Error(`unexpected url ${String(url)}`));
+    const { feed, reply } = route;
     if (reply === 'never') return new Promise(() => undefined);
     if (reply === 'abortable') {
       return new Promise((_, reject) => {
@@ -209,7 +215,9 @@ function fakeFetch(replies: Partial<Record<keyof typeof NEA_ENDPOINTS, Reply>>):
     }
     if (reply instanceof Error) return Promise.reject(reply);
     const status = reply.status ?? 200;
-    return Promise.resolve({ ok: status < 400, status, json: async () => reply.body } as unknown as Response);
+    const retrievedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const body = status < 400 ? { available: true, feed, retrievedAt, stale: false, raw: reply.body } : reply.body;
+    return Promise.resolve({ ok: status < 400, status, json: async () => body } as unknown as Response);
   }) as unknown as typeof fetch;
 }
 
@@ -542,6 +550,39 @@ describe('loadNeaContext', () => {
     const cors = await loadNeaContext({ fetchImpl: fakeFetch({ windSpeed: new TypeError('Failed to fetch') }) });
     expect(cors.fellBack).toBe(true);
     expect(cors.error).toContain('wind speed: rate limited or offline');
+  });
+
+  it('asks only the same-origin relay, and dates the context by when the relay fetched the wind', async () => {
+    const urls: string[] = [];
+    const relay = fakeFetch({});
+    const spy = ((url: string, init?: RequestInit) => {
+      urls.push(String(url));
+      return relay(url, init);
+    }) as unknown as typeof fetch;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-24T08:00:00Z'));
+    const r = await loadNeaContext({ fetchImpl: spy });
+    expect(urls.sort()).toEqual(['/api/sg?feed=pm25', '/api/sg?feed=psi', '/api/sg?feed=wind-direction', '/api/sg?feed=wind-speed']);
+    expect(r.fellBack).toBe(false);
+    expect(r.context?.retrievedAt).toBe('2026-10-24T08:00:00Z');
+  });
+
+  it('falls back to the snapshot, and backs off, when the relay says data.gov.sg is throttling it', async () => {
+    const fetchImpl = ((url: string) =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ available: false, feed: new URL(String(url), 'http://x').searchParams.get('feed'), checkedAt: '2026-10-24T08:00:00Z', reason: 'rate_limited', message: 'x' }),
+      } as unknown as Response)) as unknown as typeof fetch;
+    const r = await loadNeaContext({ fetchImpl });
+    expect(r.fellBack).toBe(true);
+    expect(r.context?.dataMode).toBe('historical');
+    expect(r.error).toMatch(/^Live NEA data unavailable \(wind direction: data\.gov\.sg rate limited; wind speed: data\.gov\.sg rate limited; retrying live after \d\d:\d\d:\d\d UTC\); showing the bundled snapshot captured /);
+    // The backoff holds: the next call does not ask the relay again.
+    let asked = false;
+    const second = await loadNeaContext({ fetchImpl: (() => ((asked = true), Promise.reject(new Error('no')))) as unknown as typeof fetch });
+    expect(asked).toBe(false);
+    expect(second.fellBack).toBe(true);
   });
 });
 
