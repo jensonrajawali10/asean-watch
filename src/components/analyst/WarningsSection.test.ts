@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { loadWarningsSnapshot } from '../../lib/warnings';
-import WarningsSection from './WarningsSection';
+import WarningsSection, { UrgentReason } from './WarningsSection';
 import WorkspaceDrawer from '../shell/WorkspaceDrawer';
 import { WarningsModeNote } from '../OfficialWarnings';
 
@@ -111,5 +111,31 @@ describe('Warnings drawer header', () => {
       createElement(WorkspaceDrawer, { section: 'haze', onSelectSection: () => {}, onClose: () => {}, children: createElement('p', null, 'x') }),
     );
     expect(html).not.toContain('ws-drawer__note');
+  });
+});
+
+describe('UrgentReason', () => {
+  const base = loadWarningsSnapshot().warnings[0];
+  const ptwc = {
+    ...base,
+    id: 'ptwc:2026-10-24T03:30:54Z',
+    issuer: 'Pacific Tsunami Warning Center (PTWC)',
+    hazard: 'tsunami' as const,
+    level: 'TSUNAMI MESSAGE NUMBER 2',
+    issuedAt: '2026-10-24T03:30:54Z',
+  };
+
+  it('says why the alerts button is red and names each message verbatim, with its issue time', () => {
+    const html = renderToStaticMarkup(createElement(UrgentReason, { warnings: [ptwc], onInspect: () => {} }));
+    expect(html).toContain('Why the alerts button is red:');
+    expect(html).toContain('not labelled as');
+    expect(html).toContain('Pacific Tsunami Warning Center (PTWC): TSUNAMI MESSAGE NUMBER 2');
+    expect(html).toContain('issued 2026-10-24 03:30 UTC');
+    const noTime = renderToStaticMarkup(createElement(UrgentReason, { warnings: [{ ...ptwc, issuedAt: null }], onInspect: () => {} }));
+    expect(noTime).toContain('no issue time published');
+  });
+
+  it('shows nothing when no message makes the button red', () => {
+    expect(renderToStaticMarkup(createElement(UrgentReason, { warnings: [], onInspect: () => {} }))).toBe('');
   });
 });

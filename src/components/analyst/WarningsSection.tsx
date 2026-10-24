@@ -8,6 +8,7 @@ import OfficialWarningsPanel, { WarningsHowTo } from '../OfficialWarnings';
 import ErrorBoundary from '../ErrorBoundary';
 import { activeOfficial, isUrgentWarning } from '../shell/alerts';
 import { useNowMs } from '../../lib/useNowMs';
+import { formatUtc } from '../format';
 import { AnalystSection, KeyFigure } from './AnalystSection';
 import type { SectionSource } from './AnalystSection';
 
@@ -54,10 +55,38 @@ function sourcesFromFeeds(feeds: WarningFeedStatus[]): SectionSource[] {
   }));
 }
 
+/**
+ * Why the alerts button is red, above everything else: our rule in plain words, then each message that
+ * triggers it (issuer and level verbatim, issue time), each opening its full card. Nothing re-scored.
+ */
+export function UrgentReason({ warnings, onInspect }: { warnings: readonly OfficialWarning[]; onInspect: (id: string) => void }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="an-note an-urgent" role="note">
+      <p>
+        <strong>Why the alerts button is red:</strong> it turns red for any tsunami message in force that the agency has not labelled as
+        information or a forecast, and for any message with an evacuation instruction. Now:
+      </p>
+      <ul>
+        {warnings.map((w) => (
+          <li key={w.id}>
+            <button type="button" className="an-row-btn" onClick={() => onInspect(w.id)}>
+              {w.issuer}: {w.level}
+            </button>{' '}
+            · {w.issuedAt ? `issued ${formatUtc(w.issuedAt)}` : 'no issue time published'}
+          </li>
+        ))}
+      </ul>
+      <p>Follow the issuing agency and your national authorities.</p>
+    </div>
+  );
+}
+
 export default function WarningsSection(p: WarningsSectionProps) {
   const nowMs = useNowMs();
   const active = activeOfficial(p.allWarnings, nowMs);
-  const urgent = active.filter((w) => isUrgentWarning(w, nowMs)).length;
+  const urgentList = active.filter((w) => isUrgentWarning(w, nowMs));
+  const urgent = urgentList.length;
   const estimates = p.allWarnings.filter((w) => w.authority === 'aggregator').length;
   const live = p.feeds.filter(fetchedThisVisit).length;
   const unavailable = p.feeds.filter((f) => f.status === 'unavailable');
@@ -68,6 +97,7 @@ export default function WarningsSection(p: WarningsSectionProps) {
       lede="Messages from national agencies, relayed as issued. ASEAN Watch never issues a warning of its own, never re-scores a level, and never treats an empty feed as an all-clear."
       sources={sourcesFromFeeds(p.feeds)}
     >
+      <UrgentReason warnings={urgentList} onInspect={p.onInspect} />
       <WarningsHowTo />
       <div className="an-figures">
         <KeyFigure label="Official alerts still active" value={String(active.length)} note="not ended by the agency and not past their expiry time (the number on the alerts button)" />

@@ -67,6 +67,31 @@
   font-size: 12px;
 }
 
+.an-urgent p {
+  margin: 0;
+  color: var(--text);
+}
+
+.an-urgent ul {
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One message per line, set off by a rule rather than a bullet (a wrapped button pushed the bullet down). */
+.an-urgent li {
+  padding-left: 8px;
+  border-left: 2px solid var(--border-strong);
+}
+
+.an-urgent li + li {
+  margin-top: 4px;
+}
+
+.an-urgent p + ul + p {
+  color: var(--text-muted);
+}
+
 .an-note--official {
   border-left-color: var(--official);
   background: var(--official-bg);
