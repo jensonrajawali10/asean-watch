@@ -613,7 +613,10 @@
   margin: 8px -12px 0 -16px;
   padding: 0 12px 0 16px;
   overflow-x: auto;
-  scrollbar-width: thin;
+  /* Swipe, wheel or Tab to the rest; the open tab is scrolled into view. The fade says there is more. */
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
 }
 
 .ws-tab {
@@ -655,6 +658,8 @@
   overflow: auto;
   overscroll-behavior: contain;
   padding: 10px 16px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* Panels reused inside the drawer share its surface: hairlines instead of boxes. */

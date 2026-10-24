@@ -85,6 +85,8 @@
   --nea-snapshot-fg: #545a62;
   --nea-snapshot-border: #8a857a;
   --border-strong: #837d71;
+  /* Thin themed scrollbars on the drawer and the cards (never the platform's grey bar with arrows). */
+  --scrollbar-thumb: #c4beb2;
   --accent-strong: #08504f;
   --selected-bg: #e7f2f1;
   --new-row: #eaf4f3;
@@ -203,6 +205,7 @@
   --nea-snapshot-fg: #a9a193;
   --nea-snapshot-border: #7a7264;
   --border-strong: #857c6d;
+  --scrollbar-thumb: #4f483e;
   --accent-strong: #dcbf92;
   --selected-bg: #2a2419;
   --new-row: #221e16;
