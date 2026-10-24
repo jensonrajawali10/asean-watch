@@ -12,9 +12,11 @@
 // feeds the 48 h "If it erupted now" puff scenario in eruptionScenario.ts. Older snapshots with 72 h are still
 // read as they are.
 //
-// loadAshWind(): live Open-Meteo first (timeout, in-flight dedupe, memory cache, 429 backoff), then the
-// bundled snapshot data/ash-wind-snapshot.json (dataMode "historical"). Never throws.
+// loadAshWind(): live Open-Meteo first through the same-origin relay /api/open-meteo?feed=ash
+// (src/lib/openMeteoRelay.ts; timeout, in-flight dedupe, memory cache, backoff), then the bundled
+// snapshot data/ash-wind-snapshot.json (dataMode "historical"). Never throws.
 import snapshotJson from '../../data/ash-wind-snapshot.json';
+import { fetchOpenMeteoRelay, OpenMeteoRelayError } from './openMeteoRelay';
 import { OPEN_METEO_FORECAST_URL, windFromToUV } from './windField';
 
 export type AshLevel = '700' | '500' | '300';
@@ -37,6 +39,11 @@ export const ASH_PAST_DAYS = 1;
 export const ASH_FORECAST_DAYS = 3;
 export const ASH_CACHE_TTL_MS = 30 * 60 * 1000;
 export const ASH_BACKOFF_MS = 5 * 60 * 1000;
+/**
+ * Client timeout for the relay: above its whole upstream budget (OPEN_METEO_UPSTREAM_TIMEOUT_MS, 20 s) plus
+ * a cold start, so a slow first fill is waited for. Not on the first paint (volcano card, scenario).
+ */
+export const ASH_RELAY_TIMEOUT_MS = 25000;
 
 export interface AshWindSeries {
   /** Smithsonian GVP id, e.g. "gvp-263250" (matches Incident.volcanoId). */
@@ -232,6 +239,11 @@ export function loadAshWindSnapshot(): AshWindData | null {
 
 type Point = { volcanoId: string; name: string; lat: number; lon: number };
 
+/** The summits the relay asks for: the bundled snapshot's volcanoes, in its order. */
+export function ashWindPoints(): Point[] {
+  return (loadAshWindSnapshot()?.volcanoes ?? []).map(({ volcanoId, name, lat, lon }) => ({ volcanoId, name, lat, lon }));
+}
+
 export function buildAshWindUrl(points: readonly Point[]): string {
   const vars = LEVEL_KEYS.flatMap((l) => [`wind_speed_${l}hPa`, `wind_direction_${l}hPa`]).join(',');
   return (
@@ -294,18 +306,20 @@ async function loadLive(points: readonly Point[], timeoutMs: number, fetchImpl: 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(buildAshWindUrl(points), { signal: controller.signal });
-    if (res.status === 429) {
-      backoffUntil = now() + ASH_BACKOFF_MS;
-      return fallback('Open-Meteo rate limit reached; showing the bundled ash-wind snapshot.', now);
-    }
-    if (!res.ok) return fallback(`Open-Meteo returned HTTP ${res.status}; showing the bundled ash-wind snapshot.`, now);
-    const json: unknown = await res.json();
-    const data = normaliseAshWind(json, points, toIso(now()));
+    // The relay fetches buildAshWindUrl(ashWindPoints()) and returns Open-Meteo's answer as received.
+    const payload = await fetchOpenMeteoRelay('ash', fetchImpl, controller.signal);
+    const data = normaliseAshWind(payload.raw, points, payload.retrievedAt);
     if (!data) return fallback('Open-Meteo response was not in the expected shape; showing the bundled ash-wind snapshot.', now);
+    // A copy the relay serves because Open-Meteo is failing is shown, but not cached here.
+    if (payload.stale) return { data, status: 'cached', message: `Open-Meteo is not answering; showing the model run retrieved ${payload.retrievedAt}.` };
     memory = { data, at: now() };
     return { data, status: 'live', message: null };
   } catch (err) {
+    if (err instanceof OpenMeteoRelayError && (err.status === 429 || err.status === 503)) {
+      backoffUntil = now() + Math.min(err.retryAfterMs ?? ASH_BACKOFF_MS, ASH_BACKOFF_MS);
+      return fallback(`Open-Meteo is busy (${err.message}); showing the bundled ash-wind snapshot.`, now);
+    }
+    if (err instanceof OpenMeteoRelayError) return fallback(`The Open-Meteo relay returned HTTP ${err.status}; showing the bundled ash-wind snapshot.`, now);
     const why = controller.signal.aborted ? `timed out after ${timeoutMs} ms` : err instanceof Error ? err.message : String(err);
     return fallback(`Open-Meteo unavailable (${why}); showing the bundled ash-wind snapshot.`, now);
   } finally {
@@ -324,12 +338,12 @@ export async function loadAshWind(opts?: {
   try {
     if (memory && now() - memory.at < ASH_CACHE_TTL_MS) return { data: memory.data, status: 'cached', message: null };
     if (now() < backoffUntil) return fallback('Open-Meteo rate limit backoff in effect; showing the bundled ash-wind snapshot.', now);
-    const points = opts?.points ?? (loadAshWindSnapshot()?.volcanoes ?? []).map(({ volcanoId, name, lat, lon }) => ({ volcanoId, name, lat, lon }));
+    const points = opts?.points ?? ashWindPoints();
     if (points.length === 0) return fallback('No volcano points to request.', now);
     const fetchImpl = opts?.fetchImpl ?? (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
     if (!fetchImpl) return fallback('No fetch available; showing the bundled ash-wind snapshot.', now);
     if (!inflight) {
-      inflight = loadLive(points, opts?.timeoutMs ?? 8000, fetchImpl, now).finally(() => {
+      inflight = loadLive(points, opts?.timeoutMs ?? ASH_RELAY_TIMEOUT_MS, fetchImpl, now).finally(() => {
         inflight = null;
       });
     }

@@ -5,6 +5,8 @@ import { dataGovSgBackoffUntil, markDataGovSgRateLimited, resetNeaCache } from '
 import { deriveReview } from './reviewRules';
 import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from './magmaLevels';
 import * as warningsModule from './warnings';
+import { DSDA_RELAY_PATH, DSDA_XML_URL } from './dsdaRelay';
+import { sgRelayUrl } from './sgRelay';
 import warningsSource from './warnings.ts?raw';
 import mapViewSource from '../components/map/MapView.tsx?raw';
 import {
@@ -34,6 +36,7 @@ import {
   parseNwsAlerts,
   parsePubFlood,
   parseThaiWater,
+  relayedDsda,
   resetWarningsCache,
   warningsNear,
   wibToUtc,
@@ -789,8 +792,8 @@ function replies(): Map<string, Reply> {
     [FEEDS.nws.url, { body: NWS_EMPTY }],
     [FEEDS.gdacs.url, { body: GDACS }],
     [FEEDS.thaiwater.url, { body: THAIWATER }],
-    [FEEDS.dsda.url, { text: DSDA_XML }],
-    [FEEDS.pub.url, { body: PUB_EMPTY }],
+    [DSDA_RELAY_PATH, { body: { available: true, url: DSDA_XML_URL, retrievedAt: '2026-10-13T07:15:00Z', xml: DSDA_XML } }],
+    [sgRelayUrl('flood-alerts'), { body: { available: true, feed: 'flood-alerts', retrievedAt: '2026-10-13T07:30:00Z', stale: false, raw: PUB_EMPTY } }],
   ]);
 }
 
@@ -922,19 +925,75 @@ describe('loadOfficialWarnings', () => {
     expect(statusOf(r3.feeds, 'gdacs').status).toBe('live');
   });
 
+  it('reads Jakarta DSDA through the same-origin relay, never from the browser directly', async () => {
+    const { fn, calls } = fakeFetch();
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    expect(calls).toContain(DSDA_RELAY_PATH);
+    expect(calls.some((u) => u.includes('dsdadki.web.id'))).toBe(false);
+    const s = statusOf(r.feeds, 'dsda-jakarta');
+    expect(s.status).toBe('live');
+    // The time the relay fetched the XML upstream, not the time the browser read the relay.
+    expect(s.retrievedAt).toBe('2026-10-13T07:15:00Z');
+    expect(r.gauges.filter((g) => g.id.startsWith('dsda-jakarta:')).every((g) => g.retrievedAt === '2026-10-13T07:15:00Z')).toBe(true);
+  });
+
+  it("shows the relay reason beside the HISTORICAL snapshot while DSDA's certificate is untrusted", async () => {
+    const { fn } = fakeFetch({
+      [DSDA_RELAY_PATH]: { body: { available: false, url: DSDA_XML_URL, checkedAt: '2026-10-21T12:00:00Z', reason: 'certificate', message: 'x' } },
+    });
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    const s = statusOf(r.feeds, 'dsda-jakarta');
+    expect(s.status).toBe('snapshot');
+    expect(s.message).toMatch(
+      /^Live feed unavailable \(DSDA's website shows a security certificate that cannot be verified, so its data cannot be trusted in transit\); showing the bundled snapshot captured \S+Z\. Check Dinas Sumber Daya Air DKI Jakarta \(Posko Banjir DSDA\) directly for current messages\.$/,
+    );
+    expect(r.gauges.filter((g) => g.id.startsWith('dsda-jakarta:')).every((g) => g.dataMode === 'historical')).toBe(true);
+  });
+
+  it('relayedDsda: only the fixed reasons reach the visitor', () => {
+    expect(() => relayedDsda({ available: false, reason: 'certificate', message: 'upstream detail' })).toThrow(/^DSDA's website shows a security certificate/);
+    expect(() => relayedDsda({ available: false, reason: 'made-up', message: 'upstream detail' })).toThrow('the DSDA relay did not return floodgate data');
+    expect(() => relayedDsda('<xml/>')).toThrow('the DSDA relay answer was not in the expected shape');
+    expect(relayedDsda({ available: true, retrievedAt: '2026-10-21T12:00:00Z', xml: '<x/>' })).toMatchObject({ raw: '<x/>', retrievedAt: '2026-10-21T12:00:00Z' });
+  });
+
   it('PUB shares the data.gov.sg backoff with the NEA layer, both ways', async () => {
     markDataGovSgRateLimited('rate limited');
     const { fn, calls } = fakeFetch();
     const r = await loadOfficialWarnings({ fetchImpl: fn });
-    expect(calls.includes(FEEDS.pub.url)).toBe(false);
+    expect(calls.includes(sgRelayUrl('flood-alerts'))).toBe(false);
     expect(statusOf(r.feeds, 'pub-flood').message).toContain('data.gov.sg rate limited; retrying live after');
 
+    // The relay says data.gov.sg is throttling it: the shared backoff starts.
     resetNeaCache();
     resetWarningsCache();
     expect(dataGovSgBackoffUntil()).toBeNull();
-    const limited = fakeFetch({ [FEEDS.pub.url]: { status: 429 } });
-    await loadOfficialWarnings({ fetchImpl: limited.fn });
+    const throttled = { available: false, feed: 'flood-alerts', checkedAt: '2026-10-13T07:30:00Z', reason: 'rate_limited', message: 'x' };
+    const limited = fakeFetch({ [sgRelayUrl('flood-alerts')]: { body: throttled } });
+    const r2 = await loadOfficialWarnings({ fetchImpl: limited.fn });
     expect(dataGovSgBackoffUntil()).not.toBeNull();
+    expect(statusOf(r2.feeds, 'pub-flood').status).toBe('snapshot');
+    expect(statusOf(r2.feeds, 'pub-flood').message).toContain('Live feed unavailable (data.gov.sg rate limited; retrying live after');
+
+    // The relay's own per-IP limit (HTTP 429) counts as passing too.
+    resetNeaCache();
+    resetWarningsCache();
+    await loadOfficialWarnings({ fetchImpl: fakeFetch({ [sgRelayUrl('flood-alerts')]: { status: 429 } }).fn });
+    expect(dataGovSgBackoffUntil()).not.toBeNull();
+  });
+
+  it('PUB flood alerts come through the data.gov.sg relay with its fetch time, never from data.gov.sg directly', async () => {
+    const { fn, calls } = fakeFetch();
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    expect(calls).toContain(sgRelayUrl('flood-alerts'));
+    expect(calls.some((u) => u.includes('data.gov.sg'))).toBe(false);
+    expect(statusOf(r.feeds, 'pub-flood')).toMatchObject({ status: 'live', retrievedAt: '2026-10-13T07:30:00Z' });
+
+    // A relay answer for another feed, or of the wrong shape, is not accepted as PUB data.
+    resetWarningsCache();
+    const wrong = fakeFetch({ [sgRelayUrl('flood-alerts')]: { body: { available: true, feed: 'psi', retrievedAt: '2026-10-13T07:30:00Z', stale: false, raw: PUB_EMPTY } } });
+    const r2 = await loadOfficialWarnings({ fetchImpl: wrong.fn });
+    expect(statusOf(r2.feeds, 'pub-flood').status).not.toBe('live');
   });
 });
 

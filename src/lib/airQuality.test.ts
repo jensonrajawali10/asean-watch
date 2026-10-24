@@ -182,17 +182,49 @@ describe('loadAirQuality', () => {
       ...d.lats.flatMap((lat, j) => d.lons.map((lon, i) => loc(lat, lon, d.pm25.map((s) => s[j][i])))),
       ...d.places.map((p) => loc(p.lat, p.lon, p.pm25)),
     ].map((e) => ({ ...e, hourly: { time: times, pm2_5: e.hourly.pm2_5 } }));
-    let calls = 0;
-    const ok = (() => {
-      calls += 1;
-      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    const asked: string[] = [];
+    const ok = ((url: string) => {
+      asked.push(String(url));
+      return Promise.resolve(new Response(JSON.stringify({ feed: 'aq', retrievedAt: '2026-10-14T06:00:00Z', stale: false, raw: body }), { status: 200 }));
     }) as unknown as typeof fetch;
     const r1 = await loadAirQuality({ fetchImpl: ok });
     expect(r1.status).toBe('live');
     expect(r1.data!.places).toHaveLength(AQ_PLACES.length);
+    // Through the same-origin relay, stamped with the time the relay fetched it from Open-Meteo.
+    expect(asked).toEqual(['/api/open-meteo?feed=aq']);
+    expect(r1.data!.retrievedAt).toBe('2026-10-14T06:00:00Z');
     const r2 = await loadAirQuality({ fetchImpl: ok });
     expect(r2.status).toBe('cached');
+    expect(asked).toHaveLength(1);
+  });
+
+  it('shows a stale relay copy as cached, and backs off when the relay is busy', async () => {
+    const d = AQ_SNAP!;
+    const times = d.times.map((t) => t.slice(0, 16));
+    const body = [
+      ...d.lats.flatMap((lat, j) => d.lons.map((lon, i) => loc(lat, lon, d.pm25.map((s) => s[j][i])))),
+      ...d.places.map((p) => loc(p.lat, p.lon, p.pm25)),
+    ].map((e) => ({ ...e, hourly: { time: times, pm2_5: e.hourly.pm2_5 } }));
+    const stale = (() =>
+      Promise.resolve(new Response(JSON.stringify({ feed: 'aq', retrievedAt: '2026-10-14T01:00:00Z', stale: true, raw: body }), { status: 200 }))) as unknown as typeof fetch;
+    const r = await loadAirQuality({ fetchImpl: stale });
+    expect(r.status).toBe('cached');
+    expect(r.message).toBe('Open-Meteo is not answering. Showing the model run retrieved 2026-10-14T01:00:00Z.');
+    resetAqCache();
+    let calls = 0;
+    const busy = (() => {
+      calls += 1;
+      return Promise.resolve(new Response('{"error":"upstream_unavailable"}', { status: 503, headers: { 'retry-after': '120' } }));
+    }) as unknown as typeof fetch;
+    const t0 = Date.parse('2026-10-14T06:00:00Z');
+    const b1 = await loadAirQuality({ fetchImpl: busy, now: () => t0 });
+    expect(b1.status).toBe('snapshot');
+    expect(b1.data!.dataMode).toBe('historical');
+    expect(b1.message).toMatch(/^Open-Meteo air quality is busy \(HTTP 503\)\. Showing the bundled air-quality snapshot\.$/);
+    await loadAirQuality({ fetchImpl: busy, now: () => t0 + 119_000 });
     expect(calls).toBe(1);
+    await loadAirQuality({ fetchImpl: busy, now: () => t0 + 120_000 });
+    expect(calls).toBe(2);
   });
 });
 

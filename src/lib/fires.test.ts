@@ -8,6 +8,9 @@ import {
   clusterAt,
   clusterById,
   clusterSentence,
+  FIRE_RECENT_MAX_MS,
+  fireWindowWords,
+  RECENT_FIRE_WORDS,
   compassWords,
   countryRollups,
   dailyValues,
@@ -352,6 +355,10 @@ describe('clusters', () => {
   it('writes the plain sentence for a 24 h cluster', () => {
     const c = snap().clusters24h[0];
     expect(clusterSentence(c)).toBe('312 hotspots in the last 24 h around Ogan Komering Ilir, South Sumatra; fire power up 40% on the day before.');
+    // An aged snapshot dates its windows instead of saying "the last 24 h".
+    expect(clusterSentence(c, fireWindowWords('2026-10-21T06:41:00Z', Date.parse('2026-10-24T08:00:00Z')))).toBe(
+      '312 hotspots in the 24 h to 21 Oct around Ogan Komering Ilir, South Sumatra; fire power up 40% on the day before.',
+    );
     expect(clusterSentence({ ...c, frpChange24hPct: -25, last24h: { count: 312, frp: 750 } })).toContain('fire power down 25% on the day before');
     expect(clusterSentence({ ...c, frpChange24hPct: 4 })).toContain('fire power about the same as the day before');
     expect(clusterSentence({ ...c, frpChange24hPct: 200, last24h: { count: 312, frp: 3000 } })).toContain('fire power 3.0 times the day before');
@@ -447,5 +454,32 @@ describe('smoke heading (MODELLED)', () => {
     expect(compassWords(315)).toBe('north-west');
     expect(compassWords(-90)).toBe('west');
     expect(compassWords(22.5, 16)).toBe('north-north-east');
+  });
+});
+
+describe('fireWindowWords', () => {
+  const ref = '2026-10-21T06:41:00Z';
+  it('says "the last 24 h" while the snapshot is at most 12 h old', () => {
+    expect(fireWindowWords(ref, Date.parse(ref))).toBe(RECENT_FIRE_WORDS);
+    expect(fireWindowWords(ref, Date.parse(ref) + FIRE_RECENT_MAX_MS)).toEqual({
+      day: 'the last 24 h',
+      week: 'the last 7 days',
+      earlier: 'the six days before the last 24 h',
+      dated: false,
+    });
+  });
+
+  it('dates the windows once the snapshot is older (a deployed site between builds)', () => {
+    expect(fireWindowWords(ref, Date.parse(ref) + FIRE_RECENT_MAX_MS + 1)).toEqual({
+      day: 'the 24 h to 21 Oct',
+      week: 'the 7 days to 21 Oct',
+      earlier: 'the six days before the 24 h to 21 Oct',
+      dated: true,
+    });
+  });
+
+  it('falls back to the plain words when a time is unreadable', () => {
+    expect(fireWindowWords('', Date.parse(ref))).toBe(RECENT_FIRE_WORDS);
+    expect(fireWindowWords(ref, Number.NaN)).toBe(RECENT_FIRE_WORDS);
   });
 });

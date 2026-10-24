@@ -24,6 +24,7 @@ import {
   singaporeTransport,
   situationReport,
   sortCityRows,
+  utcStamp,
   warningLine,
   whoMultiple,
 } from './situation';
@@ -268,7 +269,7 @@ describe('headline', () => {
     );
     const fires = { source: 'NASA FIRMS VIIRS 375 m NRT', asOf: '2026-10-14T06:00:00Z', hotspots24h: 1234 };
     expect(headlineSentence({ airQuality: null, fires })).toBe(
-      'Air-quality model unavailable; showing satellite fire data only: 1,234 hotspots in the last 24 h (NASA FIRMS VIIRS 375 m NRT). This is not an all-clear.',
+      'Air-quality model unavailable; showing satellite fire data only: 1,234 hotspots in the 24 h to 2026-10-14 06:00 UTC (NASA FIRMS VIIRS 375 m NRT). This is not an all-clear.',
     );
     expect(headline({ airQuality: null }).freshness).toBe('UNAVAILABLE');
   });
@@ -471,7 +472,7 @@ describe('situationReport', () => {
     });
     const fires = r.sections.find((s) => s.id === 'fires');
     expect(fires?.figures[0].value).toBe('500');
-    expect(r.whatChanged).toContain('Hotspots in the last 24 h: 500, against 320 in the 24 h before (NASA FIRMS VIIRS 375 m NRT).');
+    expect(r.whatChanged).toContain('Hotspots in the 24 h to 2026-10-14 06:00 UTC: 500, against 320 in the 24 h before (NASA FIRMS VIIRS 375 m NRT).');
   });
 
   it('adds ages only when the caller passes a clock', () => {
@@ -541,10 +542,10 @@ describe('firesSummaryFromSnapshot (the fires module snapshot)', () => {
     const r = situationReport({ airQuality: null, wind925: WIND925, fires });
     const sec = r.sections.find((x) => x.id === 'fires');
     expect(sec?.figures[0].label).toBe('Hotspots, last 24 h');
-    expect(r.whatChanged.some((l) => l.startsWith('Hotspots in the last 24 h:'))).toBe(true);
+    expect(r.whatChanged.some((l) => l.startsWith(`Hotspots in the 24 h to ${utcStamp(snap.reference)}:`))).toBe(true);
     const transport = r.sections.find((x) => x.id === 'transport');
     const table = transport?.blocks.find((b) => b.kind === 'table');
     expect(table && table.kind === 'table' ? table.rows.length : 0).toBe(fires.clusters?.length);
-    expect(headlineSentence({ airQuality: null, fires })).toMatch(/^Air-quality model unavailable; showing satellite fire data only: [\d,]+ hotspots in the last 24 h/);
+    expect(headlineSentence({ airQuality: null, fires })).toMatch(/^Air-quality model unavailable; showing satellite fire data only: [\d,]+ hotspots in the 24 h to \d{4}-\d\d-\d\d \d\d:\d\d UTC/);
   });
 });

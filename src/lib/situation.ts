@@ -712,7 +712,7 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
     if (fires && typeof fires.hotspots24h === 'number') {
       text =
         `Air-quality model unavailable; showing satellite fire data only: ${plural(fires.hotspots24h, 'hotspot', 'hotspots')} ` +
-        `in the last 24 h (${fires.source}). This is not an all-clear.`;
+        `in the 24 h to ${utcStamp(fires.asOf)} (${fires.source}). This is not an all-clear.`;
     } else if (hasFireData) {
       text = 'Air-quality model unavailable; showing satellite fire data only. This is not an all-clear.';
     } else {
@@ -1339,7 +1339,9 @@ export function situationReport(input: SituationInput): SituationReport {
         : `Fire data from ${fires.source} (${utcStamp(fires.asOf)}).`;
     fireBlocks.push({ kind: 'paragraph', text: fireSummary, cites: [fid] });
     if (typeof fires.hotspots24h === 'number' && typeof fires.hotspotsPrev24h === 'number') {
-      const line = `Hotspots in the last 24 h: ${intText(fires.hotspots24h)}, against ${intText(fires.hotspotsPrev24h)} in the 24 h before (${fires.source}).`;
+      // Dated, not "the last 24 h": FIRMS is a bundled snapshot that ages on a deployed site (and this text
+      // is deterministic, so it never reads the wall clock).
+      const line = `Hotspots in the 24 h to ${utcStamp(fires.asOf)}: ${intText(fires.hotspots24h)}, against ${intText(fires.hotspotsPrev24h)} in the 24 h before (${fires.source}).`;
       fireBlocks.push({ kind: 'paragraph', text: line, cites: [fid] });
       whatChanged.push(line);
     }

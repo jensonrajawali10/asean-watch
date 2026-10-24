@@ -68,7 +68,7 @@ Plain text, deterministic (no wall-clock time; timestamps are the data's own and
 
 Requested by Jenson: when the map zooms in near Singapore, show wind direction and haze from the NEA API.
 
-- Source: NEA real-time APIs on data.gov.sg, v2, no key, CORS open: `https://api-open.data.gov.sg/v2/real-time/api/{wind-direction,wind-speed,psi,pm25}`. Wind direction is degrees FROM (10-minute average), speed in knots, 18 Singapore stations; timestamps are `+08:00` and get normalised to UTC `Z`.
+- Source: NEA real-time APIs on data.gov.sg, v2, no key: `https://api-open.data.gov.sg/v2/real-time/api/{wind-direction,wind-speed,psi,pm25}`, read through the same-origin cached relay `/api/sg` (data.gov.sg allows about six keyless requests every few seconds per IP, and its 429 carries no CORS header). Wind direction is degrees FROM (10-minute average), speed in knots, 18 Singapore stations; timestamps are `+08:00` and get normalised to UTC `Z`.
 - It is **context, not evidence**. It never changes a review state and never enters `deriveReview`.
 - `src/lib/nea.ts` owns fetching and normalising: `loadNeaContext()` tries live (5 s timeout) and on any failure falls back to the bundled real snapshot `data/nea-snapshot.json` (`dataMode: "historical"`, original timestamps kept). It never throws. The core demo still works fully offline.
 - `assessDrift(incident, ctx)` returns null when the incident is more than 600 km from Singapore (the volcano watches show "No NEA station coverage here"). For the Riau watch it returns distance, bearing, downwind direction and whether Singapore is within ±45° of downwind.

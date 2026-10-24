@@ -4,10 +4,11 @@
 // the panel itself. Absence is never an all-clear.
 import type { OfficialWarning, WarningFeedStatus } from '../../types';
 import type { GaugeReading } from '../../lib/warnings';
-import OfficialWarningsPanel from '../OfficialWarnings';
+import OfficialWarningsPanel, { WarningsHowTo } from '../OfficialWarnings';
 import ErrorBoundary from '../ErrorBoundary';
 import { activeOfficial, isUrgentWarning } from '../shell/alerts';
 import { useNowMs } from '../../lib/useNowMs';
+import { formatUtc } from '../format';
 import { AnalystSection, KeyFigure } from './AnalystSection';
 import type { SectionSource } from './AnalystSection';
 
@@ -42,29 +43,62 @@ const FEED_WHAT: Readonly<Record<string, string>> = {
   ptwc: 'Pacific tsunami messages',
 };
 
+/** Fetched from the agency during this visit: live now, or the 5-minute session copy of a live fetch. */
+const fetchedThisVisit = (f: WarningFeedStatus) => f.status === 'live' || f.status === 'cached';
+
 function sourcesFromFeeds(feeds: WarningFeedStatus[]): SectionSource[] {
   return feeds.map((f) => ({
     label: FEED_WHAT[f.feedId] ? `${f.issuer}: ${FEED_WHAT[f.feedId]}` : f.issuer,
     url: f.issuerUrl,
     retrievedAt: f.retrievedAt,
-    mode: f.status === 'live' ? 'LIVE' : f.status === 'unavailable' ? 'UNAVAILABLE' : 'SNAPSHOT',
+    mode: fetchedThisVisit(f) ? 'LIVE' : f.status === 'unavailable' ? 'UNAVAILABLE' : 'SNAPSHOT',
   }));
+}
+
+/**
+ * Why the alerts button is red, above everything else: our rule in plain words, then each message that
+ * triggers it (issuer and level verbatim, issue time), each opening its full card. Nothing re-scored.
+ */
+export function UrgentReason({ warnings, onInspect }: { warnings: readonly OfficialWarning[]; onInspect: (id: string) => void }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="an-note an-urgent" role="note">
+      <p>
+        <strong>Why the alerts button is red:</strong> it turns red for any tsunami message in force that the agency has not labelled as
+        information or a forecast, and for any message with an evacuation instruction. Now:
+      </p>
+      <ul>
+        {warnings.map((w) => (
+          <li key={w.id}>
+            <button type="button" className="an-row-btn" onClick={() => onInspect(w.id)}>
+              {w.issuer}: {w.level}
+            </button>{' '}
+            · {w.issuedAt ? `issued ${formatUtc(w.issuedAt)}` : 'no issue time published'}
+          </li>
+        ))}
+      </ul>
+      <p>Follow the issuing agency and your national authorities.</p>
+    </div>
+  );
 }
 
 export default function WarningsSection(p: WarningsSectionProps) {
   const nowMs = useNowMs();
   const active = activeOfficial(p.allWarnings, nowMs);
-  const urgent = active.filter((w) => isUrgentWarning(w, nowMs)).length;
+  const urgentList = active.filter((w) => isUrgentWarning(w, nowMs));
+  const urgent = urgentList.length;
   const estimates = p.allWarnings.filter((w) => w.authority === 'aggregator').length;
-  const live = p.feeds.filter((f) => f.status === 'live').length;
+  const live = p.feeds.filter(fetchedThisVisit).length;
   const unavailable = p.feeds.filter((f) => f.status === 'unavailable');
   return (
     <AnalystSection
       id="warnings"
       title="Official warnings"
-      lede="Every message below is the issuing agency's own text, relayed as issued: level, headline, area, times and instruction. ASEAN Watch never issues a warning of its own, never re-scores a level, and never treats an empty feed as an all-clear."
+      lede="Messages from national agencies, relayed as issued. ASEAN Watch never issues a warning of its own, never re-scores a level, and never treats an empty feed as an all-clear."
       sources={sourcesFromFeeds(p.feeds)}
     >
+      <UrgentReason warnings={urgentList} onInspect={p.onInspect} />
+      <WarningsHowTo />
       <div className="an-figures">
         <KeyFigure label="Official alerts still active" value={String(active.length)} note="not ended by the agency and not past their expiry time (the number on the alerts button)" />
         <KeyFigure label="Tsunami or evacuation alerts" value={String(urgent)} note={urgent > 0 ? 'active now' : 'none active'} />

@@ -2,8 +2,8 @@
 // tsunami.gov has no CORS, so the browser calls the same-origin strict proxy /api/ptwc (api/ptwc.ts,
 // logic in src/lib/ptwcProxy.ts), which returns the fixed Atom feed and the CAP document it links.
 // Live -> 5 min cache -> 60 s backoff -> bundled HISTORICAL snapshot (data/ptwc-snapshot.json,
-// npm run refresh:ptwc) -> unavailable. Never throws. In `vite dev` /api/ptwc does not exist, so the
-// snapshot is shown (labelled HISTORICAL).
+// npm run refresh:ptwc) -> unavailable. Never throws. `vite dev` mounts the same handler at /api/ptwc
+// (vite.config.ts), so localhost reads the live feed too.
 //
 // The Atom feed holds ONLY the latest product, which may concern any basin PTWC serves (Pacific,
 // Hawaii, Caribbean/Atlantic). PTWC Pacific messages are issued for national authorities; the public
@@ -67,6 +67,9 @@ export function parsePtwc(payload: unknown, meta: { dataMode: 'live' | 'historic
   const capUrl = cap ? str(payload.capUrl) : null;
   const feedHead = atom.split(/<entry[\s>]/i)[0];
   const feedTitle = collapse(xmlText(feedHead, 'title'));
+  // The feed holds only the latest product, so its own <updated> is that product's time. Used when the
+  // feed carries no entry and no CAP link (as on 24 Oct 2026: a title and an Energy Map link only).
+  const feedUpdated = toIsoUtc(xmlText(feedHead, 'updated'));
   const entry = xmlBlocks(atom, 'entry')[0] ?? null;
   const entryTitle = entry ? collapse(xmlText(entry, 'title')) : null;
   const entryUpdated = entry ? toIsoUtc(xmlText(entry, 'updated')) : null;
@@ -95,7 +98,7 @@ export function parsePtwc(payload: unknown, meta: { dataMode: 'live' | 'historic
   const expires = info ? toIsoUtc(xmlText(info, 'expires')) : null;
 
   if (!event && !category && !feedTitle) throw new Error('no PTWC product found');
-  const issuedAt = sent ?? entryUpdated;
+  const issuedAt = sent ?? entryUpdated ?? feedUpdated;
   const ended =
     msgType === 'Cancel' || (expires !== null && Date.parse(expires) <= Date.parse(meta.retrievedAt));
   const location = circle ?? entryPoint;

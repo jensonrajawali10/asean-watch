@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AI_BRIEF_NOT_CONFIGURED_TEXT,
+  aiBriefErrorMessage,
   AI_BRIEF_ALL_CLEAR_LINE,
   AI_BRIEF_DEFAULT_MODEL,
   AI_BRIEF_MAX_TOKENS,
@@ -288,5 +290,20 @@ describe('validateAiBriefBody', () => {
   it('respects a shorter day count', () => {
     expect(validateAiBriefBody({ watchId: 'watch-merapi', dayIndex: 3 }, ids, 3).ok).toBe(false);
     expect(validateAiBriefBody({ watchId: 'watch-merapi', dayIndex: 2 }, ids, 3).ok).toBe(true);
+  });
+});
+
+describe('aiBriefErrorMessage', () => {
+  it('says plainly that the summary is off when the site has no key, and that nothing else needs it', () => {
+    expect(aiBriefErrorMessage(503, { error: 'not_configured', message: 'AI brief not configured.' })).toBe(AI_BRIEF_NOT_CONFIGURED_TEXT);
+    expect(aiBriefErrorMessage(503, null)).toBe(AI_BRIEF_NOT_CONFIGURED_TEXT);
+    expect(AI_BRIEF_NOT_CONFIGURED_TEXT).toMatch(/switched off.*no server key.*works without it/);
+  });
+
+  it('keeps the rate-limit, missing-service, refusal and generic lines', () => {
+    expect(aiBriefErrorMessage(429, { error: 'rate_limited', retryAfterSeconds: 90 })).toBe('Rate limited: too many AI summaries from this connection. Try again in about 2 min.');
+    expect(aiBriefErrorMessage(404, null)).toBe('AI brief failed: the summary service is not available on this server.');
+    expect(aiBriefErrorMessage(502, { error: 'refused' })).toBe('AI brief failed: the model declined to summarise this brief.');
+    expect(aiBriefErrorMessage(500, null)).toBe('AI brief failed (HTTP 500). Try again.');
   });
 });

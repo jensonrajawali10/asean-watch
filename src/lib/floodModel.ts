@@ -10,6 +10,7 @@
 // (Ciliwung) remain poorly resolved. Snapshot: data/flood-snapshot.json (npm run refresh:flood).
 import type { ConnectorStatus, RiverDischargeDay, RiverDischargeSeries } from '../types';
 import { isRecord, isoNoMs, loadLiveFirst, num, snapshotOnly, str } from './liveLoad';
+import { openMeteoRelayUrl, parseOpenMeteoRelay } from './openMeteoRelay';
 
 export const FLOOD_MODEL_NOTE =
   'MODELLED river discharge from GloFAS (Copernicus Emergency Management Service) via Open-Meteo, on a ' +
@@ -175,13 +176,15 @@ function spec(source: FloodSnapshot | null, opts?: { fetchImpl?: typeof fetch; t
     sourceId: 'open-meteo-flood',
     sourceName: 'Open-Meteo Flood API (GloFAS)',
     fetchImpl: opts?.fetchImpl,
-    timeoutMs: opts?.timeoutMs ?? 10000,
+    // Above the relay's 20 s upstream budget plus a cold start; river flow is not on the first paint.
+    timeoutMs: opts?.timeoutMs ?? 25000,
     ttlMs: 60 * 60 * 1000, // daily model: an hour of reuse is plenty
     retrievedAtOf: (v: RiverDischargeSeries[]) => v[0]?.retrievedAt ?? isoNoMs(Date.now()),
     live: async (get: (url: string, kind: 'json' | 'text') => Promise<unknown>) => {
-      const url = floodApiUrl();
-      const raw = await get(url, 'json');
-      return parseFloodResponse(raw, { dataMode: 'live', retrievedAt: isoNoMs(Date.now()), sourceUrl: url });
+      // Through the same-origin relay (src/lib/openMeteoRelay.ts), which fetches floodApiUrl() as is.
+      const payload = parseOpenMeteoRelay(await get(openMeteoRelayUrl('flood'), 'json'), 'flood');
+      if (!payload) throw new Error('the relay answer was not in the expected shape');
+      return parseFloodResponse(payload.raw, { dataMode: 'live', retrievedAt: payload.retrievedAt, sourceUrl: floodApiUrl() });
     },
     snapshot: () => {
       if (!source || typeof source.retrievedAt !== 'string') return null;

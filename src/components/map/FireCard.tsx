@@ -5,6 +5,7 @@
 // It takes the typed pick from fireLayers.ts directly: a cluster badge, a province/country badge, or a
 // grid cell (shown as its cluster when the cell belongs to one of the top clusters).
 import { useMemo } from 'react';
+import { useNowMs } from '../../lib/useNowMs';
 import { MapCard } from '../ui/MapCard';
 import type { MapCardFact } from '../ui/MapCard';
 import { MiniBars } from '../analyst/AnalystSection';
@@ -13,6 +14,7 @@ import {
   clusterAt,
   clusterSentence,
   dailyValues,
+  fireWindowWords,
   formatCount,
   formatFireTime,
   formatMw,
@@ -99,6 +101,8 @@ function HeadingLine({ heading }: { heading: SmokeHeading }) {
 
 export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlaces, airQuality, airTimeISO, onOpenWorkspace, onClose, className }: FireCardProps) {
   const withAir = airQuality !== undefined;
+  // "the last 24 h" while the snapshot is recent; "the 24 h to 21 Oct" once a deployed snapshot has aged.
+  const words = fireWindowWords(s.reference, useNowMs());
   const cluster: FireCluster | null = useMemo(() => {
     if (pick.kind === 'fire-cluster') return pick.cluster;
     if (pick.kind === 'fire-cell') return clusterAt(s, pick.cell.lat, pick.cell.lon);
@@ -139,7 +143,7 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
         kind="measured"
         kindLabel="MEASURED · FIRMS"
         facts={facts}
-        sentence={clusterSentence(cluster)}
+        sentence={clusterSentence(cluster, words)}
         action={action}
         source={source}
         onClose={onClose}
@@ -169,8 +173,8 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
     const n = rollup.last24h.count;
     const sentence =
       n > 0
-        ? `${formatCount(n)} hotspots in the last 24 h across ${rollup.name}; ${changeWords(rollup.frpChange24hPct, rollup.last24h.frp, rollup.prev24h.frp, 'the day before')}.`
-        : `No confident detections across ${rollup.name} in the last 24 h. ${NO_DETECTION_NOTE}`;
+        ? `${formatCount(n)} hotspots in ${words.day} across ${rollup.name}; ${changeWords(rollup.frpChange24hPct, rollup.last24h.frp, rollup.prev24h.frp, 'the day before')}.`
+        : `No confident detections across ${rollup.name} in ${words.day}. ${NO_DETECTION_NOTE}`;
     return (
       <MapCard
         className={className}
@@ -206,7 +210,7 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
   // A grid cell outside the top clusters (or a region badge whose rollup is missing).
   if (pick.kind === 'fire-cell') {
     const c = pick.cell;
-    const when = pick.recent ? 'the last 24 h' : 'the six days before the last 24 h';
+    const when = pick.recent ? words.day : words.earlier;
     const lat = `${Math.abs(c.lat).toFixed(2)}°${c.lat < 0 ? 'S' : 'N'}`;
     const lon = `${Math.abs(c.lon).toFixed(2)}°${c.lon < 0 ? 'W' : 'E'}`;
     return (
@@ -242,7 +246,7 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
         { label: 'Hotspots, 24 h', value: formatCount(pick.badge.count) },
         { label: 'Fire power, 24 h', ...mwParts(pick.badge.frp), note: 'summed FRP' },
       ]}
-      sentence={`${formatCount(pick.badge.count)} hotspots in the last 24 h across ${pick.badge.name}.`}
+      sentence={`${formatCount(pick.badge.count)} hotspots in ${words.day} across ${pick.badge.name}.`}
       action={action}
       source={source}
       onClose={onClose}

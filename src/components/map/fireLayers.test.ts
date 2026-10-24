@@ -53,6 +53,17 @@ describe('buildFireLayers', () => {
     expect(alpha(calm)).toBeLessThan(alpha(full));
   });
 
+  it('separated squares at a city (simple view): closeCoverage from zoom 5, the usual coverage otherwise', () => {
+    const cov = (zoom: number, closeCoverage?: number) =>
+      (buildFireLayers({ snapshot: snap, theme: 'dark', zoom, closeCoverage }).find((l) => l.id === 'fires-cells-24h-0.25')!.props as unknown as { coverage: number }).coverage;
+    expect(cov(4.8)).toBe(0.9);
+    expect(cov(6.5)).toBe(0.8);
+    expect(cov(4.8, 0.55)).toBe(0.9); // the regional view keeps its squares whole
+    expect(cov(5, 0.55)).toBe(0.55);
+    expect(cov(6.5, 0.55)).toBe(0.55);
+    expect(cov(6.5, 0.01)).toBe(0.2); // never a speck
+  });
+
   it('blends additively on dark and normally on light', () => {
     const dark = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 6 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
     const light = buildFireLayers({ snapshot: snap, theme: 'light', zoom: 6 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
@@ -121,7 +132,8 @@ describe('FireCard', () => {
     expect(html).toContain('Fire power, 24 h');
     expect(html).toContain('vs previous 24 h');
     expect(html).toContain('Open in workspace');
-    expect(html).toContain('hotspots in the last 24 h around');
+    // "the last 24 h" while the bundled snapshot is recent, else dated (fireWindowWords, tested in fires.test.ts).
+    expect(html).toMatch(/hotspots in (the last 24 h|the 24 h to \d{1,2} [A-Z][a-z]{2}) around/);
     expect(html).not.toMatch(/tonne|CO2|—/);
   });
 

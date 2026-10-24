@@ -11,7 +11,19 @@ import type { PtwcPayload } from './ptwc';
 import warningsFixture from './__fixtures__/warnings-snapshot-2026-10-13.json';
 import ptwcFixture from './__fixtures__/ptwc-snapshot-2026-10-13.json';
 import { loadFixtures } from './fixtures';
-import { NEAR_KM, belowTopOfScale, emptyWarningsText, endedLabel, isExpired, mergeWarnings, officialLevelFor, officialScale, warningMatchesGauge } from './warningsView';
+import {
+  NEAR_KM,
+  belowTopOfScale,
+  emptyWarningsText,
+  endedLabel,
+  feedForWarning,
+  gaugeForWarning,
+  isExpired,
+  mergeWarnings,
+  officialLevelFor,
+  officialScale,
+  warningMatchesGauge,
+} from './warningsView';
 import { findMagmaLevel } from './volcanoOfficial';
 import { officialVolcanoLevel } from '../components/map/volcanoLevels';
 
@@ -330,5 +342,25 @@ describe('officialScale: style by the issuer\'s own scale', () => {
       expect(officialScale(w)).toEqual({ rank: n, of: 5 });
       expect(belowTopOfScale(w)).toBe(n < 5);
     }
+  });
+});
+
+describe('gaugeForWarning and feedForWarning (the inspector shows what the list shows)', () => {
+  const snap = loadWarningsSnapshot();
+  it('finds the gauge behind a flood warning by id, and none for other hazards', () => {
+    const flood = snap.warnings.find((w) => w.hazard === 'flood' && snap.gauges.some((g) => warningMatchesGauge(w.id, g.id)));
+    expect(flood).toBeDefined();
+    const g = gaugeForWarning(flood!, snap.gauges);
+    expect(g && warningMatchesGauge(flood!.id, g.id)).toBe(true);
+    const volcano = snap.warnings.find((w) => w.hazard === 'volcano')!;
+    expect(gaugeForWarning(volcano, snap.gauges)).toBeNull();
+  });
+
+  it('finds the feed by the id prefix, else by issuer', () => {
+    const w = snap.warnings[0];
+    const feed = feedForWarning(w, snap.feeds);
+    expect(feed).not.toBeNull();
+    expect(w.id.startsWith(`${feed!.feedId}:`) || feed!.issuer === w.issuer).toBe(true);
+    expect(feedForWarning({ ...w, id: 'nowhere:1', issuer: 'Nobody' }, snap.feeds)).toBeNull();
   });
 });

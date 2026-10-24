@@ -60,6 +60,28 @@ describe('normaliseOpenMeteoWind', () => {
   });
 });
 
+/** The relay's answer around an Open-Meteo multi-location body. */
+const relay = (raw: unknown) => ({ feed: 'wind', retrievedAt: '2026-10-13T00:05:00Z', stale: false, raw });
+
+/** The grid with both levels in each location, as the relay's batched request returns it. */
+function bothLevels() {
+  const axes = gridAxes();
+  return axes.lats.flatMap((lat) =>
+    axes.lons.map((lon) => ({
+      latitude: lat,
+      longitude: lon,
+      hourly_units: { wind_speed_10m: 'm/s', wind_speed_925hPa: 'm/s' },
+      hourly: {
+        time: ['2026-10-13T00:00', '2026-10-13T01:00'],
+        wind_speed_10m: [5, 5],
+        wind_direction_10m: [140, 140],
+        wind_speed_925hPa: [8, 8],
+        wind_direction_925hPa: [270, 270],
+      },
+    })),
+  );
+}
+
 describe('loadWindField', () => {
   afterEach(() => resetWindCache());
 
@@ -92,13 +114,52 @@ describe('loadWindField', () => {
     let calls = 0;
     const ok = (async () => {
       calls += 1;
-      return new Response(JSON.stringify(body), { status: 200 });
+      return new Response(JSON.stringify(relay(body)), { status: 200 });
     }) as unknown as typeof fetch;
     const [a, b] = await Promise.all([loadWindField({ fetchImpl: ok }), loadWindField({ fetchImpl: ok })]);
     expect(calls).toBe(1);
     expect(a.status).toBe('live');
     expect(b.grid).toBe(a.grid);
     expect((await loadWindField({ fetchImpl: ok })).status).toBe('cached');
+  });
+
+  it('loads both levels with ONE relay request, stamped with the relay fetch time', async () => {
+    const asked: string[] = [];
+    const ok = (async (url: string) => {
+      asked.push(String(url));
+      return new Response(JSON.stringify(relay(bothLevels())), { status: 200 });
+    }) as unknown as typeof fetch;
+    const [ten, p925] = await Promise.all([loadWindField({ fetchImpl: ok }), loadWindField({ fetchImpl: ok, level: '925hPa' })]);
+    expect(asked).toEqual(['/api/open-meteo?feed=wind']);
+    expect(ten.status).toBe('live');
+    expect(p925.status).toBe('live');
+    expect(ten.grid!.level).toBe('10 m');
+    expect(p925.grid!.level).toBe('925 hPa');
+    expect(ten.grid!.retrievedAt).toBe('2026-10-13T00:05:00Z');
+    // 10 m from 140°, 925 hPa from 270°: each level reads its own variables.
+    expect(ten.grid!.u[0][0][0]).toBeCloseTo(-5 * Math.sin((140 * Math.PI) / 180));
+    expect(p925.grid!.u[0][0][0]).toBeCloseTo(8);
+  });
+
+  it('shows a stale relay copy as cached, and backs off (snapshot) while the relay is busy', async () => {
+    const stale = (async () => new Response(JSON.stringify({ ...relay(bothLevels()), stale: true }), { status: 200 })) as unknown as typeof fetch;
+    const r = await loadWindField({ fetchImpl: stale });
+    expect(r.status).toBe('cached');
+    expect(r.message).toBe('Open-Meteo is not answering; showing the model run retrieved 2026-10-13T00:05:00Z.');
+    resetWindCache();
+    let calls = 0;
+    const busy = (async () => {
+      calls += 1;
+      return new Response('{"error":"upstream_unavailable"}', { status: 503, headers: { 'retry-after': '60' } });
+    }) as unknown as typeof fetch;
+    const t0 = Date.parse('2026-10-13T01:00:00Z');
+    const b = await loadWindField({ fetchImpl: busy, now: () => t0 });
+    expect(b.status).toBe('snapshot');
+    expect(b.grid!.dataMode).toBe('historical');
+    expect(b.message).toBe('Open-Meteo is busy (HTTP 503); showing the bundled wind snapshot.');
+    const again = await loadWindField({ fetchImpl: busy, now: () => t0 + 30_000, level: '925hPa' });
+    expect(again.message).toMatch(/backoff in effect/);
+    expect(calls).toBe(1);
   });
 });
 
@@ -108,6 +169,7 @@ describe('925 hPa level (particle wind)', () => {
   it('requests the 925 hPa variables and normalises them with the 925 hPa label', () => {
     expect(buildWindUrl([0], [103], 3, '925hPa')).toContain('&hourly=wind_speed_925hPa,wind_direction_925hPa&');
     expect(buildWindUrl([0], [103])).toContain('&hourly=wind_speed_10m,wind_direction_10m&');
+    expect(buildWindUrl([0], [103], 3, ['10m', '925hPa'])).toContain('&hourly=wind_speed_10m,wind_direction_10m,wind_speed_925hPa,wind_direction_925hPa&');
     expect(PARTICLE_WIND_LEVEL).toBe('925hPa');
     // Trimmed real 925 hPa shape (2026-10-14 probe: 6.25 m/s).
     const loc = (lat: number, lon: number) => ({

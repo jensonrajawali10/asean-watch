@@ -3,7 +3,9 @@
 //
 // Sources (checked 2026-10-13):
 // - Endpoints: https://api-open.data.gov.sg/v2/real-time/api/{wind-direction,wind-speed,psi,pm25}
-//   (no key, CORS open). Wind direction is degrees FROM (10-minute average), speed in knots.
+//   (no key). Wind direction is degrees FROM (10-minute average), speed in knots. The browser asks the
+//   same-origin relay /api/sg (src/lib/sgRelay.ts), never data.gov.sg: its keyless limit is about six
+//   requests every few seconds, and its 429 carries no CORS header.
 // - Dataset pages: Wind Direction across Singapore
 //   https://data.gov.sg/datasets/d_534cf203023b51f51f879145ccc56ff9/view, Wind Speed across Singapore
 //   https://data.gov.sg/datasets/d_7677738484067741bf3b56ab5d69c7e9/view, Pollutant Standards Index (PSI)
@@ -15,6 +17,7 @@
 //   attribution follows its example notice ("Contains information from {name of dataset} accessed
 //   on {date} from {source of data} which is made available under the terms of ...").
 import snapshotJson from '../../data/nea-snapshot.json';
+import { SG_UPSTREAM, SgUnavailable, sgRelayUrl, unwrapSgRelay, type SgFeed } from './sgRelay';
 import type {
   DriftAssessment,
   HazeReading,
@@ -30,11 +33,19 @@ export const NEA_RANGE_KM = 600;
 export const SINGAPORE = { lat: 1.3521, lon: 103.8198 } as const;
 
 export const NEA_ENDPOINTS = {
-  windDirection: 'https://api-open.data.gov.sg/v2/real-time/api/wind-direction',
-  windSpeed: 'https://api-open.data.gov.sg/v2/real-time/api/wind-speed',
-  psi: 'https://api-open.data.gov.sg/v2/real-time/api/psi',
-  pm25: 'https://api-open.data.gov.sg/v2/real-time/api/pm25',
+  windDirection: SG_UPSTREAM['wind-direction'],
+  windSpeed: SG_UPSTREAM['wind-speed'],
+  psi: SG_UPSTREAM.psi,
+  pm25: SG_UPSTREAM.pm25,
 } as const;
+
+/** The relay feed behind each endpoint: the browser fetches sgRelayUrl(feed), never the endpoint itself. */
+export const NEA_RELAY_FEEDS: Record<keyof typeof NEA_ENDPOINTS, SgFeed> = {
+  windDirection: 'wind-direction',
+  windSpeed: 'wind-speed',
+  psi: 'psi',
+  pm25: 'pm25',
+};
 
 export const NEA_SOURCE_NAME = 'NEA real-time weather and air quality via data.gov.sg';
 /** data.gov.sg dataset page for the primary layer (wind direction); confirmed to resolve. */
@@ -433,23 +444,29 @@ class FetchFailure extends Error {}
  * 429 carries no CORS header, so in the browser it surfaces as a fetch TypeError.
  */
 function describeError(err: unknown, timeoutMs: number): string {
-  if (err instanceof FetchFailure) return err.message;
+  if (err instanceof FetchFailure || err instanceof SgUnavailable) return err.message;
   if (err instanceof Error && err.name === 'AbortError') return `timed out after ${timeoutMs} ms`;
   if (err instanceof TypeError) return 'rate limited or offline';
   if (err instanceof Error) return `network error (${err.message})`;
   return `network error (${String(err)})`;
 }
 
-async function fetchJson(fetchImpl: typeof fetch, url: string, signal: AbortSignal, aborted: Promise<never>): Promise<unknown> {
+/** One feed through the relay: data.gov.sg's body and the time the relay fetched it. */
+async function fetchJson(
+  fetchImpl: typeof fetch,
+  feed: SgFeed,
+  signal: AbortSignal,
+  aborted: Promise<never>,
+): Promise<{ body: unknown; retrievedAt: string }> {
   const request = (async () => {
-    const res = await fetchImpl(url, { signal, headers: { accept: 'application/json' } });
+    const res = await fetchImpl(sgRelayUrl(feed), { signal, headers: { accept: 'application/json' } });
     if (res.status === 429) throw new FetchFailure('rate limited');
     if (!res.ok) throw new FetchFailure(`HTTP ${res.status}`);
-    const body: unknown = await res.json();
+    const { raw: body, retrievedAt } = unwrapSgRelay(await res.json(), feed);
     if (isRecord(body) && 'code' in body && body.code !== 0) {
       throw new FetchFailure(`API code ${String(body.code)}${typeof body.errorMsg === 'string' && body.errorMsg ? ` (${body.errorMsg})` : ''}`);
     }
-    return body;
+    return { body, retrievedAt };
   })();
   return Promise.race([request, aborted]);
 }
@@ -546,6 +563,7 @@ function cachedResult(now: number): NeaLoadResult | null {
 /** Short label when a failure is transient (rate limit, CORS-less 429 or offline, timeout); else null. */
 function transientLabel(err: unknown): string | null {
   if (err instanceof FetchFailure) return err.message === 'rate limited' ? 'rate limited' : null;
+  if (err instanceof SgUnavailable) return err.transient ? err.message : null;
   if (err instanceof Error && err.name === 'AbortError') return 'timed out';
   if (err instanceof TypeError) return 'rate limited or offline';
   return null;
@@ -689,17 +707,17 @@ async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     const keys = Object.keys(NEA_ENDPOINTS) as Array<keyof typeof NEA_ENDPOINTS>;
-    let settled: PromiseSettledResult<unknown>[];
+    let settled: PromiseSettledResult<{ body: unknown; retrievedAt: string }>[];
     try {
       settled = await Promise.allSettled(
-        keys.map((k) => fetchJson(fetchImpl, NEA_ENDPOINTS[k], controller.signal, aborted)),
+        keys.map((k) => fetchJson(fetchImpl, NEA_RELAY_FEEDS[k], controller.signal, aborted)),
       );
     } finally {
       clearTimeout(timer);
     }
     const result = Object.fromEntries(keys.map((k, i) => [k, settled[i]])) as Record<
       keyof typeof NEA_ENDPOINTS,
-      PromiseSettledResult<unknown>
+      PromiseSettledResult<{ body: unknown; retrievedAt: string }>
     >;
     const reasonFor = (k: keyof typeof NEA_ENDPOINTS): string | null => {
       const r = result[k];
@@ -707,7 +725,7 @@ async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }
     };
     const valueOf = (k: keyof typeof NEA_ENDPOINTS): unknown => {
       const r = result[k];
-      return r.status === 'fulfilled' ? r.value : null;
+      return r.status === 'fulfilled' ? r.value.body : null;
     };
 
     const failedWind = (['windDirection', 'windSpeed'] as const).filter((k) => result[k].status === 'rejected');
@@ -727,7 +745,9 @@ async function fetchLive(opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }
     }
 
     const snapshot = loadNeaSnapshot();
-    const retrievedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    // When the relay fetched the wind (its copy can be up to a couple of minutes old).
+    const wind = result.windDirection;
+    const retrievedAt = wind.status === 'fulfilled' ? wind.value.retrievedAt : new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
     let context: NeaContext;
     try {
       context = normaliseNea(

@@ -4,8 +4,7 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { CloseIcon, SECTION_ICONS } from './icons';
-import { taskbarButtonId } from './Taskbar';
-import { SECTIONS, sectionById } from './workspace';
+import { SECTIONS, sectionById, taskbarButtonId } from './workspace';
 import type { SectionId } from './workspace';
 
 export interface WorkspaceDrawerProps {
@@ -14,20 +13,31 @@ export interface WorkspaceDrawerProps {
   onClose: () => void;
   /** Small line under the title, e.g. the selected watch area. */
   subtitle?: ReactNode;
+  /** A key that stays in view above the scrolling body (the Warnings section's LIVE / HISTORICAL line). */
+  note?: ReactNode;
   children: ReactNode;
 }
 
-export default function WorkspaceDrawer({ section, onSelectSection, onClose, subtitle, children }: WorkspaceDrawerProps) {
+export default function WorkspaceDrawer({ section, onSelectSection, onClose, subtitle, note, children }: WorkspaceDrawerProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLElement>(null);
   const lastSection = useRef<SectionId | null>(null);
   const open = section !== null;
 
-  // Focus the heading when the drawer opens or changes section; scroll the body to the top.
+  // Focus the heading when the drawer opens or changes section; scroll the body to the top, and the row of
+  // section tabs (phones) so the open one is fully in view, not cut off at the edge.
   useEffect(() => {
     if (!section) return;
     headingRef.current?.focus({ preventScroll: true });
     bodyRef.current?.scrollTo({ top: 0 });
+    const nav = tabsRef.current;
+    const tab = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (nav && tab && nav.scrollWidth > nav.clientWidth) {
+      const n = nav.getBoundingClientRect();
+      const t = tab.getBoundingClientRect();
+      nav.scrollLeft += t.left - n.left - (n.width - t.width) / 2;
+    }
     lastSection.current = section;
   }, [section]);
 
@@ -64,11 +74,12 @@ export default function WorkspaceDrawer({ section, onSelectSection, onClose, sub
             {def?.title ?? 'Workspace'}
           </h2>
           {subtitle && <p className="ws-drawer__subtitle">{subtitle}</p>}
+          {note && <p className="ws-drawer__note">{note}</p>}
         </div>
         <button type="button" className="ws-drawer__close" onClick={close} aria-label="Close the workspace (Esc)" title="Close (Esc)">
           <CloseIcon />
         </button>
-        <nav className="ws-tabs" aria-label="Sections">
+        <nav className="ws-tabs" aria-label="Sections" ref={tabsRef}>
           {SECTIONS.map((s) => {
             const Icon = SECTION_ICONS[s.id];
             const isActive = s.id === section;
