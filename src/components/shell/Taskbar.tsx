@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { MapIcon, SECTION_ICONS } from './icons';
 import { markRailHintSeen, RAIL_HINT_TEXT, RAIL_HINT_TITLE, railHintSeen, railHintShown } from './railHint';
-import { SECTIONS } from './workspace';
+import { SECTIONS, taskbarButtonId } from './workspace';
 import type { SectionId } from './workspace';
 
 export interface TaskbarProps {
@@ -17,11 +17,6 @@ export interface TaskbarProps {
   onMap: () => void;
   /** Number badge on the Warnings icon (active official messages), with `urgent` turning it red. */
   alerts?: { count: number; urgent: boolean } | null;
-}
-
-/** Element id of a taskbar button, so the drawer can return focus to it. */
-export function taskbarButtonId(section: SectionId | 'map'): string {
-  return `taskbar-${section}`;
 }
 
 export default function Taskbar({ active, onOpen, onMap, alerts = null }: TaskbarProps) {

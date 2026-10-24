@@ -10,62 +10,15 @@ import type { ReactNode } from 'react';
 
 /** APAC-wide lists start with this many items (newest first); "Show all" reveals the rest. */
 const LIST_CAP = 20;
-import type { OfficialWarning, OfficialWarningArea, WarningFeedStatus } from '../types';
+import type { OfficialWarning, WarningFeedStatus } from '../types';
 import type { GaugeReading } from '../lib/warnings';
-import { haversineKm } from '../lib/nea';
 import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
-import { belowTopOfScale, emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
+import { belowTopOfScale, emptyWarningsText, endedLabel, gaugeForWarning, isExpired } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
 import { countsText, groupByHazard, HAZARD_GROUP_NAME, isSoutheastAsia, warningCounts } from './shell/alerts';
-
-// ---------------------------------------------------------------------------
-// Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
-
-/** A flood warning and its gauge are matched by coordinates when the ids do not line up. */
-const GAUGE_MATCH_KM = 1;
-
-/** First usable point of a warning: its location, else the first area with coordinates. */
-function warningPoint(w: OfficialWarning): { lat: number; lon: number } | null {
-  if (w.location) return w.location;
-  const area = w.areas.find(
-    (a): a is OfficialWarningArea & { lat: number; lon: number } =>
-      typeof a.lat === 'number' && typeof a.lon === 'number' && Number.isFinite(a.lat) && Number.isFinite(a.lon),
-  );
-  return area ? { lat: area.lat, lon: area.lon } : null;
-}
-
-/**
- * The gauge behind a flood warning, or null.
- * 1. By id: the adapters build the warning id as "<gauge id>:<observedAt>" (ThaiWater, DSDA), so the
- *    gauge id must equal the warning id or be its ':'-delimited prefix (warningMatchesGauge).
- * 2. Else by place: the nearest gauge from the same issuer within 1 km of the warning's point.
- */
-export function gaugeForWarning(w: OfficialWarning, gauges: GaugeReading[]): GaugeReading | null {
-  if (w.hazard !== 'flood' || gauges.length === 0) return null;
-  const byId = gauges.find((g) => warningMatchesGauge(w.id, g.id));
-  if (byId) return byId;
-  const point = warningPoint(w);
-  if (!point) return null;
-  let best: GaugeReading | null = null;
-  let bestKm = Number.POSITIVE_INFINITY;
-  for (const g of gauges) {
-    if (g.issuer !== w.issuer) continue;
-    const km = haversineKm(point.lat, point.lon, g.lat, g.lon);
-    if (km <= GAUGE_MATCH_KM && km < bestKm) {
-      best = g;
-      bestKm = km;
-    }
-  }
-  return best;
-}
-
-/** The feed a warning was read from: by the "<feedId>:" id prefix, else by issuer name. */
-export function feedForWarning(w: OfficialWarning, feeds: WarningFeedStatus[]): WarningFeedStatus | null {
-  return feeds.find((f) => w.id.startsWith(`${f.feedId}:`)) ?? feeds.find((f) => f.issuer === w.issuer) ?? null;
-}
 
 // ---------------------------------------------------------------------------
 // Shared text helpers

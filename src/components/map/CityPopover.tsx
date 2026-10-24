@@ -43,7 +43,7 @@ const group = (n: number) => Math.round(n).toLocaleString('en-US');
 const clean = (name: string) => name.replace(/\s*\(.*\)\s*$/, '');
 
 /** MapCard tone for a PM2.5 band. */
-export function bandTone(band: Pm25Band | null): FactTone {
+function bandTone(band: Pm25Band | null): FactTone {
   switch (band?.key) {
     case 'good':
       return 'good';
@@ -62,7 +62,7 @@ export function bandTone(band: Pm25Band | null): FactTone {
 }
 
 /** "Air arriving from the south-east (modelled wind about 800 m up)." or null when calm or unknown. */
-export function arrivingFrom(wind: { u: number; v: number } | null): string | null {
+function arrivingFrom(wind: { u: number; v: number } | null): string | null {
   if (!wind || !Number.isFinite(wind.u) || !Number.isFinite(wind.v)) return null;
   const speed = Math.hypot(wind.u, wind.v);
   if (speed < 1) return 'Winds about 800 m up are calm here, so smoke lingers (modelled).';

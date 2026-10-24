@@ -4,8 +4,7 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { CloseIcon, SECTION_ICONS } from './icons';
-import { taskbarButtonId } from './Taskbar';
-import { SECTIONS, sectionById } from './workspace';
+import { SECTIONS, sectionById, taskbarButtonId } from './workspace';
 import type { SectionId } from './workspace';
 
 export interface WorkspaceDrawerProps {

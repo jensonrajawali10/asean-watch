@@ -26,6 +26,11 @@ export function sectionById(id: SectionId): (typeof SECTIONS)[number] {
   return SECTIONS.find((s) => s.id === id) ?? SECTIONS[0];
 }
 
+/** Element id of a taskbar button, so the drawer can return focus to it. */
+export function taskbarButtonId(section: SectionId | 'map'): string {
+  return `taskbar-${section}`;
+}
+
 export interface AppHash {
   /** Open workspace section; null means map mode. */
   ws: SectionId | null;

@@ -30,7 +30,7 @@ const signed = (n: number) => (n < 0 ? `−${Math.abs(n)}` : `+${n}`);
 const clean = (name: string) => name.replace(/\s*\(.*\)\s*$/, '');
 
 /** "Thu 00:00" in UTC. */
-export function shortHour(iso: string): string {
+function shortHour(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${d.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })} ${iso.slice(11, 16)}`;
@@ -44,13 +44,13 @@ function longHour(iso: string): string {
 }
 
 /** "now", "now +6 h", "saved run −3 h". A snapshot's anchor is its capture time: never "now". */
-export function offsetLabel(offsetH: number, snapshot: boolean): string {
+function offsetLabel(offsetH: number, snapshot: boolean): string {
   const base = snapshot ? 'saved run' : 'now';
   return offsetH === 0 ? base : `${base} ${signed(offsetH)} h`;
 }
 
 /** "Worst at Thu 00:00: Palangka Raya, 604 µg/m³" (MODELLED). */
-export function worstLine(w: { place: { name: string }; pm25: number; timeISO: string } | null | undefined): string {
+function worstLine(w: { place: { name: string }; pm25: number; timeISO: string } | null | undefined): string {
   if (!w || !Number.isFinite(w.pm25)) return 'Worst city: no air-quality data yet';
   return `Worst at ${shortHour(w.timeISO)}: ${clean(w.place.name)}, ${Math.round(w.pm25).toLocaleString('en-US')} µg/m³`;
 }

@@ -69,7 +69,7 @@ export default function WaterSection(p: WaterSectionProps) {
   }
   const relayedGauges = p.gauges.filter((g) => g.situation !== null || gaugeAboveThreshold(g));
   const otherGauges = p.gauges.length - relayedGauges.length;
-  const recentStations = p.tideStations.filter((s) => s.lastTimeISO && Date.now() - Date.parse(s.lastTimeISO) < 48 * 3600000).length;
+  const recentStations = p.tideStations.filter((s) => s.lastTimeISO && nowMs - Date.parse(s.lastTimeISO) < 48 * 3600000).length;
   const toggle = (key: keyof MapLayerState, on: boolean) => p.onLayersChange({ [key]: on } as Partial<MapLayerState>);
 
   const sources: SectionSource[] = [

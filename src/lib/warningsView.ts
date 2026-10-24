@@ -1,8 +1,10 @@
 // View helpers for official warnings: how the relayed messages are combined, matched and labelled in
 // the UI. Pure and deterministic (any clock is passed in), so the map, the rail and the analyst
 // workspace all make the same decisions. Nothing here rewords, re-scores or merges an issuer's text.
-import type { HazardType, Incident, OfficialWarning, WarningHazard } from '../types';
+import type { HazardType, Incident, OfficialWarning, OfficialWarningArea, WarningFeedStatus, WarningHazard } from '../types';
+import { haversineKm } from './nea';
 import { compareWarnings, warningDistanceKm } from './warnings';
+import type { GaugeReading } from './warnings';
 import { isExpired, timeMs } from './warningExpiry';
 
 export { isExpired };
@@ -166,4 +168,50 @@ export function officialScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGl
 export function belowTopOfScale(w: Pick<OfficialWarning, 'id' | 'level' | 'levelGloss'>): boolean {
   const s = officialScale(w);
   return s !== null && s.rank < s.of;
+}
+
+// ---------------------------------------------------------------------------
+// Matching helpers (pure; App passes the same gauge and feed to the inspector as the list shows)
+
+/** A flood warning and its gauge are matched by coordinates when the ids do not line up. */
+const GAUGE_MATCH_KM = 1;
+
+/** First usable point of a warning: its location, else the first area with coordinates. */
+function warningPoint(w: OfficialWarning): { lat: number; lon: number } | null {
+  if (w.location) return w.location;
+  const area = w.areas.find(
+    (a): a is OfficialWarningArea & { lat: number; lon: number } =>
+      typeof a.lat === 'number' && typeof a.lon === 'number' && Number.isFinite(a.lat) && Number.isFinite(a.lon),
+  );
+  return area ? { lat: area.lat, lon: area.lon } : null;
+}
+
+/**
+ * The gauge behind a flood warning, or null.
+ * 1. By id: the adapters build the warning id as "<gauge id>:<observedAt>" (ThaiWater, DSDA), so the
+ *    gauge id must equal the warning id or be its ':'-delimited prefix (warningMatchesGauge).
+ * 2. Else by place: the nearest gauge from the same issuer within 1 km of the warning's point.
+ */
+export function gaugeForWarning(w: OfficialWarning, gauges: GaugeReading[]): GaugeReading | null {
+  if (w.hazard !== 'flood' || gauges.length === 0) return null;
+  const byId = gauges.find((g) => warningMatchesGauge(w.id, g.id));
+  if (byId) return byId;
+  const point = warningPoint(w);
+  if (!point) return null;
+  let best: GaugeReading | null = null;
+  let bestKm = Number.POSITIVE_INFINITY;
+  for (const g of gauges) {
+    if (g.issuer !== w.issuer) continue;
+    const km = haversineKm(point.lat, point.lon, g.lat, g.lon);
+    if (km <= GAUGE_MATCH_KM && km < bestKm) {
+      best = g;
+      bestKm = km;
+    }
+  }
+  return best;
+}
+
+/** The feed a warning was read from: by the "<feedId>:" id prefix, else by issuer name. */
+export function feedForWarning(w: OfficialWarning, feeds: WarningFeedStatus[]): WarningFeedStatus | null {
+  return feeds.find((f) => w.id.startsWith(`${f.feedId}:`)) ?? feeds.find((f) => f.issuer === w.issuer) ?? null;
 }

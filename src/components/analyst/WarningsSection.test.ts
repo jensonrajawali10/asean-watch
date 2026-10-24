@@ -91,13 +91,11 @@ describe('WarningsSection live count', () => {
 describe('Warnings drawer header', () => {
   it('pins the LIVE / HISTORICAL key above the scrolling list, in one line', () => {
     const html = renderToStaticMarkup(
-      createElement(WorkspaceDrawer, {
-        section: 'warnings',
-        onSelectSection: () => {},
-        onClose: () => {},
-        note: createElement(WarningsModeNote),
-        children: createElement('p', null, 'list'),
-      }),
+      createElement(
+        WorkspaceDrawer,
+        { section: 'warnings', onSelectSection: () => {}, onClose: () => {}, note: createElement(WarningsModeNote) } as never,
+        createElement('p', null, 'list'),
+      ),
     );
     const head = html.slice(html.indexOf('<header class="ws-drawer__head"'), html.indexOf('</header>'));
     expect(head).toContain('<p class="ws-drawer__note">');
@@ -108,7 +106,7 @@ describe('Warnings drawer header', () => {
 
   it('shows no note when none is given', () => {
     const html = renderToStaticMarkup(
-      createElement(WorkspaceDrawer, { section: 'haze', onSelectSection: () => {}, onClose: () => {}, children: createElement('p', null, 'x') }),
+      createElement(WorkspaceDrawer, { section: 'haze', onSelectSection: () => {}, onClose: () => {} } as never, createElement('p', null, 'x')),
     );
     expect(html).not.toContain('ws-drawer__note');
   });
