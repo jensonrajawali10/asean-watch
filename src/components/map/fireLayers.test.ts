@@ -53,6 +53,17 @@ describe('buildFireLayers', () => {
     expect(alpha(calm)).toBeLessThan(alpha(full));
   });
 
+  it('separated squares at a city (simple view): closeCoverage from zoom 5, the usual coverage otherwise', () => {
+    const cov = (zoom: number, closeCoverage?: number) =>
+      (buildFireLayers({ snapshot: snap, theme: 'dark', zoom, closeCoverage }).find((l) => l.id === 'fires-cells-24h-0.25')!.props as unknown as { coverage: number }).coverage;
+    expect(cov(4.8)).toBe(0.9);
+    expect(cov(6.5)).toBe(0.8);
+    expect(cov(4.8, 0.55)).toBe(0.9); // the regional view keeps its squares whole
+    expect(cov(5, 0.55)).toBe(0.55);
+    expect(cov(6.5, 0.55)).toBe(0.55);
+    expect(cov(6.5, 0.01)).toBe(0.2); // never a speck
+  });
+
   it('blends additively on dark and normally on light', () => {
     const dark = buildFireLayers({ snapshot: snap, theme: 'dark', zoom: 6 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
     const light = buildFireLayers({ snapshot: snap, theme: 'light', zoom: 6 }).find((l) => l.id === 'fires-cells-24h-0.25')!;
