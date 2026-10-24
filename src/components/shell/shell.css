@@ -589,6 +589,18 @@
   font-size: 13px;
 }
 
+.ws-drawer__note {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ws-drawer__note .badge {
+  margin: 0;
+  vertical-align: 1px;
+}
+
 .ws-drawer__close {
   display: inline-grid;
   place-items: center;

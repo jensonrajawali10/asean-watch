@@ -43,7 +43,7 @@ import AppHeader from './components/AppHeader';
 import RecordInspector from './components/RecordInspector';
 import type { GeneratedBrief } from './components/BriefPanel';
 import DataCheckNotice from './components/DataCheckNotice';
-import { WarningInspector, feedForWarning, gaugeForWarning } from './components/OfficialWarnings';
+import { WarningInspector, WarningsModeNote, feedForWarning, gaugeForWarning } from './components/OfficialWarnings';
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNearSingapore } from './components/format';
 import Taskbar, { taskbarButtonId } from './components/shell/Taskbar';
@@ -1154,7 +1154,13 @@ export default function App() {
 
       <Taskbar active={ws} onOpen={(s) => (ws === s ? closeWorkspace() : openSection(s))} onMap={closeWorkspace} alerts={alerts} />
 
-      <WorkspaceDrawer section={ws} onSelectSection={openSection} onClose={closeWorkspace} subtitle={subtitle}>
+      <WorkspaceDrawer
+        section={ws}
+        onSelectSection={openSection}
+        onClose={closeWorkspace}
+        subtitle={subtitle}
+        note={ws === 'warnings' ? <WarningsModeNote /> : undefined}
+      >
         <ErrorBoundary resetKey={`${ws}|${selectedIncidentId}`} fallback={(message) => <PanelError message={message} />}>
           {section}
         </ErrorBoundary>

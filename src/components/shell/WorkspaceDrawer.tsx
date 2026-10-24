@@ -14,10 +14,12 @@ export interface WorkspaceDrawerProps {
   onClose: () => void;
   /** Small line under the title, e.g. the selected watch area. */
   subtitle?: ReactNode;
+  /** A key that stays in view above the scrolling body (the Warnings section's LIVE / HISTORICAL line). */
+  note?: ReactNode;
   children: ReactNode;
 }
 
-export default function WorkspaceDrawer({ section, onSelectSection, onClose, subtitle, children }: WorkspaceDrawerProps) {
+export default function WorkspaceDrawer({ section, onSelectSection, onClose, subtitle, note, children }: WorkspaceDrawerProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLElement>(null);
@@ -73,6 +75,7 @@ export default function WorkspaceDrawer({ section, onSelectSection, onClose, sub
             {def?.title ?? 'Workspace'}
           </h2>
           {subtitle && <p className="ws-drawer__subtitle">{subtitle}</p>}
+          {note && <p className="ws-drawer__note">{note}</p>}
         </div>
         <button type="button" className="ws-drawer__close" onClick={close} aria-label="Close the workspace (Esc)" title="Close (Esc)">
           <CloseIcon />

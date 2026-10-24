@@ -643,6 +643,19 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
 }
 
 /**
+ * The LIVE / HISTORICAL key in one line, pinned in the drawer header above the Warnings list so it never
+ * scrolls away from the cards it explains. WarningsHowTo below gives the full wording.
+ */
+export function WarningsModeNote() {
+  return (
+    <>
+      <span className="badge badge-mode badge-mode--live">LIVE</span> fetched from the agency this visit ·{' '}
+      <span className="badge badge-mode badge-mode--historical">HISTORICAL</span> a saved copy, its time shown · levels as issued
+    </>
+  );
+}
+
+/**
  * How to read the official-warnings list, at the top of the Warnings section: whose words are whose, and
  * what LIVE and HISTORICAL mean. Plain words only; it changes nothing in the agency text, levels or labels.
  */
