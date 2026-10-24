@@ -96,6 +96,22 @@ describe('parsePtwc', () => {
     expect(w.sourceUrl).toBe('https://www.tsunami.gov/events/xml/PHEBAtom.xml');
   });
 
+  it("dates a bare feed (title only, no entry, no CAP) by the feed's own <updated>", () => {
+    // tsunami.gov's PHEBAtom.xml as served on 24 Oct 2026 after the Vanuatu M6.9: no <entry>, no CAP link.
+    const atom = `<?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom"><id>urn:uuid:57a1cfe2</id><title>        TSUNAMI MESSAGE NUMBER   2        </title>
+    <updated>2026-10-24T03:30:54Z</updated>
+    <author><name>NWS PACIFIC TSUNAMI WARNING CENTER HONOLULU HI</name></author>
+    <link rel="related" title="Energy Map" href="https://www.tsunami.gov/events/PHEB/2026/10/24/26297000/2/WEPA40/ " type="image/jpeg" />
+    </feed>`;
+    const [w] = parsePtwc({ atomUrl: 'https://www.tsunami.gov/events/xml/PHEBAtom.xml', atom, capUrl: null, cap: null, retrievedAt: '2026-10-24T08:15:00Z' }, { dataMode: 'live', retrievedAt: '2026-10-24T08:15:00Z' }).warnings;
+    expect(w.product).toBe('TSUNAMI MESSAGE NUMBER 2');
+    expect(w.level).toBe('TSUNAMI MESSAGE NUMBER 2');
+    expect(w.issuedAt).toBe('2026-10-24T03:30:54Z');
+    expect(w.id).toBe('ptwc:2026-10-24T03:30:54Z');
+    expect(w.areas).toEqual([]);
+  });
+
   it('rejects a non-feed payload (e.g. the SPA index.html in vite dev)', () => {
     expect(() => parsePtwc('<!doctype html>', { dataMode: 'live', retrievedAt: 'x' })).toThrow();
   });
