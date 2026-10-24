@@ -23,7 +23,7 @@ describe('AppHeader first-load legend', () => {
       expect(html).toContain(t);
     }
     // Phones show the short words; the long ones stay in the markup for screen readers.
-    for (const t of ['Smoke forecast', 'Fires (NASA)', 'Volcanoes', 'Warnings', 'Wind']) expect(html).toContain(`<span class="hl-short" aria-hidden="true">${t}</span>`);
+    for (const t of ['Smoke forecast, not sensors', 'Fires (NASA)', 'Volcanoes', 'Warnings', 'Wind']) expect(html).toContain(`<span class="hl-short" aria-hidden="true">${t}</span>`);
   });
 });
 
@@ -65,8 +65,11 @@ describe('AppHeader time and freshness', () => {
   it('says what the time is and whether the forecast was fetched now or saved, keeping the LIVE / SNAPSHOT label', () => {
     // Local time first (the visitor's clock), the UTC time the analysts use after it.
     expect(render('LIVE')).toMatch(/Map shows <span class="headline-local">\w{3} \d{1,2}:\d{2} [ap]m your time<\/span><span class="headline-utc"> \(<time dateTime="2026-10-21T12:00:00Z">Wed 21 Oct 12:00 UTC<\/time>\)<\/span>/);
-    expect(render('LIVE')).toMatch(/>LIVE<span class="fresh-chip__run"> · fetched 21 Oct 12:55 UTC<\/span>/);
-    expect(render('SNAPSHOT')).toMatch(/>SNAPSHOT<span class="fresh-chip__run"> · saved 21 Oct 12:55 UTC<\/span>/);
+    // The verb and the date have their own spans: phones show a LIVE chip as "LIVE · 12:55 UTC" (shell.css).
+    const text = (html: string) => html.replace(/<[^>]+>/g, '');
+    expect(render('LIVE')).toContain('>LIVE<span class="fresh-chip__run"> · <span class="fresh-chip__verb">fetched </span><span class="fresh-chip__date">21 Oct </span>12:55 UTC</span>');
+    expect(text(render('LIVE'))).toContain('LIVE · fetched 21 Oct 12:55 UTC');
+    expect(text(render('SNAPSHOT'))).toContain('SNAPSHOT · saved 21 Oct 12:55 UTC');
     expect(render('LIVE')).toContain('Not an official warning service: follow your national agency.');
   });
 });

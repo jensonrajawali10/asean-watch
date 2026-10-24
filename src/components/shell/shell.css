@@ -1118,6 +1118,38 @@
   }
 }
 
+/* Phones: the map keeps a third more of the screen. "Show details" and the alerts pill sit in the card's
+   first row beside the name instead of a row of their own; a LIVE chip drops "fetched" and the date (its
+   title keeps them) so it shares a line with the hour; the scrubber leaves out its "Worst at" line, which
+   repeats the headline. A saved copy keeps its full "SNAPSHOT · saved <date>" chip. */
+@media (max-width: 767px) {
+  .app:not([data-drawer='open']) .topbar__right {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    gap: 6px;
+  }
+
+  .app:not([data-drawer='open']) .brand-name {
+    line-height: 30px;
+  }
+
+  .topbar__right .detail-toggle,
+  .topbar__right .alerts-pill {
+    min-height: 30px;
+    padding: 2px 10px;
+  }
+
+  .fresh-chip.is-live .fresh-chip__verb,
+  .fresh-chip.is-live .fresh-chip__date {
+    display: none;
+  }
+
+  :root[data-detail='simple'] .hscrub__readout {
+    display: none;
+  }
+}
+
 /* Phones: while a card is open the top bar keeps the brand, the headline and the disclaimer only, so the
    card does not cover the whole map (the card states its own time and that it is a forecast). */
 @media (max-width: 767px) {

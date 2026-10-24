@@ -30,12 +30,27 @@ function applyTheme(theme: Theme) {
 
 /** The first-load legend: what each symbol on the map is (long on desktop, short on phones). */
 const HEADLINE_LEGEND = [
-  { sym: 'circle', long: 'Circles: fine smoke forecast (PM2.5, modelled)', short: 'Smoke forecast' },
+  { sym: 'circle', long: 'Circles: fine smoke forecast (PM2.5, modelled)', short: 'Smoke forecast, not sensors' },
   { sym: 'fire', long: 'Orange squares: fires seen by NASA satellites', short: 'Fires (NASA)' },
   { sym: 'volcano', long: 'Triangles: volcanoes', short: 'Volcanoes' },
   { sym: 'pin', long: 'Red pins: official warnings', short: 'Warnings' },
   { sym: 'wind', long: 'Streaks: wind (forecast)', short: 'Wind' },
 ] as const;
+
+/**
+ * "24 Oct 07:56 UTC" with the date in its own span, so phones can show a LIVE chip as "LIVE · 07:56 UTC"
+ * beside the hour (a saved copy always keeps its date).
+ */
+function RunTime({ run }: { run: string }) {
+  const m = /^(.*\S)\s+(\d{2}:\d{2} UTC)$/.exec(run);
+  if (!m) return <>{run}</>;
+  return (
+    <>
+      <span className="fresh-chip__date">{m[1]} </span>
+      {m[2]}
+    </>
+  );
+}
 
 export interface AppHeaderProps {
   /** One live sentence built from the data, e.g. "Now: haze is worst over Palangka Raya (604 µg/m³, modelled)." */
@@ -148,7 +163,8 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
               {freshness.run && (
                 <span className="fresh-chip__run">
                   {' '}
-                  · {freshness.mode === 'SNAPSHOT' ? 'saved' : 'fetched'} {freshness.run}
+                  · <span className="fresh-chip__verb">{freshness.mode === 'SNAPSHOT' ? 'saved' : 'fetched'} </span>
+                  <RunTime run={freshness.run} />
                 </span>
               )}
             </span>
