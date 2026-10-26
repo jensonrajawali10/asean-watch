@@ -136,8 +136,15 @@ describe('loading', () => {
     const body = { hourly, hourly_units: units };
     expect(normaliseAshWind(body, points, '2026-10-14T00:10:00Z')?.volcanoes[0].times).toEqual(['2026-10-14T00:00:00Z', '2026-10-14T01:00:00Z']);
     expect(normaliseAshWind({ ...body, hourly_units: { ...units, wind_speed_700hPa: 'km/h' } }, points, 'x')).toBeNull();
-    const r = await loadAshWind({ points, fetchImpl: (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch });
+    const asked: string[] = [];
+    const relay = (async (url: string) => {
+      asked.push(String(url));
+      return new Response(JSON.stringify({ feed: 'ash', retrievedAt: '2026-10-14T00:05:00Z', stale: false, raw: body }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const r = await loadAshWind({ points, fetchImpl: relay });
     expect(r.status).toBe('live');
     expect(r.data?.dataMode).toBe('live');
+    expect(r.data?.retrievedAt).toBe('2026-10-14T00:05:00Z');
+    expect(asked).toEqual(['/api/open-meteo?feed=ash']);
   });
 });

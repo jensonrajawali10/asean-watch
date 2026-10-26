@@ -69,11 +69,11 @@ export default function WaterSection(p: WaterSectionProps) {
   }
   const relayedGauges = p.gauges.filter((g) => g.situation !== null || gaugeAboveThreshold(g));
   const otherGauges = p.gauges.length - relayedGauges.length;
-  const recentStations = p.tideStations.filter((s) => s.lastTimeISO && Date.now() - Date.parse(s.lastTimeISO) < 48 * 3600000).length;
+  const recentStations = p.tideStations.filter((s) => s.lastTimeISO && nowMs - Date.parse(s.lastTimeISO) < 48 * 3600000).length;
   const toggle = (key: keyof MapLayerState, on: boolean) => p.onLayersChange({ [key]: on } as Partial<MapLayerState>);
 
   const sources: SectionSource[] = [
-    { label: 'NOAA/NWS Pacific Tsunami Warning Center', url: 'https://www.tsunami.gov/', mode: p.ptwc.status.status === 'live' ? 'LIVE' : 'SNAPSHOT', retrievedAt: p.ptwc.status.retrievedAt },
+    { label: 'NOAA/NWS Pacific Tsunami Warning Center', url: 'https://www.tsunami.gov/', mode: p.ptwc.status.status === 'live' || p.ptwc.status.status === 'cached' ? 'LIVE' : 'SNAPSHOT', retrievedAt: p.ptwc.status.retrievedAt },
     { label: 'BMKG InaTEWS tsunami messages', url: 'https://inatews.bmkg.go.id/', mode: 'OFFICIAL' },
     { label: 'IOC Sea Level Station Monitoring Facility (VLIZ)', url: 'https://www.ioc-sealevelmonitoring.org/', mode: 'MEASURED', retrievedAt: p.tideListRetrievedAt, licence: 'DOI 10.14284/482' },
     { label: 'GloFAS river discharge via Open-Meteo Flood API', url: 'https://open-meteo.com/en/docs/flood-api', mode: 'MODELLED', retrievedAt: p.riverFlow?.status.retrievedAt ?? null, licence: 'CC BY 4.0' },
@@ -230,7 +230,7 @@ export default function WaterSection(p: WaterSectionProps) {
   return (
     <AnalystSection
       id="water"
-      title="Water & tsunami"
+      title="Tsunami & floods"
       lede="Official tsunami messages first, relayed verbatim. Then the flood gauges the agencies publish, the raw IOC tide gauges, and the modelled GloFAS river flow. Raw gauges and model output are never warnings; the official word comes from BMKG, PTWC through national authorities, JMA, PHIVOLCS and the national flood agencies."
       sources={sources}
     >
@@ -267,7 +267,7 @@ export default function WaterSection(p: WaterSectionProps) {
         <KeyFigure
           label="River points (modelled)"
           value={p.riverFlow ? String(p.riverFlow.series.length) : '…'}
-          note={!p.riverFlow ? 'loading GloFAS run' : p.riverFlow.status.status === 'live' ? 'live GloFAS run' : 'saved GloFAS run'}
+          note={!p.riverFlow ? 'loading GloFAS run' : p.riverFlow.status.status === 'live' || p.riverFlow.status.status === 'cached' ? 'live GloFAS run' : 'saved GloFAS run'}
         />
       </div>
 
@@ -332,7 +332,7 @@ export default function WaterSection(p: WaterSectionProps) {
         <div className="an-table-wrap">
           <table className="an-table">
             <caption>
-              MODELLED discharge, m³/s · {p.riverFlow.status.status === 'live' ? 'live run' : 'saved run'} {formatUtc(p.riverFlow.status.retrievedAt)}
+              MODELLED discharge, m³/s · {p.riverFlow.status.status === 'live' || p.riverFlow.status.status === 'cached' ? 'live run' : 'saved run'} {formatUtc(p.riverFlow.status.retrievedAt)}
             </caption>
             <thead>
               <tr>

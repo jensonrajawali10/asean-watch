@@ -10,62 +10,15 @@ import type { ReactNode } from 'react';
 
 /** APAC-wide lists start with this many items (newest first); "Show all" reveals the rest. */
 const LIST_CAP = 20;
-import type { OfficialWarning, OfficialWarningArea, WarningFeedStatus } from '../types';
+import type { OfficialWarning, WarningFeedStatus } from '../types';
 import type { GaugeReading } from '../lib/warnings';
-import { haversineKm } from '../lib/nea';
 import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
-import { belowTopOfScale, emptyWarningsText, endedLabel, isExpired, warningMatchesGauge } from '../lib/warningsView';
+import { belowTopOfScale, emptyWarningsText, endedLabel, gaugeForWarning, isExpired } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
 import { countsText, groupByHazard, HAZARD_GROUP_NAME, isSoutheastAsia, warningCounts } from './shell/alerts';
-
-// ---------------------------------------------------------------------------
-// Matching helpers (pure; exported so App can pass the same gauge and feed to the inspector)
-
-/** A flood warning and its gauge are matched by coordinates when the ids do not line up. */
-const GAUGE_MATCH_KM = 1;
-
-/** First usable point of a warning: its location, else the first area with coordinates. */
-function warningPoint(w: OfficialWarning): { lat: number; lon: number } | null {
-  if (w.location) return w.location;
-  const area = w.areas.find(
-    (a): a is OfficialWarningArea & { lat: number; lon: number } =>
-      typeof a.lat === 'number' && typeof a.lon === 'number' && Number.isFinite(a.lat) && Number.isFinite(a.lon),
-  );
-  return area ? { lat: area.lat, lon: area.lon } : null;
-}
-
-/**
- * The gauge behind a flood warning, or null.
- * 1. By id: the adapters build the warning id as "<gauge id>:<observedAt>" (ThaiWater, DSDA), so the
- *    gauge id must equal the warning id or be its ':'-delimited prefix (warningMatchesGauge).
- * 2. Else by place: the nearest gauge from the same issuer within 1 km of the warning's point.
- */
-export function gaugeForWarning(w: OfficialWarning, gauges: GaugeReading[]): GaugeReading | null {
-  if (w.hazard !== 'flood' || gauges.length === 0) return null;
-  const byId = gauges.find((g) => warningMatchesGauge(w.id, g.id));
-  if (byId) return byId;
-  const point = warningPoint(w);
-  if (!point) return null;
-  let best: GaugeReading | null = null;
-  let bestKm = Number.POSITIVE_INFINITY;
-  for (const g of gauges) {
-    if (g.issuer !== w.issuer) continue;
-    const km = haversineKm(point.lat, point.lon, g.lat, g.lon);
-    if (km <= GAUGE_MATCH_KM && km < bestKm) {
-      best = g;
-      bestKm = km;
-    }
-  }
-  return best;
-}
-
-/** The feed a warning was read from: by the "<feedId>:" id prefix, else by issuer name. */
-export function feedForWarning(w: OfficialWarning, feeds: WarningFeedStatus[]): WarningFeedStatus | null {
-  return feeds.find((f) => w.id.startsWith(`${f.feedId}:`)) ?? feeds.find((f) => f.issuer === w.issuer) ?? null;
-}
 
 // ---------------------------------------------------------------------------
 // Shared text helpers
@@ -183,7 +136,7 @@ export default function OfficialWarningsPanel({
         )}
       </div>
 
-      <p className="ow-relayed">Each message is the agency's own text, relayed as issued. Southeast Asia first, then the wider Asia-Pacific.</p>
+      <p className="ow-relayed">Southeast Asia first, then the wider Asia-Pacific.</p>
       <div className="ow-scroll">
         {n === 0 ? (
           <p className="ow-empty">{emptyWarningsText({ loading, nearName })}</p>
@@ -639,5 +592,54 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
         </div>
       )}
     </Dialog>
+  );
+}
+
+/**
+ * The LIVE / HISTORICAL key in one line, pinned in the drawer header above the Warnings list so it never
+ * scrolls away from the cards it explains. WarningsHowTo below gives the full wording.
+ */
+export function WarningsModeNote() {
+  return (
+    <>
+      <span className="badge badge-mode badge-mode--live">LIVE</span> fetched from the agency this visit ·{' '}
+      <span className="badge badge-mode badge-mode--historical">HISTORICAL</span> a saved copy, its time shown · levels as issued
+    </>
+  );
+}
+
+/**
+ * How to read the official-warnings list, at the top of the Warnings section: whose words are whose, and
+ * what LIVE and HISTORICAL mean. Plain words only; it changes nothing in the agency text, levels or labels.
+ */
+export function WarningsHowTo() {
+  return (
+    <ul className="ow-howto" aria-label="How to read this list">
+      <li>
+        <span className="ow-howto__card" aria-hidden="true" />
+        <span>
+          <strong>Each card</strong> is one agency message in the agency's own words, as issued.
+        </span>
+      </li>
+      <li>
+        <span className="official-chip official-chip--lower ow-howto__chip" aria-hidden="true">
+          Level
+        </span>
+        <span>
+          <strong>The agency's level</strong>, as issued. The grey words after it are our fixed, plain gloss of that agency's scale (for example
+          "Level 2 of 4").
+        </span>
+      </li>
+      <li>
+        <span className="ow-howto__modes" aria-hidden="true">
+          <span className="badge badge-mode badge-mode--live">LIVE</span>
+          <span className="badge badge-mode badge-mode--historical">HISTORICAL</span>
+        </span>
+        <span>
+          <strong>LIVE</strong>: fetched from the agency during this visit. <strong>HISTORICAL SNAPSHOT</strong>: a saved copy with the time it was
+          saved, shown when the agency has no open live feed or did not answer. Check the agency for the current state.
+        </span>
+      </li>
+    </ul>
   );
 }

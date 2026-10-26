@@ -86,10 +86,110 @@
 }
 
 .taskbar__label {
+  color: var(--text);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.1;
+}
+
+/* Desktop rail: each icon sits on a small tile, so the rail reads as buttons even in a still view. */
+@media (min-width: 768px) {
+  .taskbar__btn > svg {
+    box-sizing: content-box;
+    padding: 4px 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    transition:
+      border-color 120ms ease-out,
+      background-color 120ms ease-out;
+  }
+
+  .taskbar__btn:hover > svg {
+    border-color: var(--accent-edge-hover);
+    background: var(--selected-bg);
+  }
+
+  .taskbar__btn.is-active > svg {
+    border-color: var(--accent);
+    background: var(--selected-bg);
+  }
+}
+
+/* First-visit callout beside the rail (Taskbar.tsx), below the headline card. Desktop only. */
+.rail-callout {
+  display: none;
+}
+
+@media (min-width: 768px) and (min-height: 600px) {
+  .rail-callout {
+    position: absolute;
+    z-index: 55;
+    top: calc(var(--header-offset, 180px) + 20px);
+    left: calc(100% + 14px);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    width: 250px;
+    padding: 10px 12px;
+    border: 1px solid var(--accent-edge);
+    border-radius: var(--radius);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    color: var(--text-muted);
+    font-size: 12.5px;
+    line-height: 1.4;
+  }
+
+  /* The arrow points at the rail. */
+  .rail-callout::before {
+    content: '';
+    position: absolute;
+    top: 18px;
+    left: -7px;
+    width: 12px;
+    height: 12px;
+    border-bottom: 1px solid var(--accent-edge);
+    border-left: 1px solid var(--accent-edge);
+    background: var(--panel);
+    transform: rotate(45deg);
+  }
+
+  .rail-callout p {
+    margin: 0;
+  }
+
+  .rail-callout strong {
+    display: block;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .rail-callout__ok {
+    min-height: 28px;
+    padding: 2px 12px;
+    border: 1px solid var(--accent-edge);
+    border-radius: 999px;
+    background: var(--panel-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .rail-callout__ok:hover {
+    border-color: var(--accent-edge-hover);
+  }
+
+  .rail-callout__ok:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
 }
 
 .taskbar__badge {
@@ -273,7 +373,7 @@
 }
 
 .headline-note {
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 .fresh-chip {
@@ -351,6 +451,14 @@
 .alerts-pill__count {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
+}
+
+.alerts-pill__short {
+  display: none;
+}
+
+.headline-local {
+  color: var(--text);
 }
 
 .alerts-pill.is-empty {
@@ -481,6 +589,18 @@
   font-size: 13px;
 }
 
+.ws-drawer__note {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ws-drawer__note .badge {
+  margin: 0;
+  vertical-align: 1px;
+}
+
 .ws-drawer__close {
   display: inline-grid;
   place-items: center;
@@ -505,7 +625,10 @@
   margin: 8px -12px 0 -16px;
   padding: 0 12px 0 16px;
   overflow-x: auto;
-  scrollbar-width: thin;
+  /* Swipe, wheel or Tab to the rest; the open tab is scrolled into view. The fade says there is more. */
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
 }
 
 .ws-tab {
@@ -547,6 +670,8 @@
   overflow: auto;
   overscroll-behavior: contain;
   padding: 10px 16px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 /* Panels reused inside the drawer share its surface: hairlines instead of boxes. */
@@ -797,6 +922,10 @@
     display: none;
   }
 
+  .alerts-pill__short {
+    display: inline;
+  }
+
   .ws-drawer {
     left: 0;
     bottom: 56px;
@@ -868,13 +997,16 @@
   }
 }
 
-/* Beside an open drawer on mid-size screens the map strip is narrow: the map key would cover the top bar,
-   and the alerts pill shows its number only (its title still says what it counts). */
-@media (min-width: 768px) and (max-width: 1199px) {
+/* Beside an open drawer the map strip is narrow: the map key would cover its middle (the drawer's Layers
+   section explains every layer), and on mid-size screens the alerts pill shows its number only (its title
+   still says what it counts). */
+@media (min-width: 768px) {
   .app[data-drawer='open'] .mv-key {
     display: none;
   }
+}
 
+@media (min-width: 768px) and (max-width: 1199px) {
   .app[data-drawer='open'] .alerts-pill__text {
     display: none;
   }
@@ -972,12 +1104,98 @@
   transform: rotate(-45deg);
 }
 
+/* A wind streak: a short line that fades in, like the particle trails. */
+.hl-sym--wind {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, transparent, var(--text));
+}
+
+.hl-short {
+  display: none;
+}
+
 .app[data-drawer='open'] .headline-legend {
   display: none;
 }
 
+/* Phones: a shorter top bar. The brand line already says what the site is ("What is this?" is in the
+   workspace), the freshness chip carries a UTC time, and the region is in the name. */
+@media (max-width: 767px) {
+  .brand-about,
+  .brand-line__region,
+  .headline-utc {
+    display: none;
+  }
+}
+
+/* Phones: the map keeps a third more of the screen. "Show details" and the alerts pill sit in the card's
+   first row beside the name instead of a row of their own; a LIVE chip drops "fetched" and the date (its
+   title keeps them) so it shares a line with the hour; the scrubber leaves out its "Worst at" line, which
+   repeats the headline. A saved copy keeps its full "SNAPSHOT · saved <date>" chip. */
+@media (max-width: 767px) {
+  .app:not([data-drawer='open']) .topbar__right {
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    gap: 6px;
+  }
+
+  .app:not([data-drawer='open']) .brand-name {
+    line-height: 30px;
+  }
+
+  .topbar__right .detail-toggle,
+  .topbar__right .alerts-pill {
+    min-height: 30px;
+    padding: 2px 10px;
+  }
+
+  .fresh-chip.is-live .fresh-chip__verb,
+  .fresh-chip.is-live .fresh-chip__date {
+    display: none;
+  }
+
+  :root[data-detail='simple'] .hscrub__readout {
+    display: none;
+  }
+}
+
+/* Phones: while a card is open the top bar keeps the brand, the headline and the disclaimer only, so the
+   card does not cover the whole map (the card states its own time and that it is a forecast). */
+@media (max-width: 767px) {
+  .app[data-card='open'] .brand-line,
+  .app[data-card='open'] .brand-about,
+  .app[data-card='open'] .headline-legend,
+  .app[data-card='open'] .headline-meta > :not(.headline-note) {
+    display: none;
+  }
+}
+
+/* Phones: the same legend in short words, as a strip set apart from the headline. */
 @media (max-width: 767px) {
   .headline-legend {
-    display: none;
+    gap: 4px 12px;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-2);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .headline-legend .hl-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .headline-legend .hl-short {
+    display: inline;
   }
 }

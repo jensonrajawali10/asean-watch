@@ -3,7 +3,7 @@
 // the server builds the facts itself and holds the API key. The summary is shown as plain text with
 // citation chips, under a persistent label that it is AI-written and not an official warning.
 import { useEffect, useRef, useState } from 'react';
-import { AI_BRIEF_LABEL, AI_BRIEF_SECTIONS, splitCitations } from '../lib/aiBrief';
+import { AI_BRIEF_LABEL, AI_BRIEF_SECTIONS, aiBriefErrorMessage, splitCitations } from '../lib/aiBrief';
 import type { AiBriefError, AiBriefSuccess } from '../lib/aiBrief';
 import './AiBriefPanel.css';
 
@@ -19,18 +19,6 @@ type State =
   | { key: string; status: 'error'; message: string };
 
 const SECTION_SET = new Set<string>(AI_BRIEF_SECTIONS);
-
-function errorMessage(status: number, body: Partial<AiBriefError> | null): string {
-  const code = body?.error;
-  if (code === 'not_configured' || (status === 503 && !code)) return 'AI brief not configured.';
-  if (code === 'rate_limited' || status === 429) {
-    const mins = body?.retryAfterSeconds ? Math.max(1, Math.ceil(body.retryAfterSeconds / 60)) : null;
-    return `Rate limited: too many AI summaries from this connection. Try again${mins ? ` in about ${mins} min` : ' later'}.`;
-  }
-  if (status === 404) return 'AI brief failed: the summary service is not available on this server.';
-  if (code === 'refused') return 'AI brief failed: the model declined to summarise this brief.';
-  return `AI brief failed${body?.message ? `: ${body.message}` : ` (HTTP ${status})`}. Try again.`;
-}
 
 function formatUtc(iso: string): string {
   const t = Date.parse(iso);
@@ -119,7 +107,7 @@ export default function AiBriefPanel({ watchId, dayIndex }: AiBriefPanelProps) {
       setState(
         ok
           ? { key, status: 'done', result: body as AiBriefSuccess }
-          : { key, status: 'error', message: errorMessage(res.status, body as Partial<AiBriefError> | null) },
+          : { key, status: 'error', message: aiBriefErrorMessage(res.status, body as Partial<AiBriefError> | null) },
       );
     } catch (err) {
       if (controller.signal.aborted) {

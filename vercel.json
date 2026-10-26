@@ -4,6 +4,9 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/open-meteo.ts": { "maxDuration": 30 }
+  },
   "headers": [
     {
       "source": "/assets/(.*)",

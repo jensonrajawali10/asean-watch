@@ -18,10 +18,15 @@
 // - Jakarta DSDA Posko Banjir xmldata.xml. Units: the XML is in millimetres. Evidence: DSDA's own page
 //   https://poskobanjir.dsdadki.web.id/ renders every value as `value / 10 + " cm"` (thresholds and
 //   water level, e.g. label_siaga1 " > " + vSiaga1 / 10 + " cm (BAHAYA)"), and Katulampa's 2000/1500/800
-//   match its published 200/150/80 cm Siaga levels. We show cm, as DSDA does.
+//   match its published 200/150/80 cm Siaga levels. We show cm, as DSDA does. Read through the
+//   same-origin relay /api/dsda (src/lib/dsdaProxy.ts): since about 8 Oct 2026 the host presents a
+//   certificate signed by its own Fortinet firewall, which browsers reject (ERR_CERT_AUTHORITY_INVALID).
+//   The relay keeps TLS verification on, so until DSDA fixes it the HISTORICAL snapshot is shown.
 // - data.gov.sg PUB flood alerts (shares the NEA data.gov.sg rate-limit backoff).
 import snapshotJson from '../../data/warnings-snapshot.json';
 import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
+import { DSDA_REASON_TEXT, DSDA_RELAY_PATH, type DsdaUnavailableReason } from './dsdaRelay';
+import { SgUnavailable, sgRelayUrl, unwrapSgRelay } from './sgRelay';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
 import { idnDistrictIndex, placeTsunamiAreas } from './tsunamiAreas';
 import { isExpired } from './warningExpiry';
@@ -1258,6 +1263,35 @@ interface FeedSpec {
 
 type Getter = (url: string, kind: 'json' | 'text') => Promise<unknown>;
 
+/** A payload that came through one of our relays, with the time the relay fetched it upstream. */
+class Relayed {
+  raw: unknown;
+  retrievedAt: string;
+  constructor(raw: unknown, retrievedAt: string) {
+    this.raw = raw;
+    this.retrievedAt = retrievedAt;
+  }
+}
+
+/**
+ * The DSDA relay's answer (src/lib/dsdaRelay.ts) -> the floodgate XML, or an error carrying one of the
+ * relay's fixed reasons (shown as "Live feed unavailable (…)" beside the HISTORICAL snapshot).
+ */
+export function relayedDsda(payload: unknown): Relayed {
+  if (!isRecord(payload)) throw new Error('the DSDA relay answer was not in the expected shape');
+  if (payload.available === true && typeof payload.xml === 'string') {
+    return new Relayed(payload.xml, toUtcIso(payload.retrievedAt) ?? nowIso(Date.now()));
+  }
+  const reason = typeof payload.reason === 'string' && payload.reason in DSDA_REASON_TEXT ? (payload.reason as DsdaUnavailableReason) : null;
+  throw new Error(reason ? DSDA_REASON_TEXT[reason] : 'the DSDA relay did not return floodgate data');
+}
+
+/** The data.gov.sg relay's answer (src/lib/sgRelay.ts) for PUB flood alerts -> data.gov.sg's body. */
+function relayedSg(payload: unknown): Relayed {
+  const { raw, retrievedAt } = unwrapSgRelay(payload, 'flood-alerts');
+  return new Relayed(raw, retrievedAt);
+}
+
 function isoDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
@@ -1303,8 +1337,10 @@ const SPECS: FeedSpec[] = [
   { key: 'gdacs', parse: parseGdacs, fetchRaw: (get, nowMs) => get(gdacsSearchUrl(nowMs), 'json') },
   { key: 'magma', parse: parseMagmaSnapshot },
   { key: 'thaiwater', parse: parseThaiWater, fetchRaw: (get) => get(FEEDS.thaiwater.url, 'json') },
-  { key: 'dsda', parse: parseDsda, fetchRaw: (get) => get(FEEDS.dsda.url, 'text') },
-  { key: 'pub', parse: parsePubFlood, fetchRaw: (get) => get(FEEDS.pub.url, 'json'), dataGovSg: true },
+  // Through the same-origin relay (api/dsda.ts): DSDA's certificate is not trusted by browsers.
+  { key: 'dsda', parse: parseDsda, fetchRaw: async (get) => relayedDsda(await get(DSDA_RELAY_PATH, 'json')) },
+  // Through the same-origin relay (api/sg.ts): data.gov.sg's keyless limit is a few requests a second.
+  { key: 'pub', parse: parsePubFlood, fetchRaw: async (get) => relayedSg(await get(sgRelayUrl('flood-alerts'), 'json')), dataGovSg: true },
 ];
 
 /** Snapshot feed ids differ from FEEDS keys only for the JMA tsunami detail URL field. */
@@ -1473,6 +1509,7 @@ class HttpFailure extends Error {
 /** Readable reason and whether it should start a backoff (429, CORS-less 429 / offline, timeout). */
 function classify(err: unknown, timeoutMs: number): { reason: string; transient: boolean } {
   if (err instanceof HttpFailure) return { reason: err.message, transient: err.status === 429 };
+  if (err instanceof SgUnavailable) return { reason: err.message, transient: err.transient };
   if (err instanceof Error && err.name === 'AbortError') return { reason: `timed out after ${timeoutMs} ms`, transient: true };
   if (err instanceof TypeError) return { reason: 'rate limited or offline', transient: true };
   if (err instanceof Error) return { reason: err.message, transient: false };
@@ -1569,8 +1606,9 @@ async function loadFeed(
       aborted,
     ]);
   try {
-    const raw = await spec.fetchRaw(get, now);
-    const retrievedAt = nowIso(Date.now());
+    const got = await spec.fetchRaw(get, now);
+    const raw = got instanceof Relayed ? got.raw : got;
+    const retrievedAt = got instanceof Relayed ? got.retrievedAt : nowIso(Date.now());
     const result = spec.parse(raw, { dataMode: 'live', retrievedAt });
     writeCache(feed.id, { storedAt: Date.now(), retrievedAt, result });
     clearBackoff(feed.id);

@@ -4,12 +4,16 @@
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { PM25_BANDS, WHO_PM25_24H_UGM3 } from '../../lib/airQuality';
+import { fireWindowWords, loadFireSnapshot } from '../../lib/fires';
+import { useNowMs } from '../../lib/useNowMs';
 
 const MAP_KEY_ROWS = {
   circles: { name: 'Coloured circles', text: 'Fine smoke (PM2.5) in the air, in µg/m³. Bigger and darker is worse. A forecast, not a measurement.' },
   pins: { name: 'Red pins', text: 'An official warning from a national agency (floods, tsunamis, volcanoes). Not a fire.' },
   volcanoes: { name: 'Triangles', text: 'Volcanoes. Click one for its official alert level.' },
   fires: { name: 'Orange squares', text: 'Fires seen by NASA satellites in the last 24 hours ("hotspots").' },
+  firesDated: { name: 'Orange squares', text: (day: string) => `Fires seen by NASA satellites in ${day} ("hotspots"; a saved copy).` },
+  wind: { name: 'Streaks', text: 'The wind about 800 m up, the height that carries smoke. A forecast.' },
 } as const;
 
 /** Phones start with the key folded to its title (one tap opens it): open, it would cover most of the map. */
@@ -23,6 +27,9 @@ function startsOpen(): boolean {
 
 export default function MapKey() {
   const [open, setOpen] = useState(startsOpen);
+  // FIRMS is a bundled snapshot: once it has aged, the key dates it rather than say "the last 24 hours".
+  const fireSnap = loadFireSnapshot();
+  const fireWords = fireWindowWords(fireSnap?.reference ?? '', useNowMs());
   return (
     <section className={`mv-key${open ? '' : ' is-closed'}`} aria-label="Map key">
       <button type="button" className="mv-key__toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
@@ -63,7 +70,14 @@ export default function MapKey() {
           <li>
             <span className="mv-key__fire" aria-hidden="true" />
             <span>
-              <strong>{MAP_KEY_ROWS.fires.name}</strong> {MAP_KEY_ROWS.fires.text}
+              <strong>{MAP_KEY_ROWS.fires.name}</strong>{' '}
+              {fireWords.dated ? MAP_KEY_ROWS.firesDated.text(fireWords.day) : MAP_KEY_ROWS.fires.text}
+            </span>
+          </li>
+          <li>
+            <span className="mv-key__wind" aria-hidden="true" />
+            <span>
+              <strong>{MAP_KEY_ROWS.wind.name}</strong> {MAP_KEY_ROWS.wind.text}
             </span>
           </li>
         </ul>

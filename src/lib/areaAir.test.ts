@@ -130,5 +130,6 @@ describe('plain words', () => {
     expect(html).toContain('What&#x27;s on the map');
     expect(html).toContain('Fires seen by NASA satellites');
     expect(html).toContain('Volcanoes.');
+    expect(html).toContain('The wind about 800 m up');
   });
 });

@@ -73,10 +73,18 @@ describe('parseFloodResponse', () => {
 
 describe('loadFloodModel', () => {
   it('live, then HISTORICAL snapshot, then unavailable', async () => {
-    const ok = (async () => new Response(JSON.stringify(raw), { status: 200 })) as unknown as typeof fetch;
+    const asked: string[] = [];
+    const ok = (async (url: string) => {
+      asked.push(String(url));
+      return new Response(JSON.stringify({ feed: 'flood', retrievedAt: '2026-10-21T06:00:00Z', stale: false, raw }), { status: 200 });
+    }) as unknown as typeof fetch;
     const live = await loadFloodModel({ fetchImpl: ok });
     expect(live.status.status).toBe('live');
     expect(live.series[0].dataMode).toBe('live');
+    // Through the same-origin relay, stamped with the time the relay fetched it.
+    expect(asked).toEqual(['/api/open-meteo?feed=flood']);
+    expect(live.series[0].retrievedAt).toBe('2026-10-21T06:00:00Z');
+    expect(live.status.retrievedAt).toBe('2026-10-21T06:00:00Z');
 
     resetConnectorCaches();
     const down = (async () => new Response('{"error":true}', { status: 400 })) as unknown as typeof fetch;

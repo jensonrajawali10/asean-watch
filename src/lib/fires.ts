@@ -489,6 +489,39 @@ const dayLabel = (ms: number) => {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 };
 
+/** How the snapshot's 24 h and 7-day windows are named in a sentence. */
+export interface FireWindowWords {
+  /** "the last 24 h", or "the 24 h to 21 Oct" once the snapshot is old. */
+  day: string;
+  /** "the last 7 days", or "the 7 days to 21 Oct". */
+  week: string;
+  /** The six days before the 24 h window: "the six days before the last 24 h", or "… before the 24 h to 21 Oct". */
+  earlier: string;
+  /** True when the snapshot is too old for "the last …" (the words then carry its date). */
+  dated: boolean;
+}
+
+export const RECENT_FIRE_WORDS: FireWindowWords = {
+  day: 'the last 24 h',
+  week: 'the last 7 days',
+  earlier: 'the six days before the last 24 h',
+  dated: false,
+};
+/** Up to this long after the snapshot's reference time, its windows still read as "the last 24 h". */
+export const FIRE_RECENT_MAX_MS = 12 * 3_600_000;
+
+/**
+ * FIRMS reaches the app only as a bundled snapshot (no CORS), so on a deployed site it ages until the next
+ * build. "The last 24 h" is said only while the snapshot is recent; after that the window is dated
+ * ("the 24 h to 21 Oct"), so a saved snapshot never reads as current.
+ */
+export function fireWindowWords(reference: string, nowMs: number): FireWindowWords {
+  const ref = Date.parse(reference);
+  if (!Number.isFinite(ref) || !Number.isFinite(nowMs) || nowMs - ref <= FIRE_RECENT_MAX_MS) return RECENT_FIRE_WORDS;
+  const to = dayLabel(ref);
+  return { day: `the 24 h to ${to}`, week: `the 7 days to ${to}`, earlier: `the six days before the 24 h to ${to}`, dated: true };
+}
+
 export interface FirePeriodInfo {
   p: number;
   start: string;
@@ -846,16 +879,19 @@ export function changeWords(p: number | null, now: number, before: number, again
  * One plain sentence for a cluster, e.g. "312 hotspots in the last 24 h around Ogan Komering Ilir, South
  * Sumatra; fire power up 40% on the day before." Never mentions emissions.
  */
-export function clusterSentence(c: Pick<FireCluster, 'window' | 'name' | 'last24h' | 'prev24h' | 'last7d' | 'frpChange24hPct'>): string {
+export function clusterSentence(
+  c: Pick<FireCluster, 'window' | 'name' | 'last24h' | 'prev24h' | 'last7d' | 'frpChange24hPct'>,
+  words: FireWindowWords = RECENT_FIRE_WORDS,
+): string {
   const n24 = c.last24h.count;
   const change = changeWords(c.frpChange24hPct, c.last24h.frp, c.prev24h.frp, 'the day before');
   if (c.window === '24h' || c.last7d.count === n24) {
-    const lead = `${formatCount(n24)} hotspot${n24 === 1 ? '' : 's'} in the last 24 h around ${c.name}`;
+    const lead = `${formatCount(n24)} hotspot${n24 === 1 ? '' : 's'} in ${words.day} around ${c.name}`;
     return n24 > 0 ? `${lead}; ${change}.` : `${lead}. ${NO_DETECTION_NOTE}`;
   }
-  const lead = `${formatCount(c.last7d.count)} hotspots in the last 7 days around ${c.name}`;
-  if (n24 === 0) return `${lead}; none confidently detected in the last 24 h, which is not proof the fires are out (cloud and smoke hide fires).`;
-  return `${lead}; ${formatCount(n24)} in the last 24 h, ${change}.`;
+  const lead = `${formatCount(c.last7d.count)} hotspots in ${words.week} around ${c.name}`;
+  if (n24 === 0) return `${lead}; none confidently detected in ${words.day}, which is not proof the fires are out (cloud and smoke hide fires).`;
+  return `${lead}; ${formatCount(n24)} in ${words.day}, ${change}.`;
 }
 
 export interface SensorShare {

@@ -30,7 +30,7 @@ The map is always the product. The workspace opens beside it. It never replaces 
 
 - **Top-left: brand and headline sentence.** "ASEAN Watch" plus one live sentence generated from data, for example: "Now: haze is worst over Palangka Raya (604 µg/m³, modelled). Low-level winds carry smoke north-west toward Singapore." Include the time and a freshness chip (LIVE / SNAPSHOT <time>).
 - **Top-right: Official alerts pill.** It shows the count of active official messages in the region and turns red when any is a tsunami warning or evacuation-level message. Clicking it opens the workspace's Official warnings section. Also here: the theme toggle and a "Workspace" button.
-- **Left edge: the taskbar.** A slim icon rail, always visible, with tooltips: Map, Situation, Haze, Fires, Volcanoes, Warnings, Water, Report, Sources. Clicking an icon opens that workspace section in the drawer; clicking Map closes the drawer.
+- **Left edge: the taskbar.** A slim icon rail, always visible, with tooltips: Map, Situation, Haze, Fires, Volcanoes, Warnings, Tsunami (the Tsunami & floods section; was "Water" until round 6), Report, Sources. Clicking an icon opens that workspace section in the drawer; clicking Map closes the drawer.
 - **Bottom: one time scrubber** (−24 h … now … +48 h, 3-hourly) with play. It has HazeView-style bars showing the worst city for each step, a compact PM2.5 colour scale, and the MODELLED label. It drives the haze, the wind particles, the city circles and the eruption scenario.
 - **Above the scrubber: layer chips,** at most six: Haze, Wind, Fires, Volcanoes, Warnings, Satellite. Every other layer (tide gauges, rivers, quake detail, BMKG tsunami areas, Himawari IR, 3D buildings…) lives in the workspace's Layers list.
 
@@ -91,7 +91,7 @@ The drawer is 480–560 px on desktop and a full-height sheet on mobile. It has 
    - Ash-drift numbers for each pressure level.
    - The official level, verbatim.
 5. **Warnings.** The full official-warnings list, verbatim, with feed status, and GDACS labelled as an aggregator.
-6. **Water & tsunami.** Tide gauges, GloFAS river flow (modelled), PTWC, BMKG tsunami areas, and the flood gauge relays.
+6. **Tsunami & floods** (rail label "Tsunami"). Tide gauges, GloFAS river flow (modelled), PTWC, BMKG tsunami areas, and the flood gauge relays.
 7. **Report.**
    - A brief composer: pick the sections, then download .md or .txt, or copy.
    - The Claude summary, if configured.

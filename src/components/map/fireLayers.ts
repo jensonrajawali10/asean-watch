@@ -185,6 +185,12 @@ export interface FireLayerOptions {
    * pins and coastlines stay on top. 1 (default) is full strength.
    */
   cellStrength?: number;
+  /**
+   * Share of each cell a square fills once the map is zoomed in past the regional view (default: 0.9, then
+   * 0.8 from zoom 6.5). The simple view uses less from zoom 5, so at a city the squares read as separate
+   * detections with the land between them, not one solid mosaic.
+   */
+  closeCoverage?: number;
   onClick?: (pick: FirePick, info: PickingInfo) => void;
   onHover?: (pick: FirePick | null, info: PickingInfo) => void;
 }
@@ -366,6 +372,8 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
   // full strength at the regional view, about a third by zoom 8.
   const cellFade = zoom <= 5.5 ? 1 : Math.max(0.32, 1 - (zoom - 5.5) * 0.28);
   const strength = Math.max(0, Math.min(1, opts.cellStrength ?? 1));
+  const coverage =
+    opts.closeCoverage !== undefined && zoom >= 5 ? Math.max(0.2, Math.min(1, opts.closeCoverage)) : zoom >= 6.5 ? 0.8 : 0.9;
   const glowLayer = (id: string, data: FireCell[], alpha: (c: FireCell) => number, minPx: number, days: number) =>
     sprite
       ? new IconLayer<FireCell>({
@@ -408,7 +416,7 @@ export function buildFireLayers(opts: FireLayerOptions): Layer[] {
           // GridCellLayer places the cell by its south-west corner (offset [1, 1]).
           getPosition: (c) => [c.west, c.south],
           cellSize: cellDeg * M_PER_DEG,
-          coverage: zoom >= 6.5 ? 0.8 : 0.9,
+          coverage,
           getFillColor: (c) => fireColor(c.frp / days, theme, alpha(c) * cellFade * strength),
           parameters,
           pickable: true,

@@ -305,6 +305,23 @@ export interface AiBriefError {
   retryAfterSeconds?: number;
 }
 
+/** Shown when the site has no server key: says what is off and that nothing else depends on it. */
+export const AI_BRIEF_NOT_CONFIGURED_TEXT =
+  'The AI summary is switched off on this site (no server key is set). Everything else on the page works without it.';
+
+/** The visitor-facing line for a failed /api/ai-brief answer. */
+export function aiBriefErrorMessage(status: number, body: Partial<AiBriefError> | null): string {
+  const code = body?.error;
+  if (code === 'not_configured' || (status === 503 && !code)) return AI_BRIEF_NOT_CONFIGURED_TEXT;
+  if (code === 'rate_limited' || status === 429) {
+    const mins = body?.retryAfterSeconds ? Math.max(1, Math.ceil(body.retryAfterSeconds / 60)) : null;
+    return `Rate limited: too many AI summaries from this connection. Try again${mins ? ` in about ${mins} min` : ' later'}.`;
+  }
+  if (status === 404) return 'AI brief failed: the summary service is not available on this server.';
+  if (code === 'refused') return 'AI brief failed: the model declined to summarise this brief.';
+  return `AI brief failed${body?.message ? `: ${body.message}` : ` (HTTP ${status})`}. Try again.`;
+}
+
 /** Splits a summary line into text and citation tokens, for rendering citation chips. */
 export function splitCitations(line: string): Array<{ text: string } | { cite: string }> {
   const parts: Array<{ text: string } | { cite: string }> = [];

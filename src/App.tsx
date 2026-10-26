@@ -43,12 +43,14 @@ import AppHeader from './components/AppHeader';
 import RecordInspector from './components/RecordInspector';
 import type { GeneratedBrief } from './components/BriefPanel';
 import DataCheckNotice from './components/DataCheckNotice';
-import { WarningInspector, feedForWarning, gaugeForWarning } from './components/OfficialWarnings';
+import { WarningInspector, WarningsModeNote } from './components/OfficialWarnings';
+import { feedForWarning, gaugeForWarning } from './lib/warningsView';
 import ErrorBoundary from './components/ErrorBoundary';
 import { isNearSingapore } from './components/format';
-import Taskbar, { taskbarButtonId } from './components/shell/Taskbar';
+import Taskbar from './components/shell/Taskbar';
+import { riverFlowNeeded } from './components/map/layerNeeds';
 import WorkspaceDrawer from './components/shell/WorkspaceDrawer';
-import { buildHash, parseHash, sameSelection, selToHash, selectionFromSel } from './components/shell/workspace';
+import { buildHash, parseHash, sameSelection, selToHash, selectionFromSel, taskbarButtonId } from './components/shell/workspace';
 import type { MapSelection, SectionId } from './components/shell/workspace';
 import { alertsPill } from './components/shell/alerts';
 import { DEFAULT_LAYERS } from './components/map/layerCatalog';
@@ -383,9 +385,6 @@ export default function App() {
     let live = true;
     void bundledQuakesSnapshot().then((s) => {
       if (live) setQuakes((prev) => prev ?? loadQuakesSnapshot(s));
-    });
-    void bundledFloodSnapshot().then((s) => {
-      if (live) setRiverFlow((prev) => prev ?? loadFloodModelSnapshot(s));
     });
     return () => {
       live = false;
@@ -792,11 +791,23 @@ export default function App() {
     settle(loadWindField({ level: PARTICLE_WIND_LEVEL }), (r) => setWind925(r.grid), '925 hPa wind');
     settle(loadAshWind(), (r) => setAshWind(r.data), 'Ash-drift winds');
     settle(loadQuakes(), setQuakes, 'Earthquakes');
-    settle(loadFloodModel(), setRiverFlow, 'River flow');
     return () => {
       alive = false;
     };
   }, []);
+
+  // River flow (GloFAS) loads with what shows it (layerNeeds.ts), once: its snapshot chunk and the live
+  // relay request start together, and the live answer replaces the snapshot when it settles.
+  const needRiverFlow = riverFlowNeeded(layers, ws);
+  const riverFlowStarted = useRef(false);
+  useEffect(() => {
+    if (!needRiverFlow || riverFlowStarted.current) return;
+    riverFlowStarted.current = true;
+    void bundledFloodSnapshot().then((s) => setRiverFlow((prev) => prev ?? loadFloodModelSnapshot(s)));
+    loadFloodModel()
+      .then(setRiverFlow)
+      .catch((err: unknown) => console.error('River flow could not be loaded:', err));
+  }, [needRiverFlow]);
 
   // --- Render --------------------------------------------------------------
 
@@ -867,7 +878,7 @@ export default function App() {
         showBadges: detailMode === 'full' && ctx.zoom >= REGIONAL_ZOOM,
         // Simple view: only the last 24 h (what the map key says), at half strength, so the squares never
         // read as part of the haze forecast or bury the pins and circles.
-        ...(detailMode === 'simple' ? { window: '24h' as const, cellStrength: 0.35 } : {}),
+        ...(detailMode === 'simple' ? { window: '24h' as const, cellStrength: 0.35, closeCoverage: 0.55 } : {}),
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
@@ -1144,7 +1155,13 @@ export default function App() {
 
       <Taskbar active={ws} onOpen={(s) => (ws === s ? closeWorkspace() : openSection(s))} onMap={closeWorkspace} alerts={alerts} />
 
-      <WorkspaceDrawer section={ws} onSelectSection={openSection} onClose={closeWorkspace} subtitle={subtitle}>
+      <WorkspaceDrawer
+        section={ws}
+        onSelectSection={openSection}
+        onClose={closeWorkspace}
+        subtitle={subtitle}
+        note={ws === 'warnings' ? <WarningsModeNote /> : undefined}
+      >
         <ErrorBoundary resetKey={`${ws}|${selectedIncidentId}`} fallback={(message) => <PanelError message={message} />}>
           {section}
         </ErrorBoundary>

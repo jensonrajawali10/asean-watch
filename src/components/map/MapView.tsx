@@ -502,6 +502,8 @@ export default function MapView({
   const deckRef = useRef<MapboxOverlay | null>(null);
   const hazeRef = useRef<HazeLayerController | null>(null);
   const padRef = useRef({ left: 0, right: 0, top: 0, bottom: 0 });
+  /** A padding change is waiting for the camera to land (see syncPadding). */
+  const padPendingRef = useRef(false);
   const sizeRef = useRef({ w: 0, h: 0 });
   const darkRef = useRef(dark);
   const narrowRef = useRef(false);
@@ -1267,7 +1269,15 @@ export default function MapView({
     const prev = map.getPadding();
     if (prev.left === next.left && prev.right === next.right && prev.top === next.top && prev.bottom === next.bottom) return;
     if (map.isMoving()) {
-      map.setPadding(next);
+      // setPadding is a jumpTo, which would stop a flight under way (a card opening while the camera flies to
+      // its city): apply the new padding once the camera lands.
+      if (!padPendingRef.current) {
+        padPendingRef.current = true;
+        map.once('moveend', () => {
+          padPendingRef.current = false;
+          syncPadding();
+        });
+      }
       return;
     }
     // Keep what was centred in the old visible area centred in the new one.
