@@ -441,6 +441,8 @@ export default function App() {
   );
   const flyTo = useCallback((lat: number, lon: number, zoom?: number) => {
     setFlyRequest((prev) => ({ lat, lon, zoom, seq: (prev?.seq ?? 0) + 1 }));
+    // On a phone the workspace sheet covers the map: close it so the place flown to is seen.
+    if (window.matchMedia?.('(max-width: 767px)').matches) setWs(null);
   }, []);
 
   const reviews = useMemo(() => {
