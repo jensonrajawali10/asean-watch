@@ -41,7 +41,7 @@ export default function SituationSection({ input, report, onOpenSection }: Situa
   return (
     <AnalystSection
       id="ws-situation"
-      title="Situation report"
+      title="Overview"
       meta={<FreshnessChip freshness={r.headline.freshness} chip={r.headline.chip} />}
       lede={
         <>

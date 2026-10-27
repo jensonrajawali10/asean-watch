@@ -87,7 +87,7 @@
 }
 
 .map-view .maplibregl-ctrl-group {
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel-glass);
   -webkit-backdrop-filter: var(--panel-filter);
   backdrop-filter: var(--panel-filter);
@@ -646,7 +646,7 @@
   max-height: calc(100% - var(--overlay-top, 0px) - var(--mv-dock-h, 0px) - 36px);
   overflow: auto;
   overscroll-behavior: contain;
-  border-radius: 14px;
+  border-radius: var(--radius);
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
   animation: mv-card-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -656,7 +656,7 @@
   width: min(340px, calc(100vw - 32px));
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--panel);
   color: var(--text);
 }
@@ -703,7 +703,7 @@
   min-height: 34px;
   padding: 4px 12px 4px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--panel-glass);
   -webkit-backdrop-filter: var(--panel-filter);
   backdrop-filter: var(--panel-filter);
@@ -736,13 +736,14 @@
   color: var(--text);
 }
 
-.mv-chip.is-on svg {
-  color: var(--accent);
+/* The chip's map symbol is in full colour when the layer is on and greyed out when it is off. */
+.mv-chip .hl-sym {
+  transition: opacity 120ms ease-out;
 }
 
-/* Warnings is the one chip in the reserved family: its icon turns official red when on. */
-.mv-chip--warnings.is-on svg {
-  color: var(--official);
+.mv-chip:not(.is-on) .hl-sym {
+  opacity: 0.45;
+  filter: grayscale(1);
 }
 
 .mv-chip--more {
@@ -836,7 +837,7 @@
   height: 20px;
   padding: 0 8px 0 6px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--panel-glass);
   -webkit-backdrop-filter: var(--panel-filter);
   backdrop-filter: var(--panel-filter);
@@ -876,7 +877,7 @@
   max-width: min(340px, 100%);
   padding: 6px 10px 8px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel-glass);
   -webkit-backdrop-filter: var(--panel-filter);
   backdrop-filter: var(--panel-filter);
@@ -954,7 +955,7 @@
   margin-left: 4px;
   padding: 0 5px;
   border: 1px solid var(--mode-modelled-border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--mode-modelled-bg);
   color: var(--mode-modelled-fg);
   font-size: 10px;

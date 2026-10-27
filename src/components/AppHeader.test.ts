@@ -12,13 +12,13 @@ describe('AppHeader first-load legend', () => {
         timeLabel: null,
         timeISO: null,
         freshness: null,
-        alerts: { count: 3, urgent: false, label: 'official alerts in force: floods' },
+        alerts: { count: 3, urgent: false, label: 'official messages in force: floods' },
         onAlerts: () => {},
         workspaceOpen: false,
         onWorkspace: () => {},
       }),
     );
-    expect(html).toContain('Smoke forecast (modelled) · NASA fire detections · official warnings, word for word<span class="brand-line__region"> · South-east Asia</span>');
+    expect(html).toContain('A smoke forecast, NASA fire detections and official warnings in the agencies’ own words<span class="brand-line__region">, across South-east Asia</span>.');
     for (const t of ['Circles: fine smoke forecast (PM2.5, modelled)', 'Orange squares: fires seen by NASA satellites', 'Triangles: volcanoes', 'Red pins: official warnings', 'Streaks: wind (forecast)']) {
       expect(html).toContain(t);
     }
@@ -35,15 +35,15 @@ describe('AppHeader alerts pill', () => {
         timeLabel: null,
         timeISO: null,
         freshness: null,
-        alerts: { count: 3, urgent, label: 'official alerts in force: floods, tsunami' },
+        alerts: { count: 3, urgent, label: 'official messages in force: floods, tsunami' },
         onAlerts: () => {},
         workspaceOpen: false,
         onWorkspace: () => {},
       }),
     );
   it('shows the number once and says what the alerts are, adding "urgent" when one is', () => {
-    expect(render(false)).toContain('official alerts in force: floods, tsunami</span>');
-    expect(render(true)).toContain('official alerts in force: floods, tsunami (incl. urgent)');
+    expect(render(false)).toContain('official messages in force: floods, tsunami</span>');
+    expect(render(true)).toContain('official messages in force: floods, tsunami (incl. urgent)');
     expect(render(true)).toContain('alerts-pill is-urgent');
   });
 });
@@ -56,7 +56,7 @@ describe('AppHeader time and freshness', () => {
         timeLabel: 'Wed 21 Oct 12:00 UTC',
         timeISO: '2026-10-21T12:00:00Z',
         freshness: { mode, run: '21 Oct 12:55 UTC' },
-        alerts: { count: 0, urgent: false, label: 'official alerts in force' },
+        alerts: { count: 0, urgent: false, label: 'official messages in force' },
         onAlerts: () => {},
         workspaceOpen: false,
         onWorkspace: () => {},
@@ -93,12 +93,12 @@ describe('AppHeader alerts pill on phones', () => {
         timeLabel: null,
         timeISO: null,
         freshness: null,
-        alerts: { count: 47, urgent: false, label: 'official alerts in force: floods' },
+        alerts: { count: 47, urgent: false, label: 'official messages in force: floods' },
         onAlerts: () => {},
         workspaceOpen: false,
         onWorkspace: () => {},
       }),
     );
-    expect(html).toContain('<span class="alerts-pill__count">47</span><span class="alerts-pill__short" aria-hidden="true">alerts</span>');
+    expect(html).toContain('<span class="alerts-pill__count">47</span><span class="alerts-pill__short" aria-hidden="true">messages</span>');
   });
 });

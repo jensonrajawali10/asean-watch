@@ -510,7 +510,7 @@ export default function HazeAirSection({
         <>
           <p className="an-muted">
             Forward paths through the modelled wind from each fire cluster, checked against Singapore. Two levels are shown
-            because smoke rides at different heights: 925 hPa (about 750 m, the regional transport level the wind particles
+            because smoke rides at different heights: 925 hPa (about 800 m, the regional transport level the wind particles
             show) and 10 m (the surface, which the map's haze paths use). When they disagree, treat the direction as uncertain.
           </p>
           {transports.map((t) => (

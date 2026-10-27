@@ -73,6 +73,7 @@ import BriefPanel from './components/BriefPanel';
 import { firesSummaryFromSnapshot, headline as situationHeadline } from './lib/situation';
 import type { SituationInput } from './lib/situation';
 import { loadFireSnapshot } from './lib/fires';
+import { FIRES_REFRESH_MS, refreshLiveFires, useFireSnapshot } from './lib/firesLive';
 import type { FireSnapshot } from './lib/fires';
 import type { FirePick } from './components/map/fireLayers';
 import { firePoint, fireSelectionId, resolveFirePick } from './components/map/fireSelection';
@@ -180,26 +181,30 @@ const RULES_BY_WATCH: Record<string, string[]> = (() => {
   return out;
 })();
 
-/** The FIRMS whole-region snapshot (fires module): the Fires chip's heat grid, the fire cards and section. */
+/**
+ * The bundled FIRMS whole-region snapshot (fires module). The app starts from it and src/lib/firesLive.ts
+ * swaps in a fresh build from /api/fires when the relay answers (useFireSnapshot in App).
+ */
 const FIRE_SNAP: FireSnapshot | null = loadFireSnapshot();
 const NO_RIVER_SERIES: FloodModelResult['series'] = [];
-const FIRES_SUMMARY = (() => {
+
+function firesSummaryOf(snap: FireSnapshot | null) {
   try {
-    return FIRE_SNAP ? firesSummaryFromSnapshot(FIRE_SNAP) : null;
+    return snap ? firesSummaryFromSnapshot(snap, { dataMode: snap.origin === 'live' ? 'live' : 'historical' }) : null;
   } catch (err) {
     console.error('Fire summary could not be derived:', err);
     return null;
   }
-})();
+}
 
 /** Province, state and country fire badges for the regional zoom (largest first). */
-const FIRE_BADGES = (() => {
+function fireBadgesOf(snap: FireSnapshot | null) {
   try {
-    return FIRE_SNAP ? regionalBadges(FIRE_SNAP, '24h', 8) : [];
+    return snap ? regionalBadges(snap, '24h', 8) : [];
   } catch {
     return [];
   }
-})();
+}
 
 /** The watch-area FIRMS clusters the haze paths start from. */
 const HAZE_SOURCES = (() => {
@@ -391,6 +396,15 @@ export default function App() {
   }, []);
   const hazeHour = useHazeHour(airQuality);
   const briefSeq = useRef(0);
+  /** The fire snapshot on screen: bundled first, then the live /api/fires build (refreshed every 30 min). */
+  const fireSnap = useFireSnapshot();
+  const firesSummary = useMemo(() => firesSummaryOf(fireSnap), [fireSnap]);
+  const fireBadges = useMemo(() => fireBadgesOf(fireSnap), [fireSnap]);
+  useEffect(() => {
+    void refreshLiveFires();
+    const timer = window.setInterval(() => void refreshLiveFires(), FIRES_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // --- Selection and workspace (both mirrored in the hash) -----------------------------------
 
@@ -427,8 +441,8 @@ export default function App() {
   const selectedIncidentId = selection?.kind === 'area' ? selection.id : null;
   const selectedCityId = selection?.kind === 'city' ? selection.id : null;
   const firePick = useMemo(
-    () => (selection?.kind === 'fire' ? resolveFirePick(FIRE_SNAP, selection.id, lastFirePick) : null),
-    [selection, lastFirePick],
+    () => (selection?.kind === 'fire' ? resolveFirePick(fireSnap, selection.id, lastFirePick) : null),
+    [selection, lastFirePick, fireSnap],
   );
   const selectedClusterId = firePick?.kind === 'fire-cluster' ? firePick.cluster.id : null;
   const selectFire = useCallback(
@@ -553,13 +567,13 @@ export default function App() {
       neaError: neaResult?.error ?? null,
       warnings: allWarnings,
       warningFeeds: allFeeds,
-      fires: FIRES_SUMMARY,
+      fires: firesSummary,
       ashWind,
       riverFlow,
       quakes,
       nowMs,
     }),
-    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, ashWind, riverFlow, quakes, nowMs],
+    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, firesSummary, ashWind, riverFlow, quakes, nowMs],
   );
   /** One live sentence that follows the scrubber; a snapshot never says "now". */
   const head = useMemo(() => situationHeadline(situationInput, { atISO: hazeHour.timeISO || null }), [situationInput, hazeHour.timeISO]);
@@ -863,7 +877,7 @@ export default function App() {
       !deckLayers
         ? []
         : deckLayers.buildFireLayers({
-        snapshot: FIRE_SNAP,
+        snapshot: fireSnap,
         theme: ctx.theme,
         zoom: ctx.zoom,
         visible: layers.fires,
@@ -880,7 +894,7 @@ export default function App() {
         maxBadges: 6,
         onClick: (pick) => selectFire(pick),
       }),
-    [layers.fires, selectedClusterId, selectFire, deckLayers, detailMode],
+    [layers.fires, selectedClusterId, selectFire, deckLayers, detailMode, fireSnap],
   );
 
   let section: ReactNode = null;
@@ -904,7 +918,7 @@ export default function App() {
           wind925={wind925}
           hazeSources={HAZE_SOURCES}
           hotspotSnapshot={FIXTURES.snapshot ?? null}
-          fires={FIRES_SUMMARY}
+          fires={firesSummary}
           transportStartISO={transport?.time ?? null}
           scrubberISO={hazeHour.timeISO || null}
           selectedCityId={selectedCityId}
@@ -916,7 +930,7 @@ export default function App() {
     case 'fires':
       section = (
         <FiresSection
-          snapshot={FIRE_SNAP}
+          snapshot={fireSnap}
           windGrid={wind925}
           smokeStartISO={hazeHour.timeISO || undefined}
           onFlyTo={flyTo}
@@ -1043,7 +1057,7 @@ export default function App() {
 
   const card = (
     <MapCards
-      fireSnapshot={FIRE_SNAP}
+      fireSnapshot={fireSnap}
       firePick={firePick}
       selection={selection}
       onClose={() => setSelection(null)}
@@ -1083,7 +1097,7 @@ export default function App() {
     transport,
     hotspots: WATCH_HOTSPOTS,
     extraLayers: fireLayers,
-    fireBadges: FIRE_BADGES,
+    fireBadges,
     onSelectFireBadge: (badge) => selectFire({ kind: 'fire-region', badge }),
     flyRequest,
     focusPoint: firePick ? firePoint(firePick) : null,
@@ -1111,7 +1125,7 @@ export default function App() {
             fallback={(message) => (
               <div className="map-fallback" role="alert">
                 <p>
-                  <strong>The map could not be drawn.</strong> The workspace sections still work: use the taskbar on the left.
+                  <strong>The map could not be drawn.</strong> The data and report sections still work: use the buttons on the left.
                 </p>
                 <p className="muted small">{message}</p>
               </div>

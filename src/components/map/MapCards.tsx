@@ -136,7 +136,7 @@ export default function MapCards(p: MapCardsProps) {
       kindLabel="MEASURED · SATELLITE"
       onClose={close}
       sentence="No satellite fire cluster is listed here in the current snapshot. That is not an all-clear: cloud and smoke hide hotspots."
-      action={{ label: 'Open in workspace', onClick: () => p.onOpenWorkspace('fires'), title: 'Fires section: counts and fire power by region' }}
+      action={{ label: 'Open full data', onClick: () => p.onOpenWorkspace('fires'), title: 'Fires section: counts and fire power by region' }}
       source="NASA FIRMS (VIIRS and MODIS)"
     >
       <AreaAirQuality
@@ -170,7 +170,7 @@ function WarningCard({ w, onClose, onInspect, onOpenWorkspace }: { w: OfficialWa
       kind={estimate ? 'aggregator' : 'official'}
       kindLabel={estimate ? 'ESTIMATE, NOT A WARNING' : 'OFFICIAL'}
       onClose={onClose}
-      action={{ label: 'Open in workspace', onClick: onOpenWorkspace, title: 'Warnings section: every message, verbatim, with feed status' }}
+      action={{ label: 'Open full data', onClick: onOpenWorkspace, title: 'Warnings section: every message, verbatim, with feed status' }}
       source={
         <>
           Shown exactly as issued ({w.dataMode === 'live' ? 'live' : `saved ${formatUtc(w.retrievedAt)}`}). ASEAN Watch never issues warnings of its own.

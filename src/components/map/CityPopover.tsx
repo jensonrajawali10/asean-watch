@@ -139,7 +139,7 @@ export default function CityCard({ cityId, airQuality, timeISO, nowISO, wind = n
           </span>
         </>
       }
-      action={{ label: 'Open in workspace', onClick: onOpenWorkspace, title: 'Haze & air section: the full city table and transport' }}
+      action={{ label: 'Open full data', onClick: onOpenWorkspace, title: 'Haze & air section: the full city table and transport' }}
       source={
         <>
           The model works in ~45 km squares, so this is the area around {area}, not your street. CAMS via Open-Meteo,{' '}
