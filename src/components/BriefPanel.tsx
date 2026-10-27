@@ -5,7 +5,6 @@ import { useRef, useState } from 'react';
 import type { Incident } from '../types';
 import Dialog from './Dialog';
 import { ModeBadge } from './Badges';
-import AiBriefPanel from './AiBriefPanel';
 
 export interface GeneratedBrief {
   text: string;
@@ -26,14 +25,6 @@ export interface BriefPanelProps {
   onGenerate: () => void;
   /** Starts the browser download of the current brief. May throw. */
   onDownload: () => void;
-  /** Replay day index (0..6) for the AI summary. When omitted it is read from the brief filename ("_day-N.txt", 1-based). */
-  dayIndex?: number | null;
-}
-
-/** "..._day-5.txt" (1-based, from briefingFilename) to day index 4; null for static briefs. */
-function dayIndexFromFilename(filename: string | null): number | null {
-  const m = filename ? /_day-(\d+)\.txt$/.exec(filename) : null;
-  return m ? Number(m[1]) - 1 : null;
 }
 
 interface DownloadStatus {
@@ -50,7 +41,6 @@ export default function BriefPanel({
   filename,
   onGenerate,
   onDownload,
-  dayIndex,
 }: BriefPanelProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [status, setStatus] = useState<DownloadStatus | null>(null);
@@ -117,7 +107,6 @@ export default function BriefPanel({
       <p className="brief-status" aria-live={previewOpen ? 'off' : 'polite'}>
         {statusText}
       </p>
-      <AiBriefPanel watchId={incident.id} dayIndex={dayIndex !== undefined ? dayIndex : dayIndexFromFilename(filename)} />
 
       <Dialog
         open={previewOpen && brief !== null}

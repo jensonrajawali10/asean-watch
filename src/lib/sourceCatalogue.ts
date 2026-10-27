@@ -332,7 +332,7 @@ export function buildSourceCatalogue(input: SituationInput): SourceEntry[] {
       retrievedAt: g.retrievedAt,
       licence: g.attribution || WIND_ATTRIBUTION,
       usedFor: /925/.test(g.level)
-        ? 'Wind particles (the smoke-transport level, about 750 m) and the 925 hPa transport paths.'
+        ? 'Wind particles (the smoke-transport level, about 800 m) and the 925 hPa transport paths.'
         : 'The haze paths on the map and the 10 m transport paths.',
       limitations: ['Model wind, not measured wind; a 1° grid smooths local winds such as sea breezes.'],
     });

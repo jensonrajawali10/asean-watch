@@ -142,7 +142,7 @@ export default function VolcanoCard({
             }
           : undefined
       }
-      action={{ label: 'Open in workspace', onClick: onOpenWorkspace, title: 'Volcanoes section: evidence, ash numbers per height, methods and caveats' }}
+      action={{ label: 'Open full data', onClick: onOpenWorkspace, title: 'Volcanoes section: evidence, ash numbers per height, methods and caveats' }}
       source={
         <>
           Level: <ExternalLink href={MAGMA_LEVEL_LIST.url}>MAGMA Indonesia level list</ExternalLink>

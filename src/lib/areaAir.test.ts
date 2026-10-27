@@ -126,10 +126,10 @@ describe('plain words', () => {
     const html = renderToStaticMarkup(createElement(MapKey));
     expect(html).toContain('µg/m³');
     expect(html).toContain('MODELLED');
-    expect(html).toContain('Not a fire.');
+    expect(html).toContain('Fires are the orange squares.');
     expect(html).toContain('What&#x27;s on the map');
     expect(html).toContain('Fires seen by NASA satellites');
     expect(html).toContain('Volcanoes.');
-    expect(html).toContain('The wind about 800 m up');
+    expect(html).toContain('Forecast wind about 800 m up');
   });
 });

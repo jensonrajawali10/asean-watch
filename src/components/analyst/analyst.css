@@ -50,7 +50,7 @@
   margin-left: 6px;
   padding: 0 5px;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.05em;

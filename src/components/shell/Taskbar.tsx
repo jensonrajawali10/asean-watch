@@ -27,7 +27,7 @@ export default function Taskbar({ active, onOpen, onMap, alerts = null }: Taskba
     if (seen) markRailHintSeen();
   }, [seen]);
   return (
-    <nav className="taskbar" aria-label="Workspace sections">
+    <nav className="taskbar" aria-label="Data and report sections">
       <ul className="taskbar__list">
         <li>
           <button
@@ -36,7 +36,7 @@ export default function Taskbar({ active, onOpen, onMap, alerts = null }: Taskba
             className={`taskbar__btn${active === null ? ' is-active' : ''}`}
             aria-current={active === null ? 'page' : undefined}
             aria-label="Map"
-            title="Map: close the workspace"
+            title="Map: close Data & reports"
             onClick={onMap}
           >
             <MapIcon />

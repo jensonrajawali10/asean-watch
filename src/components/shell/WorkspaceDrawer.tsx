@@ -69,14 +69,14 @@ export default function WorkspaceDrawer({ section, onSelectSection, onClose, sub
     >
       <header className="ws-drawer__head">
         <div className="ws-drawer__titles">
-          <p className="ws-drawer__eyebrow">Analyst workspace</p>
+          <p className="ws-drawer__eyebrow">Data &amp; reports</p>
           <h2 id="ws-drawer-title" className="ws-drawer__title" ref={headingRef} tabIndex={-1}>
-            {def?.title ?? 'Workspace'}
+            {def?.title ?? 'Data & reports'}
           </h2>
           {subtitle && <p className="ws-drawer__subtitle">{subtitle}</p>}
           {note && <p className="ws-drawer__note">{note}</p>}
         </div>
-        <button type="button" className="ws-drawer__close" onClick={close} aria-label="Close the workspace (Esc)" title="Close (Esc)">
+        <button type="button" className="ws-drawer__close" onClick={close} aria-label="Close Data & reports (Esc)" title="Close (Esc)">
           <CloseIcon />
         </button>
         <nav className="ws-tabs" aria-label="Sections" ref={tabsRef}>

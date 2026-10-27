@@ -1,9 +1,8 @@
 // Workspace section 1, "Situation" (docs/UX_V3.md section 3): the deterministic situation report from
 // src/lib/situation.ts, with the headline and freshness chip, a "what changed" note, the key figures, one
-// part per hazard, data freshness and gaps, and a slot for the existing grounded AI brief (AiBriefPanel).
+// part per hazard, and data freshness and gaps.
 // Every figure carries MODELLED / MEASURED / OFFICIAL in words, its time and a numbered source.
 import { useMemo } from 'react';
-import type { ReactNode } from 'react';
 import { situationReport } from '../../lib/situation';
 import type { ReportSection, SituationInput, SituationReport } from '../../lib/situation';
 import { AnalystSection, AnalystSubhead } from './AnalystSection';
@@ -28,15 +27,11 @@ export interface SituationSectionProps {
   input: SituationInput;
   /** A report already built from the same input (optional; built here otherwise). */
   report?: SituationReport | null;
-  /** The existing grounded AI brief panel, e.g. <AiBriefPanel watchId={...} dayIndex={...} />. */
-  aiBrief?: ReactNode;
-  /** Anything else to show under the AI brief slot. */
-  children?: ReactNode;
   /** Open another workspace section (the shell's section setter). */
   onOpenSection?: (section: SituationLinkTarget) => void;
 }
 
-export default function SituationSection({ input, report, aiBrief, children, onOpenSection }: SituationSectionProps) {
+export default function SituationSection({ input, report, onOpenSection }: SituationSectionProps) {
   const r = useMemo(() => report ?? situationReport(input), [report, input]);
   const numbers = useMemo(() => citationNumbers(r.citations), [r.citations]);
   const parts = r.sections.filter((s) => s.id !== 'overview' && s.id !== 'freshness');
@@ -46,7 +41,7 @@ export default function SituationSection({ input, report, aiBrief, children, onO
   return (
     <AnalystSection
       id="ws-situation"
-      title="Situation report"
+      title="Overview"
       meta={<FreshnessChip freshness={r.headline.freshness} chip={r.headline.chip} />}
       lede={
         <>
@@ -114,18 +109,6 @@ export default function SituationSection({ input, report, aiBrief, children, onO
           ))}
         </section>
       )}
-
-      <section className="anx-slot" aria-labelledby="ws-situation-ai">
-        <AnalystSubhead>
-          <span id="ws-situation-ai">Ask Claude for a summary</span>
-        </AnalystSubhead>
-        <p className="an-muted">
-          An AI-written summary of the deterministic brief for one watch area and day. It may contain errors, cites the
-          brief's records, and is not an official warning; follow the issuer's instructions.
-        </p>
-        {aiBrief ?? children ?? <p className="an-muted">Select a watch area to ask for a summary of its brief.</p>}
-        {aiBrief && children}
-      </section>
 
       <p className="an-note">{r.disclaimer}</p>
       {onOpenSection && (
