@@ -5,7 +5,7 @@
 
 export const SECTIONS = [
   // `hint`: one plain line for first-time visitors (shown beside the rail icon on hover and focus).
-  { id: 'situation', label: 'Situation', title: 'Situation', hint: 'A short summary of what is happening now' },
+  { id: 'situation', label: 'Overview', title: 'Overview', hint: 'A short summary of what is happening now' },
   { id: 'haze', label: 'Haze', title: 'Haze & air', hint: 'Smoke levels by city, and where the smoke is heading' },
   { id: 'fires', label: 'Fires', title: 'Fires', hint: 'Fires seen by satellites, by country and province' },
   { id: 'volcanoes', label: 'Volcanoes', title: 'Volcanoes', hint: 'Watched volcanoes and their official alert levels' },

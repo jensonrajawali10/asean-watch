@@ -108,7 +108,8 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
         <div className="brand">
           <h1 className="brand-name">ASEAN Watch</h1>
           <p className="brand-line">
-            Smoke forecast (modelled) · NASA fire detections · official warnings, word for word<span className="brand-line__region"> · South-east Asia</span>
+            A smoke forecast, NASA fire detections and official warnings in the agencies&rsquo; own words
+            <span className="brand-line__region">, across South-east Asia</span>.
           </p>
           <details className="brand-about">
             <summary>What is this?</summary>
@@ -179,9 +180,11 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
           className="detail-toggle"
           aria-pressed={detail === 'full'}
           onClick={toggleDetail}
-          title={detail === 'full' ? 'Back to the simple view' : 'Show the forecast timeline, fire counts, workspace links and theme'}
+          title={detail === 'full' ? 'Back to the simple view' : 'Show the forecast timeline, fire counts, data links and theme'}
         >
-          {detail === 'full' ? 'Simple view' : 'Show details'}
+          {/* Phones show the one-word label so the button and the messages pill fit beside the name. */}
+          <span className="detail-toggle__long">{detail === 'full' ? 'Simple view' : 'Show details'}</span>
+          <span className="detail-toggle__short">{detail === 'full' ? 'Simple' : 'Details'}</span>
         </button>
         <button
           type="button"
@@ -197,7 +200,7 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
           <span className="alerts-pill__count">{alerts.count}</span>
           {/* Phones hide the long words: the number still says what it counts. */}
           <span className="alerts-pill__short" aria-hidden="true">
-            {alerts.count === 1 ? 'alert' : 'alerts'}
+            {alerts.count === 1 ? 'message' : 'messages'}
           </span>
           <span className="alerts-pill__text">
             {/* The red pill already signals urgency; the words say what the alerts are, plus "urgent" when one is. */}
@@ -212,9 +215,9 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
             Light
           </button>
         </div>
-        <button type="button" className="ws-button" aria-pressed={workspaceOpen} onClick={onWorkspace} title="Open the analyst workspace">
+        <button type="button" className="ws-button" aria-pressed={workspaceOpen} onClick={onWorkspace} title="Open the data tables and reports">
           <LayersIcon size={16} />
-          <span>Workspace</span>
+          <span>Data &amp; reports</span>
         </button>
       </div>
     </header>

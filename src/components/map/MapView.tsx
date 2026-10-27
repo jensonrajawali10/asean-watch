@@ -57,7 +57,6 @@ import { placePm25At } from '../../lib/airQuality';
 import type { FireBadge } from '../../lib/fires';
 import type { MapSelection } from '../shell/workspace';
 import ErrorBoundary from '../ErrorBoundary';
-import { FireIcon, HazeIcon, LayersIcon, VolcanoIcon, WarningIcon } from '../shell/icons';
 import {
   arrowAngleDeg,
   ASEAN_BOUNDS,
@@ -354,29 +353,16 @@ function OfficialSymbol({ kind, selected = false }: { kind: OfficialKind; select
   );
 }
 
-const CHIP_ICONS: Partial<Record<LayerKey, (p: { size?: number }) => ReactNode>> = {
-  haze: HazeIcon,
-  fires: FireIcon,
-  watch: VolcanoIcon,
-  warnings: WarningIcon,
+// Each chip carries the symbol its layer draws on the map (the same .hl-sym marks as the header key), so the
+// chip row doubles as a legend instead of a row of generic icons.
+const CHIP_SYMBOLS: Partial<Record<LayerKey, string>> = {
+  haze: 'circle',
+  particles: 'wind',
+  fires: 'fire',
+  watch: 'volcano',
+  warnings: 'pin',
+  satIr: 'cloud',
 };
-
-function WindChipIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden="true" focusable="false">
-      <path d="M2.5 7.5h9a2.5 2.5 0 1 0-2.5-2.5M2.5 12.5h12a2.5 2.5 0 1 1-2.5 2.5M2.5 10h6" />
-    </svg>
-  );
-}
-
-function SatelliteChipIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" aria-hidden="true" focusable="false">
-      <rect x="7.5" y="7.5" width="5" height="5" transform="rotate(45 10 10)" />
-      <path d="m4 4 3 3M13 13l3 3M2.5 9.5l2-2 3 3-2 2zM12.5 15.5l2-2 3 3-2 2z" />
-    </svg>
-  );
-}
 
 /** Non-chip layers that count as "extra" when on (rings and tsunami areas follow the selection and the feed). */
 const EXTRA_KEYS = LAYER_CATALOG.filter((l) => !l.chip && l.key !== 'rings' && l.key !== 'tsunami').map((l) => l.key);
@@ -1869,7 +1855,7 @@ export default function MapView({
     return (
       <div className={className ? `map-view is-error ${className}` : 'map-view is-error'} role="alert">
         <p>
-          <strong>The map engine could not start</strong> (WebGL may be unavailable). The workspace sections still work.
+          <strong>The map engine could not start</strong> (WebGL may be unavailable). The data and report sections still work.
         </p>
         <p className="mv-muted">{engineError}</p>
       </div>
@@ -2178,7 +2164,7 @@ export default function MapView({
         <MapKey />
         <div className="mv-chips" role="group" aria-label="Map layers">
           {MAP_CHIPS.map((c) => {
-            const Icon = c.key === 'particles' ? WindChipIcon : c.key === 'satIr' ? SatelliteChipIcon : CHIP_ICONS[c.key];
+            const sym = CHIP_SYMBOLS[c.key];
             const on = chipOn(c.key);
             return (
               <button
@@ -2189,14 +2175,13 @@ export default function MapView({
                 title={c.explanation}
                 onClick={() => toggleChip(c.key)}
               >
-                {Icon && <Icon size={15} />}
+                {sym && <i className={`hl-sym hl-sym--${sym}`} aria-hidden="true" />}
                 <span>{c.chipLabel}</span>
               </button>
             );
           })}
           {onOpenLayers && (
-            <button type="button" className="mv-chip mv-chip--more" onClick={onOpenLayers} title="Every other layer, with an explanation (workspace)">
-              <LayersIcon size={15} />
+            <button type="button" className="mv-chip mv-chip--more" onClick={onOpenLayers} title="Every other layer, with an explanation (Data & reports)">
               <span>{extrasOn > 0 ? `+${extrasOn} more on` : 'More layers'}</span>
             </button>
           )}

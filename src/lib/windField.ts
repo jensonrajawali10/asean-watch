@@ -5,7 +5,7 @@
 // loadWindField(): live first through the same-origin relay /api/open-meteo?feed=wind (src/lib/openMeteoRelay.ts;
 // timeout, in-flight dedupe, memory cache, backoff), then the bundled snapshot data/wind-snapshot.json
 // (dataMode "historical"). Never throws.
-// Two levels: '10m' (default; the trajectory logic in transport.ts) and '925hPa' (about 750 m, the
+// Two levels: '10m' (default; the trajectory logic in transport.ts) and '925hPa' (about 800 m, the
 // lower boundary layer that carries a regional smoke plume; the default for the animated particles).
 // Variable names verified live 2026-10-14: wind_speed_925hPa / wind_direction_925hPa, unit m/s.
 // The 925 hPa snapshot is data/wind925-snapshot.json (scripts/capture-wind-snapshot.mjs 925hPa).

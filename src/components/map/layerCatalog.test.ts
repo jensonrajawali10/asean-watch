@@ -4,7 +4,7 @@ import { DEFAULT_LAYERS, LAYER_CATALOG, LAYER_GROUPS, MAP_CHIPS, layersInGroup }
 describe('layer catalog', () => {
   it('has at most six map chips, each with a short label', () => {
     expect(MAP_CHIPS.length).toBeLessThanOrEqual(6);
-    expect(MAP_CHIPS.map((c) => c.chipLabel)).toEqual(['Haze', 'Wind', 'Fires', 'Volcanoes', 'Warnings', 'Satellite']);
+    expect(MAP_CHIPS.map((c) => c.chipLabel)).toEqual(['Haze', 'Wind', 'Fires', 'Volcanoes', 'Warnings', 'Clouds']);
   });
 
   it('has unique keys, an explanation for every layer and a default for every key', () => {

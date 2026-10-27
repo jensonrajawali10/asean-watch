@@ -51,7 +51,7 @@ describe('VolcanoCard', () => {
     expect(html).toContain(MAGMA_KRB_MAP['gvp-263250'].url);
     expect(html).toContain(VAAC_DARWIN.url);
     expect(html).toContain('Play ash scenario');
-    expect(html).toContain('Open in workspace');
+    expect(html).toContain('Open full data');
     expect(html).toContain('Not a prediction, a dispersion model or a VAAC advisory');
     for (const re of FORBIDDEN) expect(html).not.toMatch(re);
   });

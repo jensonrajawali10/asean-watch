@@ -220,6 +220,8 @@ export interface FireSnapshot {
   history: readonly FireHistoryDay[];
   sources: readonly FireSourceInfo[];
   attribution: string;
+  /** 'live' when it came from the /api/fires relay (src/lib/firesLive.ts); absent for the bundled snapshot. */
+  origin?: 'live';
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,7 +1100,7 @@ export interface FireSourceRef {
 }
 
 /** Every source behind the fire figures, FIRMS files first, with the acknowledgement. */
-export function fireSourceRefs(s: Pick<FireSnapshot, 'sources' | 'retrievedAt'>): FireSourceRef[] {
+export function fireSourceRefs(s: Pick<FireSnapshot, 'sources' | 'retrievedAt' | 'origin'>): FireSourceRef[] {
   const out: FireSourceRef[] = s.sources.map((src) => {
     const rows = src.sensor && isNum(src.rowsConfident) ? ` · ${formatCount(src.rowsConfident)} confident of ${formatCount(src.rowsRead ?? 0)} rows` : '';
     const lm = src.lastModified ? ` · file last modified ${formatFireTime(src.lastModified)}` : '';
@@ -1106,7 +1108,7 @@ export function fireSourceRefs(s: Pick<FireSnapshot, 'sources' | 'retrievedAt'>)
       label: `${src.name}${rows}${lm}`,
       url: src.url,
       retrievedAt: src.retrievedAt ?? s.retrievedAt,
-      mode: src.sensor ? 'SNAPSHOT · MEASURED' : 'REFERENCE',
+      mode: src.sensor ? (s.origin === 'live' ? 'LIVE · MEASURED' : 'SNAPSHOT · MEASURED') : 'REFERENCE',
       licence: src.licence,
     };
   });
