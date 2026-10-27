@@ -77,6 +77,7 @@ Offline, the app runs entirely from the bundled snapshots. When it is online, th
 | `npm run refresh:all` | Runs every refresh script in order: data, warnings, NEA, winds, air quality, fires, ash winds, quakes, sea level, PTWC and river flow. It stops at the first one that fails, so run the remaining ones yourself. Open-Meteo allows a limited number of calls per hour; if it answers HTTP 429, wait and retry. |
 | `npm test` | Unit tests for validation, watch rules, review states, warnings parsing, NEA, and the brief |
 | `npm run typecheck` | TypeScript project check |
+| `npm run verify` | Opens the site in a real browser at desktop and phone sizes, clicks through the layer chips, a volcano, city and fire card and every workspace section, and saves screenshots plus `report.json` and an `index.html` to view them in `verify-artifacts/`. Exits non-zero if a step fails or the page logs an error. `npm run verify -- help` lists the options. |
 | `npm run build:region` | Regenerates `data/region.geojson` from Natural Earth via the installed `world-atlas` package |
 
 The MAGMA Indonesia volcano levels are bundled records copied on 13 October 2026 (MAGMA's API needs a token). No refresh script updates them.
@@ -178,3 +179,4 @@ NASA FIRMS (LANCE/ESDIS) hotspots; U.S. Geological Survey earthquakes (public do
 - [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md): sources, watch rules, the warnings relay, label policy, limitations, references
 - [docs/ROADMAP.md](docs/ROADMAP.md): what exists per hazard, and what comes next
 - [docs/CONTRACT.md](docs/CONTRACT.md), [docs/DESIGN.md](docs/DESIGN.md), [data/SOURCES.md](data/SOURCES.md): implementation contract, UI design, data provenance
+- [.claude/skills/verify-asean-watch/](.claude/skills/verify-asean-watch/SKILL.md): how an agent (or you) drives the site in a browser to check a change, and the feature map of what to check
