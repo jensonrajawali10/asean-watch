@@ -5,7 +5,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/open-meteo.ts": { "maxDuration": 30 }
+    "api/open-meteo.ts": { "maxDuration": 30 },
+    "api/fires.ts": { "maxDuration": 60 }
   },
   "headers": [
     {

@@ -175,7 +175,7 @@ Since 14 October 2026 the app opens in a dark, map-first theme (cinematic: near-
 | `--bg` / `--map-water` | `#0a1218` | the sea and page plane |
 | `--map-land` / `--map-land-asean` | `#25221d` / `#2f2b24` | warm near-black land |
 | `--panel` / `--panel-2` | `#0e1216` / `#161b20` | opaque surfaces (dialogs, drawer) |
-| `--panel-glass` | `rgba(14,18,22,0.86)` + `blur(6px)` | floating panels and the map hint |
+| `--panel-glass` | `rgba(14,18,22,0.95)`; no blur | floating panels and the map hint |
 | `--border` / `--border-strong` | `#4a443b` / `#857c6d` | hairline (decorative) / control edges |
 | `--text` / `--text-muted` | `#ece4d6` / `#a9a193` | cream ink |
 | `--accent` / `--accent-strong` / `--focus` | `#c9a675` / `#dcbf92` / `#d8b680` | tan smoke; primary buttons carry `--on-accent #16120c` |

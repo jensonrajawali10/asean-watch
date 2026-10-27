@@ -11,7 +11,7 @@ data/watches.json + data/real/* → watchRules → validateObservations → visi
 live in the browser when online: NEA, official warning feeds (warnings.ts); snapshots otherwise
 ```
 
-No database. One optional server function (`api/ai-brief.ts`, Vercel) calls the Claude API for the grounded summary; the key stays server-side and the client sends only `{watchId, dayIndex}`. Further server functions may proxy official feeds that block browser calls (fixed host allow-lists only). The core works offline from bundled real snapshots. Browser-callable feeds refresh live when online; FIRMS has no CORS, so it is refreshed by script. External links open in a new tab.
+No database. One optional server function (`api/ai-brief.ts`, Vercel) calls the Claude API for the grounded summary; the key stays server-side and the client sends only `{watchId, dayIndex}`. Further server functions may proxy official feeds that block browser calls (fixed host allow-lists only). The core works offline from bundled real snapshots. Browser-callable feeds refresh live when online; FIRMS has no CORS: the watch-area records are refreshed by script, and the whole-region fire view is rebuilt every few hours by the `/api/fires` relay (`src/lib/firesProxy.ts`, the same builder as `scripts/refresh-fires.mjs`), with the bundled `data/fires-snapshot.json` as its offline fallback. External links open in a new tab.
 
 ## File ownership
 
@@ -106,7 +106,7 @@ Jenson: "make it all real data". Simulated fixtures are retired. Everything show
   - Modelled data (Open-Meteo wind at 10 m and 925 hPa, CAMS PM2.5 via Open-Meteo) is context only, labelled MODELLED, and never evidence.
 - **Anomalies come from stated watch rules,** e.g. "FIRMS detection, confidence nominal or high, within 5 km of the summit". The rule text travels with each record (`anomalyReason`) and appears in "Why this state?". These rules are illustrative workflow rules, not official thresholds.
 - **Replay steps through the real last 7 days,** one step per UTC day, oldest first, so the demo flow keeps working on real data. The state at each step is whatever the real data gives. Nothing is staged.
-- **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. In the app, NEA and the official warning feeds (warnings.ts) also refresh live when online; FIRMS and earthquakes come from the snapshot only. Snapshots are bundled at build time, so rebuild after `npm run refresh:all`.
+- **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. In the app, NEA and the official warning feeds (warnings.ts) also refresh live when online; The whole-region fire view (`data/fires-snapshot.json`) is replaced by the `/api/fires` relay build when it answers (labelled LIVE with its fetch time; the bundled copy stays SNAPSHOT); the watch-area FIRMS records and earthquakes come from the snapshot only. Snapshots are bundled at build time, so rebuild after `npm run refresh:all`.
 - **Banner:** "DEMO REPLAY" becomes a data-recency banner, e.g. "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".
 
 ## Map v2 and AI summary (2026-10-14)
