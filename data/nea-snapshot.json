@@ -1,7 +1,7 @@
 {
-  "capturedAt": "2026-10-24T08:24:22Z",
+  "capturedAt": "2026-10-27T07:10:15Z",
   "source": "NEA real-time weather and air quality via data.gov.sg: https://api-open.data.gov.sg/v2/real-time/api/{wind-direction,wind-speed,psi,pm25}",
-  "licence": "Singapore Open Data Licence version 1.0 (https://data.gov.sg/open-data-licence). Contains information from Wind Direction across Singapore, Wind Speed across Singapore, Pollutant Standards Index (PSI) and PM2.5 accessed on 2026-10-24 from data.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 https://data.gov.sg/open-data-licence",
+  "licence": "Singapore Open Data Licence version 1.0 (https://data.gov.sg/open-data-licence). Contains information from Wind Direction across Singapore, Wind Speed across Singapore, Pollutant Standards Index (PSI) and PM2.5 accessed on 2026-10-27 from data.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 https://data.gov.sg/open-data-licence",
   "responses": {
     "windDirection": {
       "code": 0,
@@ -172,79 +172,79 @@
         ],
         "readings": [
           {
-            "timestamp": "2026-10-24T16:18:00+08:00",
+            "timestamp": "2026-10-27T15:04:00+08:00",
             "data": [
               {
                 "stationId": "S108",
-                "value": 118
+                "value": 126
               },
               {
                 "stationId": "S109",
-                "value": 149
+                "value": 79
               },
               {
                 "stationId": "S106",
-                "value": 215
+                "value": 166
               },
               {
                 "stationId": "S117",
-                "value": 231
+                "value": 161
               },
               {
                 "stationId": "S107",
-                "value": 242
+                "value": 86
               },
               {
                 "stationId": "S104",
-                "value": 145
+                "value": 75
               },
               {
                 "stationId": "S115",
-                "value": 271
+                "value": 161
               },
               {
                 "stationId": "S116",
-                "value": 10
+                "value": 171
               },
               {
                 "stationId": "S102",
-                "value": 138
+                "value": 150
               },
               {
                 "stationId": "S60",
-                "value": 149
+                "value": 89
               },
               {
                 "stationId": "S50",
-                "value": 120
+                "value": 92
               },
               {
                 "stationId": "S44",
-                "value": 340
+                "value": 207
               },
               {
                 "stationId": "S43",
-                "value": 226
+                "value": 189
               },
               {
                 "stationId": "S23",
-                "value": 146
+                "value": 177
               },
               {
                 "stationId": "S06",
-                "value": 218
+                "value": 123
               },
               {
                 "stationId": "S111",
-                "value": 185
+                "value": 50
               },
               {
                 "stationId": "S199",
-                "value": 225
+                "value": 143
               },
               {
                 "stationId": "S121",
-                "value": 134
+                "value": 171
               }
             ]
           }
@@ -423,79 +423,79 @@
         ],
         "readings": [
           {
-            "timestamp": "2026-10-24T16:18:00+08:00",
+            "timestamp": "2026-10-27T15:04:00+08:00",
             "data": [
               {
                 "stationId": "S108",
-                "value": 0.9
+                "value": 1.7
               },
               {
                 "stationId": "S109",
-                "value": 1.9
+                "value": 4.7
               },
               {
                 "stationId": "S106",
-                "value": 0.9
-              },
-              {
-                "stationId": "S117",
-                "value": 2.7
-              },
-              {
-                "stationId": "S107",
                 "value": 3
               },
               {
+                "stationId": "S117",
+                "value": 6.9
+              },
+              {
+                "stationId": "S107",
+                "value": 5.6
+              },
+              {
                 "stationId": "S104",
-                "value": 3.5
+                "value": 6.8
               },
               {
                 "stationId": "S115",
-                "value": 2
+                "value": 4.6
               },
               {
                 "stationId": "S116",
-                "value": 1.7
+                "value": 7.7
               },
               {
                 "stationId": "S102",
-                "value": 2.2
+                "value": 5.5
               },
               {
                 "stationId": "S60",
-                "value": 1.9
+                "value": 5.2
               },
               {
                 "stationId": "S50",
-                "value": 0.7
-              },
-              {
-                "stationId": "S44",
-                "value": 2.1
-              },
-              {
-                "stationId": "S43",
-                "value": 1.7
-              },
-              {
-                "stationId": "S23",
-                "value": 1.6
-              },
-              {
-                "stationId": "S06",
-                "value": 1.7
-              },
-              {
-                "stationId": "S111",
-                "value": 0.6
-              },
-              {
-                "stationId": "S199",
                 "value": 3.2
               },
               {
+                "stationId": "S44",
+                "value": 5.3
+              },
+              {
+                "stationId": "S43",
+                "value": 4.2
+              },
+              {
+                "stationId": "S23",
+                "value": 6.6
+              },
+              {
+                "stationId": "S06",
+                "value": 6.7
+              },
+              {
+                "stationId": "S111",
+                "value": 5.7
+              },
+              {
+                "stationId": "S199",
+                "value": 9.7
+              },
+              {
                 "stationId": "S121",
-                "value": 1.5
+                "value": 4.5
               }
             ]
           }
@@ -547,92 +547,92 @@
         ],
         "items": [
           {
-            "date": "2026-10-24",
-            "updatedTimestamp": "2026-10-24T16:15:38+08:00",
-            "timestamp": "2026-10-24T16:00:00+08:00",
+            "date": "2026-10-27",
+            "updatedTimestamp": "2026-10-27T15:00:38+08:00",
+            "timestamp": "2026-10-27T15:00:00+08:00",
             "readings": {
               "psi_twenty_four_hourly": {
-                "north": 121,
-                "south": 110,
-                "west": 151,
-                "east": 116,
-                "central": 132
+                "north": 63,
+                "south": 63,
+                "west": 75,
+                "east": 62,
+                "central": 64
               },
               "no2_one_hour_max": {
-                "north": 29,
-                "south": 22,
-                "west": 30,
-                "east": 17,
-                "central": 26
+                "north": 8,
+                "south": 14,
+                "west": 19,
+                "east": 9,
+                "central": 16
               },
               "pm10_twenty_four_hourly": {
-                "north": 108,
-                "south": 87,
-                "west": 120,
-                "east": 105,
-                "central": 108
+                "north": 38,
+                "south": 32,
+                "west": 47,
+                "east": 36,
+                "central": 35
               },
               "pm25_twenty_four_hourly": {
-                "north": 74,
-                "south": 64,
-                "west": 104,
-                "east": 70,
-                "central": 85
+                "north": 23,
+                "south": 23,
+                "west": 33,
+                "east": 22,
+                "central": 24
               },
               "so2_twenty_four_hourly": {
-                "north": 8,
-                "south": 4,
-                "west": 11,
-                "east": 5,
+                "north": 9,
+                "south": 7,
+                "west": 6,
+                "east": 9,
                 "central": 6
               },
               "co_eight_hour_max": {
                 "north": 1,
                 "south": 1,
-                "west": 2,
+                "west": 1,
                 "east": 1,
                 "central": 1
               },
               "o3_eight_hour_max": {
-                "north": 35,
-                "south": 30,
-                "west": 28,
-                "east": 43,
-                "central": 39
+                "north": 70,
+                "south": 47,
+                "west": 50,
+                "east": 47,
+                "central": 50
               },
               "co_sub_index": {
-                "north": 11,
-                "south": 9,
-                "west": 15,
-                "east": 8,
-                "central": 8
+                "north": 8,
+                "south": 8,
+                "west": 12,
+                "east": 7,
+                "central": 7
               },
               "o3_sub_index": {
-                "north": 15,
-                "south": 13,
-                "west": 12,
-                "east": 18,
-                "central": 17
+                "north": 30,
+                "south": 20,
+                "west": 21,
+                "east": 20,
+                "central": 21
               },
               "pm10_sub_index": {
-                "north": 79,
-                "south": 69,
-                "west": 85,
-                "east": 78,
-                "central": 79
+                "north": 38,
+                "south": 32,
+                "west": 47,
+                "east": 36,
+                "central": 35
               },
               "pm25_sub_index": {
-                "north": 121,
-                "south": 110,
-                "west": 151,
-                "east": 116,
-                "central": 132
+                "north": 63,
+                "south": 63,
+                "west": 75,
+                "east": 62,
+                "central": 64
               },
               "so2_sub_index": {
-                "north": 5,
-                "south": 2,
-                "west": 7,
-                "east": 3,
+                "north": 6,
+                "south": 4,
+                "west": 4,
+                "east": 6,
                 "central": 4
               }
             }
@@ -683,16 +683,16 @@
         ],
         "items": [
           {
-            "date": "2026-10-24",
-            "updatedTimestamp": "2026-10-24T16:15:37+08:00",
-            "timestamp": "2026-10-24T16:00:00+08:00",
+            "date": "2026-10-27",
+            "updatedTimestamp": "2026-10-27T15:00:36+08:00",
+            "timestamp": "2026-10-27T15:00:00+08:00",
             "readings": {
               "pm25_one_hourly": {
-                "north": 39,
-                "south": 38,
-                "west": 93,
-                "east": 52,
-                "central": 49
+                "north": 52,
+                "south": 23,
+                "west": 38,
+                "east": 39,
+                "central": 32
               }
             }
           }
