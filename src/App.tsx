@@ -70,7 +70,6 @@ import ReportSection from './components/analyst/ReportSection';
 import SourcesSection from './components/analyst/SourcesSection';
 import { FiresSection } from './components/analyst/FiresSection';
 import BriefPanel from './components/BriefPanel';
-import AiBriefPanel from './components/AiBriefPanel';
 import { firesSummaryFromSnapshot, headline as situationHeadline } from './lib/situation';
 import type { SituationInput } from './lib/situation';
 import { loadFireSnapshot } from './lib/fires';
@@ -847,7 +846,6 @@ export default function App() {
           filename: briefingFilename(incident, currentStep),
           onGenerate: generateBrief,
           onDownload: downloadBrief,
-          dayIndex: currentStep?.index ?? null,
         }
       : null;
 
@@ -892,13 +890,6 @@ export default function App() {
         <SituationSection
           input={situationInput}
           onOpenSection={openSection}
-          aiBrief={
-            incident ? (
-              <AiBriefPanel watchId={incident.id} dayIndex={currentStep?.index ?? null} />
-            ) : (
-              <p className="an-muted">Pick a watch area (map or Volcanoes section) to ask for an AI-written summary of it.</p>
-            )
-          }
         />
       );
       break;
@@ -975,7 +966,6 @@ export default function App() {
             filename: incident ? briefingFilename(incident, currentStep) : null,
             onGenerate: generateBrief,
             onDownload: downloadBrief,
-            dayIndex: currentStep?.index ?? null,
           }}
           attribution={attribution}
           dataAsOf={DATA_AS_OF}
