@@ -1,19 +1,21 @@
 // The map key: a small permanent legend for first-time visitors. What each symbol means in plain words, and
 // the PM2.5 colour bands with their unit. The circles are a forecast (MODELLED); the red pins are official
-// warnings (not fires); the orange squares and "N hotspots" are fires seen by satellites (MEASURED).
+// warnings (not fires); the orange squares and "N hotspots" are fires seen by satellites (MEASURED), live from
+// /api/fires when the relay answers.
 import type { CSSProperties } from 'react';
 import { useState } from 'react';
 import { PM25_BANDS, WHO_PM25_24H_UGM3 } from '../../lib/airQuality';
-import { fireWindowWords, loadFireSnapshot } from '../../lib/fires';
+import { fireWindowWords } from '../../lib/fires';
+import { useFireSnapshot } from '../../lib/firesLive';
 import { useNowMs } from '../../lib/useNowMs';
 
 const MAP_KEY_ROWS = {
-  circles: { name: 'Coloured circles', text: 'Fine smoke (PM2.5) in the air, in µg/m³. Bigger and darker is worse. A forecast, not a measurement.' },
-  pins: { name: 'Red pins', text: 'An official warning from a national agency (floods, tsunamis, volcanoes). Not a fire.' },
+  circles: { name: 'Coloured circles', text: 'Forecast fine smoke (PM2.5) in the air, in µg/m³. Bigger and darker is worse.' },
+  pins: { name: 'Red pins', text: 'Official warnings from national agencies on floods, tsunamis and volcanoes. Fires are the orange squares.' },
   volcanoes: { name: 'Triangles', text: 'Volcanoes. Click one for its official alert level.' },
   fires: { name: 'Orange squares', text: 'Fires seen by NASA satellites in the last 24 hours ("hotspots").' },
-  firesDated: { name: 'Orange squares', text: (day: string) => `Fires seen by NASA satellites in ${day} ("hotspots"; a saved copy).` },
-  wind: { name: 'Streaks', text: 'The wind about 800 m up, the height that carries smoke. A forecast.' },
+  firesDated: { name: 'Orange squares', text: (day: string, saved: boolean) => `Fires seen by NASA satellites in ${day} ("hotspots"${saved ? '; a saved copy' : ''}).` },
+  wind: { name: 'Streaks', text: 'Forecast wind about 800 m up, the height that carries smoke.' },
 } as const;
 
 /** Phones start with the key folded to its title (one tap opens it): open, it would cover most of the map. */
@@ -27,8 +29,9 @@ function startsOpen(): boolean {
 
 export default function MapKey() {
   const [open, setOpen] = useState(startsOpen);
-  // FIRMS is a bundled snapshot: once it has aged, the key dates it rather than say "the last 24 hours".
-  const fireSnap = loadFireSnapshot();
+  // Live from /api/fires once it answers, else the bundled snapshot. Once the data has aged, the key dates it
+  // rather than say "the last 24 hours", and calls a bundled one a saved copy.
+  const fireSnap = useFireSnapshot();
   const fireWords = fireWindowWords(fireSnap?.reference ?? '', useNowMs());
   return (
     <section className={`mv-key${open ? '' : ' is-closed'}`} aria-label="Map key">
@@ -71,7 +74,7 @@ export default function MapKey() {
             <span className="mv-key__fire" aria-hidden="true" />
             <span>
               <strong>{MAP_KEY_ROWS.fires.name}</strong>{' '}
-              {fireWords.dated ? MAP_KEY_ROWS.firesDated.text(fireWords.day) : MAP_KEY_ROWS.fires.text}
+              {fireWords.dated ? MAP_KEY_ROWS.firesDated.text(fireWords.day, fireSnap?.origin !== 'live') : MAP_KEY_ROWS.fires.text}
             </span>
           </li>
           <li>

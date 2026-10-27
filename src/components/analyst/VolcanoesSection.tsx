@@ -54,7 +54,6 @@ export interface VolcanoesSectionProps {
     filename: string | null;
     onGenerate: () => void;
     onDownload: () => void;
-    dayIndex: number | null;
   };
   attribution?: ReactNode;
   dataAsOf: string | null;
@@ -161,7 +160,6 @@ export default function VolcanoesSection(p: VolcanoesSectionProps) {
             filename={p.brief.filename}
             onGenerate={p.brief.onGenerate}
             onDownload={p.brief.onDownload}
-            dayIndex={p.brief.dayIndex}
           />
         </>
       )}

@@ -73,7 +73,7 @@ The map is always the product. The workspace opens beside it. It never replaces 
 
 The drawer is 480–560 px on desktop and a full-height sheet on mobile. It has a sticky section header and section tabs, and uses dense typography. Every number cites its source and time, and every model output carries MODELLED. Sections:
 
-1. **Situation.** An auto-generated situation report (deterministic text) and a key-figures table: worst cities, biggest fire regions, volcano levels, active official warnings. Also "Ask Claude for a summary": the existing grounded AI brief.
+1. **Situation.** An auto-generated situation report (deterministic text) and a key-figures table: worst cities, biggest fire regions, volcano levels, active official warnings.
 2. **Haze & air.**
    - A city table: now, 24 h peak and time, WHO multiple, and the trend.
    - NEA Singapore measured PSI and PM2.5 beside the modelled figure.
@@ -94,7 +94,6 @@ The drawer is 480–560 px on desktop and a full-height sheet on mobile. It has 
 6. **Tsunami & floods** (rail label "Tsunami"). Tide gauges, GloFAS river flow (modelled), PTWC, BMKG tsunami areas, and the flood gauge relays.
 7. **Report.**
    - A brief composer: pick the sections, then download .md or .txt, or copy.
-   - The Claude summary, if configured.
    - Every figure carries its citation.
 8. **Sources & methods.** Every feed with its licence, retrieval time and mode, plus the limitations.
 9. **Layers.** The full layer list with explanations: every toggle that is not a map chip.

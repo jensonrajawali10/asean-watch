@@ -122,11 +122,12 @@ export function FireCard({ pick, snapshot: s, windGrid, smokeStartISO, smokePlac
 
   const source = (
     <>
-      NASA FIRMS VIIRS and MODIS (MEASURED) · 24 h to {formatFireTime(s.reference)} · snapshot {formatFireTime(s.retrievedAt)}. FRP is fire
+      NASA FIRMS VIIRS and MODIS (MEASURED) · 24 h to {formatFireTime(s.reference)} · {s.origin === 'live' ? 'fetched' : 'snapshot'}{' '}
+      {formatFireTime(s.retrievedAt)}. FRP is fire
       intensity, not emissions.
     </>
   );
-  const action = { label: 'Open in workspace', onClick: onOpenWorkspace, title: 'Open the Fires section of the analyst workspace' };
+  const action = { label: 'Open full data', onClick: onOpenWorkspace, title: 'Open the Fires section of Data & reports' };
 
   if (cluster) {
     const facts: MapCardFact[] = [

@@ -32,8 +32,8 @@ describe('alertsPill', () => {
   it('counts active official messages only', () => {
     const list = [warning({}), warning({ id: 'x:2', ended: true }), warning({ id: 'x:3', authority: 'aggregator' })];
     expect(activeOfficial(list)).toHaveLength(1);
-    expect(alertsPill(list)).toEqual({ count: 1, urgent: false, label: 'official alert in force: volcano' });
-    expect(alertsPill([]).label).toBe('official alerts in force');
+    expect(alertsPill(list)).toEqual({ count: 1, urgent: false, label: 'official message in force: volcano' });
+    expect(alertsPill([]).label).toBe('official messages in force');
   });
 
   it('turns red for a tsunami warning in force, not for an information statement', () => {
@@ -52,9 +52,9 @@ describe('alertsPill', () => {
     const tsunami = warning({ hazard: 'tsunami', level: 'Warning', product: 'Warning', expiresAt: '2026-10-14T00:00:00Z' });
     const before = Date.parse('2026-10-13T12:00:00Z');
     const after = Date.parse('2026-10-14T06:00:00Z');
-    expect(alertsPill([tsunami], before)).toEqual({ count: 1, urgent: true, label: 'official alert in force: tsunami' });
+    expect(alertsPill([tsunami], before)).toEqual({ count: 1, urgent: true, label: 'official message in force: tsunami' });
     // Past its expiry: no longer counted, and the pill is not red, although the issuer's ended flag is false.
-    expect(alertsPill([tsunami], after)).toEqual({ count: 0, urgent: false, label: 'official alerts in force' });
+    expect(alertsPill([tsunami], after)).toEqual({ count: 0, urgent: false, label: 'official messages in force' });
     expect(isUrgentWarning(tsunami, after)).toBe(false);
     // Without a clock: judged as relayed.
     expect(alertsPill([tsunami]).count).toBe(1);
@@ -89,7 +89,7 @@ describe('what the alerts are about', () => {
   ];
   it('names the most numerous kinds first, up to three', () => {
     expect(hazardMix(list)).toBe('floods, tsunami, volcano');
-    expect(alertsPill(list).label).toBe('official alerts in force: floods, tsunami, volcano');
+    expect(alertsPill(list).label).toBe('official messages in force: floods, tsunami, volcano');
   });
   it('puts active messages first: groups with one before groups without, and active before ended inside a group', () => {
     const mixed = [

@@ -135,6 +135,6 @@ export function alertsPill(warnings: readonly OfficialWarning[], nowMs?: number)
     count,
     urgent: active.some((w) => isUrgentWarning(w, nowMs)),
     // Says what the alerts are about, so flood gauges in a haze map do not look like a bug.
-    label: `official ${count === 1 ? 'alert' : 'alerts'} in force${mix ? `: ${mix}` : ''}`,
+    label: `official ${count === 1 ? 'message' : 'messages'} in force${mix ? `: ${mix}` : ''}`,
   };
 }

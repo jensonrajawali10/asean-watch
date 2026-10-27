@@ -10,7 +10,7 @@
   margin-right: 4px;
   padding: 0 6px;
   border: 1px solid var(--mode-modelled-border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--mode-modelled-bg);
   color: var(--mode-modelled-fg);
   font-family: var(--mono);
@@ -64,7 +64,7 @@
   margin-right: 4px;
   padding: 0 6px;
   border: 1px solid var(--mode-modelled-border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--mode-modelled-bg);
   color: var(--mode-modelled-fg);
   font-family: var(--mono);
