@@ -14,8 +14,8 @@
     },
     "dataMode": "historical",
     "scenarioWindow": {
-      "start": "2026-10-18T00:00:00Z",
-      "end": "2026-10-24T08:23:56Z"
+      "start": "2026-10-21T00:00:00Z",
+      "end": "2026-10-27T07:09:58Z"
     },
     "replayable": true,
     "summary": "Watch area around Merapi's summit (Smithsonian GVP 263250). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -45,8 +45,8 @@
     },
     "dataMode": "historical",
     "scenarioWindow": {
-      "start": "2026-10-18T00:00:00Z",
-      "end": "2026-10-24T08:23:56Z"
+      "start": "2026-10-21T00:00:00Z",
+      "end": "2026-10-27T07:09:58Z"
     },
     "replayable": true,
     "summary": "Watch area around Semeru's summit (Smithsonian GVP 263300). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -76,8 +76,8 @@
     },
     "dataMode": "historical",
     "scenarioWindow": {
-      "start": "2026-10-18T00:00:00Z",
-      "end": "2026-10-24T08:23:56Z"
+      "start": "2026-10-21T00:00:00Z",
+      "end": "2026-10-27T07:09:58Z"
     },
     "replayable": true,
     "summary": "Watch area around Anak Krakatau, the active cone inside the Krakatau caldera. The Smithsonian GVP catalogues it under Krakatau (262000); the watch is centred on the GVP point for Krakatau. Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -107,8 +107,8 @@
     },
     "dataMode": "historical",
     "scenarioWindow": {
-      "start": "2026-10-18T00:00:00Z",
-      "end": "2026-10-24T08:23:56Z"
+      "start": "2026-10-21T00:00:00Z",
+      "end": "2026-10-27T07:09:58Z"
     },
     "replayable": true,
     "summary": "Watch area around Sinabung's summit (Smithsonian GVP 261080). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -142,8 +142,8 @@
     },
     "dataMode": "historical",
     "scenarioWindow": {
-      "start": "2026-10-18T00:00:00Z",
-      "end": "2026-10-24T08:23:56Z"
+      "start": "2026-10-21T00:00:00Z",
+      "end": "2026-10-27T07:09:58Z"
     },
     "replayable": true,
     "summary": "Haze watch box over the Riau mainland peatlands, latitude -0.5 to 1.6 and longitude 101.0 to 103.2 (the marker is the Siak-Kampar peatlands). Shows real NASA FIRMS satellite hotspots as one daily total per sensor, from the data snapshot, one replay step per UTC day. The box stops short of the Malaysian and Singapore coasts so their heat sources are not counted. A hotspot can be a fire, a flare or other hot ground and needs contextual review.",

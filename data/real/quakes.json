@@ -1,5 +1,6 @@
 {
   "about": "USGS and BMKG earthquake rows near the watch areas, one row per product; duplicates across agencies and products are kept on purpose.",
   "rows": [
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026uwol","time":"2026-10-24T22:59:47Z","lat":3.11,"lon":98.05,"depthKm":10,"mag":2.6,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null}
   ]
 }
