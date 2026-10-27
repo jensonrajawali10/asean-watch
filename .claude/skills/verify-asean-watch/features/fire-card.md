@@ -11,7 +11,7 @@ Fires are NASA FIRMS satellite heat detections, labelled MEASURED. A fire card s
 
 ## How to get to it (user POV)
 
-- Click "Show details" in the header, then a fire-count badge on the map. Badge names read "<place> · <n> hotspots in the last 24 hours (NASA FIRMS satellite detections, not confirmed fires)".
+- Click "Show details" in the header ("Details" on phones), then a fire-count badge on the map. Badge names read "<place> · <n> hotspots in the last 24 hours (NASA FIRMS satellite detections, not confirmed fires)".
 - Rail button "Fires", then "Fly to" on a row of the "Top fire clusters" list.
 - Rail button "Fires", then a country, Indonesian province or Malaysian state row's fly button (title "Fly to <name>"). It flies the map only; no card opens. Not driven yet.
 - Click an orange fire square on the map (canvas; not driven yet, see Gotchas).
@@ -23,13 +23,13 @@ Preconditions:
 
 - Baseline. The Fires chip is on (default).
 
-- **Badge.** Run `npm run verify -- run --journey cards`. Step `card-fire` clicks "Show details", clicks the first badge not covered by another control, checks the card, then clicks "Simple view" to go back. Screenshot `<viewport>-<nn>-fire-card-map.png`; `saw.badge` names the badge.
+- **Badge.** Run `npm run verify -- run --journey cards`. Step `card-fire` clicks "Show details" ("Details" on phones), clicks the first badge not covered by another control, checks the card, then clicks "Simple view" ("Simple" on phones) to go back. Screenshot `<viewport>-<nn>-fire-card-map.png`; `saw.badge` names the badge.
 - **List.** Same run, step `card-fire-list`: rail "Fires", then the first `ol.fires-clusters button.fires-fly`. The card must be on top and the hash must contain `sel=fire:`. Screenshot `<viewport>-<nn>-fire-card-list.png`.
 - **Link.** Run `npm run verify -- open --hash "sel=fire:24h-1" --viewport phone`. `card.title` is the top cluster ("Pulang Pisau, Central Kalimantan ...") and `cardOnTop` is `true`. With `ws=fires&` in front, the phone shows the Fires sheet over the card and `cardOnTop` names the workspace sheet: that is the link asking for the section, not a bug.
 
 ## Gotchas
 
-- At phone width the label planner fits no fire badge beside the tall header, so `card-fire` reports `skip` on the phone. Reach the card through the Fires section there.
-- On a phone the workspace is a full-screen sheet. If "Fly to" leaves the sheet open, the card opens behind it and the user sees nothing change; `card-fire-list` fails with "covered by the workspace sheet". On desktop the workspace is a side panel and the card shows beside it.
+- The label planner drops badges it cannot fit beside the header and dock. Before 27 Oct's shorter phone header none fitted at 375 px; if that happens again, `card-fire` reports `skip` on the phone and the Fires section is the way in.
+- On a phone the workspace is a full-screen sheet, so "Fly to" closes it to show the map and the card. If it ever leaves the sheet open, the card opens behind it and the user sees nothing change; `card-fire-list` then fails with "covered by the workspace sheet". On desktop the workspace is a side panel and the card shows beside it.
 - At the regional view the biggest clusters (Central Kalimantan) sit under Palangka Raya's city circle, so a canvas click there opens the city card. That is why the canvas path is not driven.
 - Counts and fire power come from the FIRMS snapshot or relay and change between runs.

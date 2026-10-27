@@ -414,9 +414,9 @@ async function closeCard(page) {
 }
 
 async function closeDrawer(page) {
-  const btn = page.getByRole('button', { name: 'Close the workspace (Esc)' });
-  if (await btn.isVisible().catch(() => false)) await btn.click();
-  else await page.keyboard.press('Escape');
+  // The close button ("Close Data & reports (Esc)") is the user path; no silent Esc fallback, so a missing
+  // or covered button fails the step.
+  await page.locator('button.ws-drawer__close').click({ timeout: 5_000 });
   await page.waitForSelector('.app[data-drawer="closed"]', { timeout: 5_000 });
 }
 
@@ -483,7 +483,7 @@ async function journeyMap(s) {
     rec.saw.headline = (await page.locator('h1').first().innerText().catch(() => '')).trim();
     const alerts = page.locator('button.alerts-pill');
     rec.saw.alertsButton = (await alerts.count()) ? await alerts.first().getAttribute('title') : null;
-    if (!rec.saw.alertsButton) throw new Error('no official-alerts button in the header');
+    if (!rec.saw.alertsButton) throw new Error('no official-messages button in the header');
     rec.saw.volcanoMarkers = await page.locator('button.mv-marker.is-volcano').count();
     rec.saw.warningPins = await page.locator('button.mv-wmarker').count();
     rec.saw.layout = await noSidewaysScroll(page);
@@ -491,21 +491,64 @@ async function journeyMap(s) {
     if (!rec.saw.headline) throw new Error('no page heading (h1) found');
     await s.shot(rec, 'map');
   });
+
+  // The fire relay and the map key's words must agree: "in the last 24 hours" only for data under 12 h old
+  // (FIRE_RECENT_MAX_MS in src/lib/fires.ts), otherwise the key names the day. An empty or failed relay is
+  // never read as "no fires": the page keeps its bundled copy and dates it.
+  await s.step('fires-live', async (rec) => {
+    const res = await fetch(new URL('api/fires', s.baseUrl), { signal: AbortSignal.timeout(90_000) });
+    rec.did.push('GET /api/fires');
+    rec.saw.status = res.status;
+    if (res.status !== 200) throw new Error(`/api/fires answered HTTP ${res.status}`);
+    const body = await res.json();
+    rec.saw.available = body.available === true;
+    if (rec.saw.available) {
+      rec.saw.reference = body.snapshot?.reference ?? null;
+      rec.saw.stale = body.stale === true;
+    } else {
+      rec.saw.reason = body.reason ?? null;
+      rec.saw.message = body.message ?? null;
+    }
+    const ref = Date.parse(rec.saw.reference ?? '');
+    const recent = rec.saw.available && Number.isFinite(ref) && Date.now() - ref <= 12 * 3_600_000;
+    rec.saw.keyShouldSay = recent ? 'in the last 24 hours' : 'a named day ("in the 24 h to <day>")';
+
+    const key = page.locator('section[aria-label="Map key"]');
+    const toggle = key.locator('button.mv-key__toggle');
+    const folded = (await toggle.getAttribute('aria-expanded')) === 'false';
+    if (folded) {
+      await toggle.click();
+      rec.did.push('open the map key ("What\'s on the map"), folded on phones');
+    }
+    // The fires row is the one with the orange-square swatch (the pins row also mentions "the orange squares").
+    const row = key.locator('li:has(.mv-key__fire)');
+    await row.waitFor({ state: 'attached', timeout: 5_000 });
+    if (!(await row.isVisible())) {
+      // Phones show only the key's first two rows (MapView.css, max-width 767px).
+      await s.shot(rec, 'map-key-short');
+      if (folded) await toggle.click();
+      const relay = rec.saw.available ? `live, data from ${rec.saw.reference}` : `unavailable: ${rec.saw.reason}`;
+      throw new Skip(`/api/fires answered (${relay}), but the map key shows only its first two rows at this size, so the fire line is not on screen`);
+    }
+    if (recent) {
+      // The page asks the relay itself; its answer can land a few seconds after the map.
+      await page
+        .waitForFunction((el) => el.textContent.includes('in the last 24 hours'), await row.elementHandle(), { timeout: 60_000 })
+        .catch(() => {});
+    } else await sleep(3_000);
+    rec.saw.keyFires = (await row.innerText()).replace(/\s+/g, ' ').trim();
+    await s.shot(rec, 'map-key-fires');
+    if (folded) await toggle.click();
+    const saysRecent = rec.saw.keyFires.includes('the last 24 hours');
+    if (recent && !saysRecent) throw new Error(`relay data is from ${rec.saw.reference} but the key says "${rec.saw.keyFires}"`);
+    if (!recent && saysRecent) throw new Error(`the key says "the last 24 hours" but the fire data is ${rec.saw.available ? `from ${rec.saw.reference}` : `the bundled copy (relay: ${rec.saw.reason})`}`);
+  });
 }
 
 async function journeyLayers(s) {
   const { page } = s;
   const group = page.getByRole('group', { name: 'Map layers' });
   await s.step('layers-chips', async (rec) => {
-    if (!(await group.isVisible().catch(() => false))) {
-      // Phones tuck the chips behind the details toggle.
-      const details = page.getByRole('button', { name: /Show the forecast timeline|Show details/ }).first();
-      if (await details.isVisible().catch(() => false)) {
-        rec.did.push('tap the details toggle to reveal the layer chips');
-        await details.click();
-      }
-      await group.waitFor({ state: 'visible', timeout: 5_000 });
-    }
     const chips = group.locator('button[aria-pressed]');
     const n = await chips.count();
     if (n === 0) throw new Error('no layer chips found');
@@ -626,12 +669,13 @@ async function journeyCards(s, cities) {
 
   await s.step('card-fire', async (rec) => {
     await baseline(s, rec);
-    // The simple view (the default) hides the fire-count badges; "Show details" brings them back.
-    const details = page.getByRole('button', { name: 'Show details', exact: true });
+    // The simple view (the default) hides the fire-count badges; "Show details" ("Details" on phones) brings
+    // them back. The button's title stays the same at both sizes, so find it by that.
+    const details = page.locator('button.detail-toggle[title^="Show the forecast timeline"]');
     const simpleFirst = await details.isVisible().catch(() => false);
     if (simpleFirst) {
       await details.click();
-      rec.did.push('click "Show details"');
+      rec.did.push('click "Show details" ("Details" on phones)');
     }
     try {
       const badges = page.locator('button.mv-fbadge');
@@ -665,15 +709,15 @@ async function journeyCards(s, cities) {
       await expectFireCard(s, rec);
     } finally {
       if (simpleFirst) {
-        await page.getByRole('button', { name: 'Simple view', exact: true }).click().catch(() => {});
-        rec.did.push('click "Simple view" to go back');
+        await page.locator('button.detail-toggle[title="Back to the simple view"]').click().catch(() => {});
+        rec.did.push('click "Simple view" ("Simple" on phones) to go back');
       }
     }
   });
 
   await s.step('card-fire-list', async (rec) => {
     await baseline(s, rec);
-    await page.getByRole('navigation', { name: 'Workspace sections' }).getByRole('button', { name: 'Fires', exact: true }).click();
+    await rail(page).getByRole('button', { name: 'Fires', exact: true }).click();
     rec.did.push('click "Fires" in the workspace rail');
     const fly = page.locator('ol.fires-clusters button.fires-fly').first();
     await fly.waitFor({ state: 'visible', timeout: 10_000 });
@@ -698,18 +742,21 @@ async function expectFireCard(s, rec) {
   rec.did.push('close the card');
 }
 
+/** The left rail (bottom bar on phones). By class: its accessible name has been renamed before. */
+const rail = (page) => page.locator('nav.taskbar');
+
 async function journeyWorkspace(s) {
   const { page } = s;
   await baseline(s);
-  const rail = page.getByRole('navigation', { name: 'Workspace sections' });
-  const buttons = rail.getByRole('button');
+  const nav = rail(page);
+  const buttons = nav.getByRole('button');
   const names = [];
   for (let i = 0; i < (await buttons.count()); i++) names.push(await buttons.nth(i).getAttribute('aria-label'));
   for (const name of names) {
     if (!name || name === 'Map') continue;
     const short = name.replace(/\s*\(.*$/, '');
     await s.step(`workspace-${short.toLowerCase()}`, async (rec) => {
-      await rail.getByRole('button', { name, exact: true }).click();
+      await nav.getByRole('button', { name, exact: true }).click();
       rec.did.push(`click "${name}" in the left rail`);
       await page.waitForSelector('.app[data-drawer="open"]', { timeout: 5_000 });
       await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});

@@ -31,7 +31,7 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 
 ## Features
 
-- [Map view](./map-view.md) covers the first screen: map, header sentence, alerts button, map key, and no sideways scroll.
+- [Map view](./map-view.md) covers the first screen: map, header sentence, official-messages button, no sideways scroll, and the live fire relay (`/api/fires`) agreeing with the map key's wording.
 - [Layer chips](./layer-chips.md) covers the six map-layer toggles and the "More layers" chip.
 - [Volcano card](./volcano-card.md) covers clicking a volcano triangle and its card.
 - [City card](./city-card.md) covers clicking a city's haze circle and its card.
@@ -44,7 +44,8 @@ These are real user paths with no journey yet. A change to one of them needs a m
 
 - Haze forecast scrubber and the Play button (bottom dock).
 - "Play ash scenario" on a volcano card.
-- Official warning pins on the map and the alerts button opening the Warnings section.
+- Official warning pins on the map and the "messages" button opening the Warnings section.
+- The first-visit tip by the rail ("These buttons open the full data", "Got it").
 - Dark / light theme buttons in the details view.
 - Report section: compose and download.
 - Tide gauge and earthquake charts (pins drawn on the canvas).
