@@ -11,7 +11,7 @@ data/watches.json + data/real/* → watchRules → validateObservations → visi
 live in the browser when online: NEA, official warning feeds (warnings.ts); snapshots otherwise
 ```
 
-No database. One optional server function (`api/ai-brief.ts`, Vercel) calls the Claude API for the grounded summary; the key stays server-side and the client sends only `{watchId, dayIndex}`. Further server functions may proxy official feeds that block browser calls (fixed host allow-lists only). The core works offline from bundled real snapshots. Browser-callable feeds refresh live when online; FIRMS has no CORS: the watch-area records are refreshed by script, and the whole-region fire view is rebuilt every few hours by the `/api/fires` relay (`src/lib/firesProxy.ts`, the same builder as `scripts/refresh-fires.mjs`), with the bundled `data/fires-snapshot.json` as its offline fallback. External links open in a new tab.
+No database, and no AI service is called. Server functions may proxy official feeds that block browser calls (fixed host allow-lists only). The core works offline from bundled real snapshots. Browser-callable feeds refresh live when online; FIRMS has no CORS: the watch-area records are refreshed by script, and the whole-region fire view is rebuilt every few hours by the `/api/fires` relay (`src/lib/firesProxy.ts`, the same builder as `scripts/refresh-fires.mjs`), with the bundled `data/fires-snapshot.json` as its offline fallback. External links open in a new tab.
 
 ## File ownership
 
@@ -109,8 +109,8 @@ Jenson: "make it all real data". Simulated fixtures are retired. Everything show
 - **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. In the app, NEA and the official warning feeds (warnings.ts) also refresh live when online; The whole-region fire view (`data/fires-snapshot.json`) is replaced by the `/api/fires` relay build when it answers (labelled LIVE with its fetch time; the bundled copy stays SNAPSHOT); the watch-area FIRMS records and earthquakes come from the snapshot only. Snapshots are bundled at build time, so rebuild after `npm run refresh:all`.
 - **Banner:** "DEMO REPLAY" becomes a data-recency banner, e.g. "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".
 
-## Map v2 and AI summary (2026-10-14)
+## Map v2 (2026-10-14)
 
 - **Map engine:** MapLibre GL + deck.gl (`src/components/map/MapView.tsx`). Basemaps: CARTO Dark Matter (default; CARTO's free basemaps are for non-commercial use within their view limits, attribution "© CARTO © OpenStreetMap contributors"), OpenFreeMap positron (light option). Offline: a local outline style from `data/region.geojson`.
 - **Modelled haze layers:** CAMS PM2.5 haze, 925 hPa wind particles, city markers and the forecast scrubber are MODELLED context. When showing a snapshot they say "snapshot run <time>", never "now". Singapore's NEA reading is shown separately as MEASURED.
-- **Claude summary:** summarises only the deterministic brief for one watch and day, cites [E#] and [W#], states each warning's mode, time and status, quotes official instructions verbatim or cites them, never predicts, never gives its own advice, and never treats absence as an all-clear. Labelled "AI-written summary of the data shown. May contain errors. Not an official warning; follow the issuer's instructions."
+- **AI summary:** removed on 2026-10-27. It was never switched on in production (no server key was set), and the site calls no AI model.
