@@ -49,3 +49,4 @@ These are real user paths with no journey yet. A change to one of them needs a m
 - Report section: compose and download.
 - Tide gauge and earthquake charts (pins drawn on the canvas).
 - Clicking fire squares on the canvas (city circles sit on top of the biggest clusters at the regional view).
+- The other workspace rows that move the map: Fires section country, province and state rows ("Fly to <name>"), Haze section city rows ("Show this place on the map", which also opens the city card) and smoke-path rows ("Fly the map to this cluster"). On a phone each must leave the map in view, like the clusters list does.

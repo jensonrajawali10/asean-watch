@@ -5,7 +5,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -822,8 +822,8 @@ async function run(args) {
   for (const j of journeys) if (!JOURNEYS.includes(j)) throw Object.assign(new Error(`Unknown journey "${j}". Use one of: ${JOURNEYS.join(', ')}.`), { code: 2 });
   for (const v of vps) if (!VIEWPORTS[v]) throw Object.assign(new Error(`Unknown viewport "${v}". Use desktop or phone.`), { code: 2 });
   const theme = args.theme === 'light' ? 'light' : 'dark';
-  const id = runId();
-  const outDir = resolve(args.out && args.out !== true ? String(args.out) : join(ART_ROOT, id));
+  const outDir = resolve(args.out && args.out !== true ? String(args.out) : join(ART_ROOT, runId()));
+  const id = basename(outDir);
   mkdirSync(outDir, { recursive: true });
 
   const { url, started } = await acquireServer(args);

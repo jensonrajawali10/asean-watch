@@ -13,8 +13,9 @@ Fires are NASA FIRMS satellite heat detections, labelled MEASURED. A fire card s
 
 - Click "Show details" in the header, then a fire-count badge on the map. Badge names read "<place> · <n> hotspots in the last 24 hours (NASA FIRMS satellite detections, not confirmed fires)".
 - Rail button "Fires", then "Fly to" on a row of the "Top fire clusters" list.
+- Rail button "Fires", then a country, Indonesian province or Malaysian state row's fly button (title "Fly to <name>"). It flies the map only; no card opens. Not driven yet.
 - Click an orange fire square on the map (canvas; not driven yet, see Gotchas).
-- A shared link with `#ws=fires&sel=fire:24h-1`.
+- A shared link with `#sel=fire:24h-1`, or `#ws=fires&sel=fire:24h-1` to open the Fires section too.
 
 ## Driving it with aw-verify
 
@@ -24,7 +25,7 @@ Preconditions:
 
 - **Badge.** Run `npm run verify -- run --journey cards`. Step `card-fire` clicks "Show details", clicks the first badge not covered by another control, checks the card, then clicks "Simple view" to go back. Screenshot `<viewport>-<nn>-fire-card-map.png`; `saw.badge` names the badge.
 - **List.** Same run, step `card-fire-list`: rail "Fires", then the first `ol.fires-clusters button.fires-fly`. The card must be on top and the hash must contain `sel=fire:`. Screenshot `<viewport>-<nn>-fire-card-list.png`.
-- **Link.** Run `npm run verify -- open --hash "ws=fires&sel=fire:24h-1" --viewport phone`. Check `card.title` and `cardOnTop`.
+- **Link.** Run `npm run verify -- open --hash "sel=fire:24h-1" --viewport phone`. `card.title` is the top cluster ("Pulang Pisau, Central Kalimantan ...") and `cardOnTop` is `true`. With `ws=fires&` in front, the phone shows the Fires sheet over the card and `cardOnTop` names the workspace sheet: that is the link asking for the section, not a bug.
 
 ## Gotchas
 
