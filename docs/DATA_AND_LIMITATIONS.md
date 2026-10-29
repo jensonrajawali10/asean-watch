@@ -105,6 +105,44 @@ Example from the bundled snapshot: ThaiWater gauge C.35 (Ban Pom, Phra Nakhon Si
 - **Official items** use a reserved style that our own states never use. GDACS uses a separate dashed "impact estimate" style.
 - **Provenance:** every record, card and warning shows its source and time.
 
+## Expected update intervals
+
+Each source has an expected update interval. When its data is older than that interval plus an allowance, the app says so in plain words: "Older than expected: last update 9 h ago, usually hourly." An official feed that has not answered for an hour reads "Feed quiet for N h: no update has reached this page, so messages may be missing. Check <issuer> directly." Neither is ever an all-clear.
+
+The flag appears in four places: each row of Sources & methods, the Sources summary figures, the Overview's "Data freshness and gaps", and the header chip beside the forecast time when the map's air-quality forecast is past its interval. When the forecast is past its interval, the headline says "Older model run" and the scrubber says "older run", never "now". The official warnings panel's feed list also names quiet feeds.
+
+Ages are measured against the page clock (`src/lib/useNowMs.ts`), which ticks every 5 minutes, when the tab becomes visible and when the browser comes back online. An age is flagged only when it is strictly past the interval plus the allowance. Times slightly ahead of the page clock (up to 5 minutes) count as age zero. Times further ahead are not judged.
+
+A feed counts as quiet from the last time it answered on this page. One failed refresh therefore does not read as days of silence: the panel already says the feed fell back to its saved copy. A feed being asked again is not called quiet until the answer is in. An unavailable feed keeps its own sentence, "Official feed unavailable: check <issuer> directly".
+
+The table lives in `src/lib/staleness.ts` (`UPDATE_INTERVALS`). A test checks that every row below matches it.
+
+| Id | Source | Usually | Flagged after | Time checked | Why | Provider's page |
+|---|---|---|---|---|---|---|
+| `nea-haze` | NEA Singapore PSI and PM2.5 (data.gov.sg) | hourly | 2 h | NEA's own reading time | data.gov.sg updates the PSI and PM2.5 readings hourly from NEA; its feeds refresh every 15 min. The extra hour covers a late reading. This page reads NEA once per visit, so a tab left open also ages. | https://guide.data.gov.sg/developer-guide/real-time-apis |
+| `cams-pm25` | CAMS PM2.5 forecast (Open-Meteo Air Quality API) | every 12 h | 15 h | when the model run was fetched from Open-Meteo | CAMS runs its global forecast every 12 h, so a copy fetched more than 12 h ago has missed at least one run. The 3 h allowance covers this site's 2 h relay cache and a run published late. | https://open-meteo.com/en/docs/air-quality-api |
+| `open-meteo-wind` | Wind grids and summit winds (Open-Meteo Forecast API) | every 6 h | 9 h | when the model run was fetched from Open-Meteo | Open-Meteo lists ECMWF IFS and GFS as updated every 6 h, and ICON and JMA every 3 h. It gives no cadence for its best-match blend, so the slower 6 h is used. The 3 h allowance covers the relay cache and a run published late. | https://open-meteo.com/en/docs |
+| `glofas` | GloFAS river discharge (Open-Meteo Flood API) | daily | 36 h | when the discharge series was fetched | GloFAS issues one forecast a day. The 12 h allowance covers this site's 6 h relay cache and a late daily run. | https://open-meteo.com/en/docs/flood-api |
+| `fires-relay` | Regional fire view (NASA FIRMS, through `/api/fires`) | every 3 h | 4.5 h | when the relay built its copy from FIRMS | The relay rebuilds every 3 h, and FIRMS makes global detections available within 3 h of each pass. The 90 min allowance covers the hour the CDN may keep the previous build and the tab's 30-minute re-ask. The newest detection is not used as the clock: FIRMS sees most places about twice a day, so on a normal day it can be 12 h old. | https://www.earthdata.nasa.gov/data/tools/firms/faq |
+| `watch-relay` | Watch-area evidence (FIRMS, USGS and BMKG, through `/api/watch`) | every 3 h | 4.5 h | when the relay built its copy | Same relay cadence and allowance as the regional fire view; both relays share `src/lib/buildRelay.ts`. | https://www.earthdata.nasa.gov/data/tools/firms/faq |
+| `usgs-quakes` | USGS earthquakes (FDSN event service) | every minute | 1 h | when this page fetched the list | USGS updates its earthquake feeds every minute. This page fetches the list once per visit, so it is flagged after an hour, when a newer earthquake may be missing from the map. | https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php |
+| `bmkg-quakes` | BMKG earthquake lists (data.bmkg.go.id) | within minutes of each earthquake | 1 h | when this page fetched the list | BMKG updates its lists whenever an earthquake occurs. The once-per-visit fetch and one-hour allowance are the same as for USGS. | https://data.bmkg.go.id/gempabumi/ |
+| `official-feed` | Official warning feeds and GDACS (every feed in the official warnings panel: BMKG, JMA, GeoNet, NWS, PTWC, ThaiWater, DSDA, PUB, GDACS, and any feed added later) | every 5 min | 1 h | the last time the feed answered this page | Issuers publish when they have a message, so weeks without a new message are normal and say nothing about the feed. What is checked is that the feed answers. This page asks every 5 min, so an hour without an answer is about twelve missed asks in a row. Issuers' own rates, for context: JMA's high-frequency XML feeds update every minute, GDACS's main feeds every 6 min, and BMKG's when an earthquake occurs. GeoNet and NWS publish no cadence. | none (event-driven) |
+| `magma-copy` | PVMBG MAGMA Indonesia volcano levels (recorded copy) | every 6 h | 12 h | when the copy was recorded | MAGMA reports on each volcano for every 6-hour period, and a level can change in any report. Its API is token-only, so the copy is never refreshed here. After 12 h it is flagged and points to MAGMA. | https://magma.esdm.go.id/ |
+
+Sources with no expected update are not flagged:
+
+- links (ASMC, NUS CRISP);
+- map tiles (GIBS imagery, basemaps);
+- bundled reference data (the GVP catalogue, geoBoundaries, Natural Earth, the IOC station list);
+- values computed in the browser (the smoke-transport paths).
+
+Issuers' cadence pages:
+
+- JMA: https://xml.kishou.go.jp/xmlpull.html
+- GDACS: https://www.gdacs.org/feed_reference.aspx
+- NWS, which asks clients to poll no more than every 30 seconds: https://www.weather.gov/documentation/services-web-alerts
+
 ## Limitations
 
 - **A hotspot is not an eruption or a confirmed fire.** Near a volcano it can be volcanic heat, a vegetation fire or other hot ground. In the haze box it can be a fire, a gas flare or other hot ground. Every hotspot needs contextual review [6]. Satellite anomalies alone do not establish that an eruption will occur [1].

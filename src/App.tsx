@@ -390,7 +390,7 @@ export default function App() {
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
   /** Official feeds and PTWC: the bundled snapshot first, then live, refreshed every 5 minutes. */
-  const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
+  const { feed: warningsResult, ptwc, loading: warningsLoading, checking: warningsChecking } = useOfficialWarnings();
   /** Shared page clock (every 5 minutes, on visible, on online): warning expiry and the quake layer's 24 h. */
   const nowMs = useNowMs();
   const detailMode = useDetailMode();
@@ -601,13 +601,14 @@ export default function App() {
       neaError: neaResult?.error ?? null,
       warnings: allWarnings,
       warningFeeds: allFeeds,
+      warningFeedsChecking: warningsChecking,
       fires: firesSummary,
       ashWind,
       riverFlow,
       quakes,
       nowMs,
     }),
-    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, firesSummary, ashWind, riverFlow, quakes, nowMs, wv],
+    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, warningsChecking, firesSummary, ashWind, riverFlow, quakes, nowMs, wv],
   );
   /** One live sentence that follows the scrubber; a snapshot never says "now". */
   const head = useMemo(() => situationHeadline(situationInput, { atISO: hazeHour.timeISO || null }), [situationInput, hazeHour.timeISO]);
@@ -1044,6 +1045,7 @@ export default function App() {
           elsewhere={elsewhereWarnings}
           onShowAll={() => selectArea(null)}
           loading={warningsLoading}
+          checking={warningsChecking}
           selectedWarningId={selection?.kind === 'warning' ? selection.id : inspectedWarningId}
           onInspect={openWarning}
         />
@@ -1148,7 +1150,9 @@ export default function App() {
   };
 
   const freshness =
-    head.freshness === 'UNAVAILABLE' || !head.asOf ? null : { mode: head.freshness, run: runLabel(head.asOf) };
+    head.freshness === 'UNAVAILABLE' || !head.asOf
+      ? null
+      : { mode: head.freshness, run: runLabel(head.asOf), older: head.age?.state === 'older' ? { text: head.age.text, short: head.age.short } : null };
   const subtitle = selectedName ? `Selected: ${selectedName}` : cityName ? `Selected: ${cleanPlace(cityName)}` : undefined;
 
   return (

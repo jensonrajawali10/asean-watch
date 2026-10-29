@@ -23,6 +23,8 @@ export interface WarningsSectionProps {
   elsewhere: OfficialWarning[];
   onShowAll: () => void;
   loading: boolean;
+  /** True while the feeds are being asked again (useOfficialWarnings); a feed is not called quiet meanwhile. */
+  checking?: boolean;
   selectedWarningId: string | null;
   onInspect: (id: string) => void;
 }
@@ -123,6 +125,7 @@ export default function WarningsSection(p: WarningsSectionProps) {
           elsewhere={p.elsewhere}
           onShowAll={p.onShowAll}
           loading={p.loading}
+          checking={p.checking}
           selectedWarningId={p.selectedWarningId}
           onInspect={p.onInspect}
         />

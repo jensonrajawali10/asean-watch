@@ -32,6 +32,8 @@ import { localTimeLabel, placeRef } from './places';
 import { REACH_KM, SINGAPORE, TRANSPORT_CAVEAT, computeTrajectories, sampleWind } from './transport';
 import type { HotspotSource, Trajectory } from './transport';
 import type { FireRollup, FireSnapshot } from './fires';
+import { checkAge, feedAge, inSentence, intervalById } from './staleness';
+import type { AgeCheck } from './staleness';
 import { compareWarnings } from './warnings';
 import { endedLabel, isExpired } from './warningsView';
 import type { WindGrid } from './windField';
@@ -82,6 +84,8 @@ export interface FiresSummary {
   sourceUrl?: string | null;
   /** ISO 8601 UTC time of the newest file or the retrieval. */
   asOf: string | null;
+  /** ISO 8601 UTC time the copy was built (the /api/fires relay) or captured (the bundled snapshot). */
+  retrievedAt?: string | null;
   dataMode?: 'live' | 'historical' | null;
   /** Detections in the last 24 h over the region covered. */
   hotspots24h?: number | null;
@@ -122,6 +126,7 @@ export function firesSummaryFromSnapshot(
     source: 'NASA FIRMS VIIRS and MODIS, near real time',
     sourceUrl: FIRMS_PAGE,
     asOf: s.reference,
+    retrievedAt: s.retrievedAt,
     dataMode: opts?.dataMode ?? 'historical',
     hotspots24h: s.totals.last24h.count,
     hotspotsPrev24h: s.totals.prev24h.count,
@@ -186,6 +191,8 @@ export interface SituationInput {
   warnings?: readonly OfficialWarning[] | null;
   /** Every official feed's status (App's allFeeds). */
   warningFeeds?: readonly WarningFeedStatus[] | null;
+  /** True while the page is asking the official feeds again: a feed past its interval is not called quiet yet. */
+  warningFeedsChecking?: boolean;
   fires?: FiresSummary | null;
   ashWind?: AshWindData | null;
   /** App's riverFlow (FloodModelResult fits). */
@@ -193,9 +200,10 @@ export interface SituationInput {
   /** App's quakes (QuakesResult fits). */
   quakes?: { events: readonly QuakeEvent[]; statuses: readonly ConnectorStatus[] } | null;
   /**
-   * Wall-clock ms (App passes the shared page clock, useNowMs): "N h old" age notes, and whether an official
-   * message is still in force (its expiry against this clock, isExpired). Omit for fully deterministic
-   * output; messages are then judged as relayed (the issuer's ended flag at retrieval).
+   * Wall-clock ms (App passes the shared page clock, useNowMs): "N h old" age notes, "older than expected"
+   * and "feed quiet" flags (src/lib/staleness.ts), and whether an official message is still in force (its
+   * expiry against this clock, isExpired). Omit for fully deterministic output; messages are then judged as
+   * relayed (the issuer's ended flag at retrieval) and no age is flagged.
    */
   nowMs?: number | null;
 }
@@ -674,6 +682,11 @@ export interface Headline {
   /** The hour the sentence describes. */
   timeISO: string | null;
   worst: { id: string; name: string; pm25: number } | null;
+  /**
+   * The model run's age against CAMS' expected update interval (src/lib/staleness.ts); null without a page
+   * clock or model data. When it is "older", the sentence says "Older model run", never "Now".
+   */
+  age: AgeCheck | null;
 }
 
 export interface HeadlineOptions {
@@ -720,7 +733,7 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
     } else {
       text = 'Air-quality model and fire data are unavailable right now; this is not an all-clear. Check ASMC and your national air-quality agency.';
     }
-    return { text, freshness: 'UNAVAILABLE', asOf: null, chip: 'NO MODEL DATA', timeISO: null, worst: null };
+    return { text, freshness: 'UNAVAILABLE', asOf: null, chip: 'NO MODEL DATA', timeISO: null, worst: null, age: null };
   }
 
   const atMs = opts.atISO ? Date.parse(opts.atISO) : Number.NaN;
@@ -728,9 +741,13 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
   const offsetH = Math.round((Date.parse(timeISO) - Date.parse(anchorISO)) / HOUR_MS);
   const snapshot = aq.dataMode === 'historical';
   const signed = offsetH < 0 ? `−${Math.abs(offsetH)} h` : `+${offsetH} h`;
+  const age = checkAge(intervalById('cams-pm25'), aq.retrievedAt, input.nowMs);
+  // A run past its expected interval is a copy, like the snapshot: it never says "Now".
   const when = snapshot
     ? `Snapshot run, ${utcDayLabel(timeISO)}`
-    : offsetH === 0
+    : age?.state === 'older'
+      ? `Older model run, ${utcDayLabel(timeISO)}`
+      : offsetH === 0
       ? 'Now'
       : `${offsetH > 0 ? 'Forecast' : 'Model'} ${signed} (${utcDayLabel(timeISO)})`;
   const freshness = snapshot ? 'SNAPSHOT' : 'LIVE';
@@ -745,6 +762,7 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
       chip,
       timeISO,
       worst: null,
+      age,
     };
   }
   const name = shortPlaceName(worst.place.name);
@@ -789,6 +807,7 @@ export function headline(input: SituationInput, opts: HeadlineOptions = {}): Hea
     chip,
     timeISO,
     worst: { id: worst.place.id, name: worst.place.name, pm25: worst.pm25 },
+    age,
   };
 }
 
@@ -859,7 +878,9 @@ export interface FreshnessLine {
   basis: Basis;
   mode: Citation['mode'];
   time: string | null;
-  /** e.g. "captured 2026-10-14 07:19 UTC (about 30 h old)". */
+  /** Age against the expected update interval (src/lib/staleness.ts); null without a page clock. */
+  age?: AgeCheck | null;
+  /** e.g. "captured 2026-10-14 07:19 UTC (about 30 h old). Older than expected: last update 30 h ago, usually every 12 h." */
   text: string;
 }
 
@@ -1691,33 +1712,58 @@ export function situationReport(input: SituationInput): SituationReport {
   });
 
   // --- Freshness ---------------------------------------------------------
+  // Each line: mode and time, its age, and the expected-interval sentence when the age is past it.
   const freshness: FreshnessLine[] = [];
-  const pushFresh = (source: string, basis: Basis, mode: Citation['mode'], time: string | null, kind: string) => {
+  const ageOf = (intervalId: string, at: string | null | undefined) => checkAge(intervalById(intervalId), at, input.nowMs);
+  const pushFresh = (source: string, basis: Basis, mode: Citation['mode'], time: string | null, kind: string, check: AgeCheck | null = null) => {
     const age = ageText(time, input.nowMs);
     const modeWord = mode === 'SNAPSHOT' ? 'bundled snapshot' : mode === 'LIVE' ? 'live' : mode === 'RECORDED' ? 'recorded copy' : mode === 'LINK' ? 'linked only' : 'unavailable';
+    // When the check used another time than the one shown (a relay's build time), the sentence names it.
+    const older =
+      check?.state !== 'older'
+        ? ''
+        : check.at === time
+          ? ` ${check.text}`
+          : ` ${check.text.replace(/\.$/, '')} (checked against ${check.interval.clock}).`;
     freshness.push({
       source,
       basis,
       mode,
       time,
-      text: `${source} (${basis}): ${modeWord}${time ? `, ${kind} ${utcStamp(time)}` : ''}${age ? ` (${age})` : ''}.`,
+      age: check,
+      text: `${source} (${basis}): ${modeWord}${time ? `, ${kind} ${utcStamp(time)}` : ''}${age ? ` (${age})` : ''}.${older}`,
     });
   };
-  if (aq) pushFresh('CAMS PM2.5 (Open-Meteo)', 'MODELLED', modeOf(aq.dataMode), aq.retrievedAt, aq.dataMode === 'live' ? 'retrieved' : 'captured');
+  if (aq) pushFresh('CAMS PM2.5 (Open-Meteo)', 'MODELLED', modeOf(aq.dataMode), aq.retrievedAt, aq.dataMode === 'live' ? 'retrieved' : 'captured', ageOf('cams-pm25', aq.retrievedAt));
   else pushFresh('CAMS PM2.5 (Open-Meteo)', 'MODELLED', 'UNAVAILABLE', null, '');
   for (const g of [input.wind925, input.wind10m]) {
-    if (g) pushFresh(`Wind ${g.level} (Open-Meteo)`, 'MODELLED', modeOf(g.dataMode), g.retrievedAt, g.dataMode === 'live' ? 'retrieved' : 'captured');
+    if (g) pushFresh(`Wind ${g.level} (Open-Meteo)`, 'MODELLED', modeOf(g.dataMode), g.retrievedAt, g.dataMode === 'live' ? 'retrieved' : 'captured', ageOf('open-meteo-wind', g.retrievedAt));
   }
-  if (nea) pushFresh('NEA Singapore PSI and PM2.5', 'MEASURED', modeOf(nea.haze?.dataMode ?? nea.dataMode), nea.haze?.observedAt ?? nea.observedAt, 'reading');
-  else pushFresh('NEA Singapore PSI and PM2.5', 'MEASURED', 'UNAVAILABLE', null, '');
+  if (nea) {
+    const reading = nea.haze?.observedAt ?? nea.observedAt;
+    pushFresh('NEA Singapore PSI and PM2.5', 'MEASURED', modeOf(nea.haze?.dataMode ?? nea.dataMode), reading, 'reading', ageOf('nea-haze', reading));
+  } else pushFresh('NEA Singapore PSI and PM2.5', 'MEASURED', 'UNAVAILABLE', null, '');
   if (input.hotspotSnapshot) {
     const snap = input.hotspotSnapshot;
-    pushFresh('NASA FIRMS hotspots (watch areas)', 'MEASURED', snap.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT', snap.satelliteAsOf ?? snap.retrievedAt, 'newest file');
+    pushFresh(
+      'NASA FIRMS hotspots (watch areas)',
+      'MEASURED',
+      snap.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT',
+      snap.satelliteAsOf ?? snap.retrievedAt,
+      'newest file',
+      ageOf('watch-relay', snap.retrievedAt),
+    );
   }
-  if (fires) pushFresh(fires.source, 'MEASURED', fires.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT', fires.asOf, 'as of');
-  if (ash) pushFresh('Ash-drift winds (Open-Meteo)', 'MODELLED', modeOf(ash.dataMode), ash.retrievedAt, ash.dataMode === 'live' ? 'retrieved' : 'captured');
-  if (river?.series[0]) pushFresh('GloFAS river discharge', 'MODELLED', modeOf(river.series[0].dataMode), river.series[0].retrievedAt, river.series[0].dataMode === 'live' ? 'retrieved' : 'captured');
-  for (const s of input.quakes?.statuses ?? []) pushFresh(`${s.sourceName} earthquakes`, 'MEASURED', feedMode(s.status), s.retrievedAt, 'retrieved');
+  if (fires) pushFresh(fires.source, 'MEASURED', fires.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT', fires.asOf, 'as of', ageOf('fires-relay', fires.retrievedAt ?? fires.asOf));
+  if (ash) pushFresh('Ash-drift winds (Open-Meteo)', 'MODELLED', modeOf(ash.dataMode), ash.retrievedAt, ash.dataMode === 'live' ? 'retrieved' : 'captured', ageOf('open-meteo-wind', ash.retrievedAt));
+  if (river?.series[0]) {
+    const s0 = river.series[0];
+    pushFresh('GloFAS river discharge', 'MODELLED', modeOf(s0.dataMode), s0.retrievedAt, s0.dataMode === 'live' ? 'retrieved' : 'captured', ageOf('glofas', s0.retrievedAt));
+  }
+  for (const s of input.quakes?.statuses ?? []) {
+    const check = s.status === 'unavailable' ? null : ageOf(s.sourceId.startsWith('bmkg') ? 'bmkg-quakes' : 'usgs-quakes', s.retrievedAt);
+    pushFresh(`${s.sourceName} earthquakes`, 'MEASURED', feedMode(s.status), s.retrievedAt, 'retrieved', check);
+  }
   if (feeds.length > 0) {
     const counts = { live: 0, snapshot: 0, unavailable: 0 };
     for (const f of feeds) {
@@ -1725,6 +1771,11 @@ export function situationReport(input: SituationInput): SituationReport {
       else if (f.status === 'snapshot') counts.snapshot += 1;
       else counts.live += 1;
     }
+    // A feed counts as quiet from its last live answer on this page (or the snapshot's capture when it has
+    // not answered since the page loaded); an unavailable feed already says "check <issuer> directly".
+    const quiet = feeds
+      .map((f) => ({ f, check: feedAge(f, input.nowMs, input.warningFeedsChecking === true) }))
+      .filter((q): q is { f: WarningFeedStatus; check: AgeCheck } => q.check?.state === 'older');
     const newest = feeds.map((f) => f.retrievedAt).filter((t): t is string => t !== null).sort().at(-1) ?? null;
     freshness.push({
       source: 'Official warning feeds',
@@ -1733,8 +1784,20 @@ export function situationReport(input: SituationInput): SituationReport {
       time: newest,
       text:
         `Official warning feeds (OFFICIAL): ${counts.live} live, ${counts.snapshot} from a bundled snapshot or recorded copy, ${counts.unavailable} unavailable` +
-        `${newest ? `; newest retrieval ${utcStamp(newest)}` : ''}.`,
+        `${newest ? `; newest retrieval ${utcStamp(newest)}` : ''}` +
+        `${quiet.length > 0 ? `; ${plural(quiet.length, 'feed is', 'feeds are')} quiet or older than expected (below)` : ''}.`,
     });
+    for (const { f, check } of quiet) {
+      const basis: Basis = f.feedId === 'gdacs' ? 'ESTIMATE' : 'OFFICIAL';
+      freshness.push({
+        source: f.issuer,
+        basis,
+        mode: check.interval.kind === 'copy' ? 'RECORDED' : feedMode(f.status),
+        time: check.at,
+        age: check,
+        text: `${f.issuer} (${basis}): ${inSentence(check.text)}`,
+      });
+    }
   }
   pushFresh('ASMC regional haze alert level', 'OFFICIAL', 'LINK', null, '');
   gaps.push(`ASMC's regional haze alert level is not ingested (no open feed; its terms restrict republishing): check ${ASMC.alerts}.`);
@@ -1764,9 +1827,11 @@ export function situationReport(input: SituationInput): SituationReport {
     text: 'Every figure is labelled MODELLED (a forecast model), MEASURED (stations or satellites) or OFFICIAL (relayed from the issuing agency, verbatim). Modelled values are context, not observations.',
   });
 
+  // A live run past its expected interval is an older copy: never "now" (as for the snapshot).
+  const hazeHourWords = table?.dataMode !== 'live' ? 'the snapshot hour' : head.age?.state === 'older' ? "the older run's hour" : 'now';
   const sections: ReportSection[] = [
     { id: 'overview', title: 'Situation overview', basis: 'MIXED', summary: head.text, figures: keyFigures, blocks: overviewBlocks },
-    { id: 'haze', title: `Haze and air quality: ${table?.dataMode === 'live' ? 'now' : 'the snapshot hour'} and the next ${HAZE_FUTURE_H} h`, basis: 'MIXED', summary: hazeSummary, figures: hazeFigures, blocks: hazeBlocks },
+    { id: 'haze', title: `Haze and air quality: ${hazeHourWords} and the next ${HAZE_FUTURE_H} h`, basis: 'MIXED', summary: hazeSummary, figures: hazeFigures, blocks: hazeBlocks },
     { id: 'transport', title: 'Smoke transport toward Singapore', basis: 'MODELLED', summary: transportSummary, figures: transportFigures, blocks: transportBlocks },
     { id: 'fires', title: 'Fires', basis: 'MEASURED', summary: fireSummary, figures: fireFigures, blocks: fireBlocks },
     { id: 'volcanoes', title: 'Volcanoes: official levels', basis: 'OFFICIAL', summary: volcanoSummary, figures: volcanoFigures, blocks: volcanoBlocks },

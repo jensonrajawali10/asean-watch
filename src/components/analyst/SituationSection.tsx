@@ -42,7 +42,7 @@ export default function SituationSection({ input, report, onOpenSection }: Situa
     <AnalystSection
       id="ws-situation"
       title="Overview"
-      meta={<FreshnessChip freshness={r.headline.freshness} chip={r.headline.chip} />}
+      meta={<FreshnessChip freshness={r.headline.freshness} chip={r.headline.chip} age={r.headline.age} />}
       lede={
         <>
           Generated from the loaded data by fixed rules, not written by hand or by AI. Modelled values are context, measured
