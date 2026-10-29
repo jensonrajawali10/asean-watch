@@ -1,11 +1,12 @@
 // Workspace section 8, "Sources & methods" (docs/UX_V3.md section 3): every feed the app uses, grouped as
 // Official, Measured, Modelled, Imagery and Reference, each with its issuer, licence or attribution, mode
 // (live, snapshot, recorded copy, link only...), retrieval time where there is one, what it is used for and
-// its limitations. Built by src/lib/sourceCatalogue.ts from the data App has loaded.
+// its limitations, and how old it is against its expected update interval (src/lib/staleness.ts). Built by
+// src/lib/sourceCatalogue.ts from the data App has loaded.
 import { useMemo } from 'react';
 import { utcStamp } from '../../lib/situation';
 import type { SituationInput } from '../../lib/situation';
-import { buildSourceCatalogue, groupSources } from '../../lib/sourceCatalogue';
+import { buildSourceCatalogue, groupSources, olderThanExpected } from '../../lib/sourceCatalogue';
 import type { SourceEntry } from '../../lib/sourceCatalogue';
 import { AnalystSection, AnalystSubhead, KeyFigure } from './AnalystSection';
 import { ExtLink } from './reportParts';
@@ -27,6 +28,11 @@ const MODES: ReadonlyArray<[string, string]> = [
   ['LINK ONLY', 'Not ingested: linked so you can read it at the source.'],
   ['BUNDLED', 'Reference data built into the app (catalogues, boundaries).'],
   ['DERIVED', 'Computed in your browser from the sources above.'],
+  [
+    'OLDER THAN EXPECTED',
+    "Past the source's usual update interval plus an allowance. It may still be the newest copy the source has; check the source before relying on it.",
+  ],
+  ['FEED QUIET', 'An official feed has not answered this page for an hour or more, so messages may be missing. It is never an all-clear: check the issuer directly.'],
 ];
 
 function SourceCard({ e }: { e: SourceEntry }) {
@@ -36,8 +42,13 @@ function SourceCard({ e }: { e: SourceEntry }) {
         <h4 className="anx-source__name">
           <ExtLink href={e.url}>{e.name}</ExtLink>
         </h4>
-        <span className={`anx-chip${e.mode.startsWith('LIVE') ? ' anx-chip--live' : e.mode === 'SNAPSHOT' || e.mode === 'RECORDED COPY' ? ' anx-chip--snapshot' : e.mode === 'UNAVAILABLE' ? ' anx-chip--unavailable' : ''}`}>
-          {e.mode}
+        <span className="anx-source__chips">
+          <span className={`anx-chip${e.mode.startsWith('LIVE') ? ' anx-chip--live' : e.mode === 'SNAPSHOT' || e.mode === 'RECORDED COPY' ? ' anx-chip--snapshot' : e.mode === 'UNAVAILABLE' ? ' anx-chip--unavailable' : ''}`}>
+            {e.mode}
+          </span>
+          {e.age?.state === 'older' && (
+            <span className="anx-chip anx-chip--older">{e.age.interval.kind === 'feed' ? 'FEED QUIET' : 'OLDER THAN EXPECTED'}</span>
+          )}
         </span>
       </div>
       <dl>
@@ -49,6 +60,14 @@ function SourceCard({ e }: { e: SourceEntry }) {
           <>
             <dt>Status</dt>
             <dd>{e.modeNote}</dd>
+          </>
+        )}
+        {e.age && (
+          <>
+            <dt>Updates</dt>
+            <dd className={e.age.state === 'older' ? 'anx-source__older' : undefined}>
+              {e.age.text} <span className="an-muted">Checked against {e.age.interval.clock}.</span>
+            </dd>
           </>
         )}
         <dt>Used for</dt>
@@ -78,6 +97,10 @@ export default function SourcesSection({ input, catalogue }: SourcesSectionProps
   const unavailable = entries.filter((e) => e.mode === 'UNAVAILABLE');
   const snapshots = entries.filter((e) => (e.mode === 'SNAPSHOT' || e.mode === 'RECORDED COPY') && e.retrievedAt);
   const oldest = snapshots.map((e) => e.retrievedAt as string).sort()[0] ?? null;
+  // Judged only against the page clock; without one there is no count to show.
+  const clocked = typeof input.nowMs === 'number' && Number.isFinite(input.nowMs);
+  const older = olderThanExpected(entries);
+  const quietFeeds = older.filter((e) => e.age?.interval.kind === 'feed').length;
   const acknowledgements = input.hotspotSnapshot?.attributions ?? [];
 
   return (
@@ -98,11 +121,33 @@ export default function SourcesSection({ input, catalogue }: SourcesSectionProps
         <KeyFigure label="Live now" value={String(entries.filter((e) => e.mode.startsWith('LIVE') && e.mode !== 'LIVE TILES' && !e.mode.includes('on demand')).length)} />
         <KeyFigure label="From a snapshot or copy" value={String(snapshots.length)} note={oldest ? `oldest ${utcStamp(oldest)}` : undefined} />
         <KeyFigure label="Unavailable" value={String(unavailable.length)} note={unavailable.length > 0 ? 'check those issuers directly' : 'none failed'} />
+        {clocked && (
+          <KeyFigure
+            label="Older than expected"
+            value={String(older.length)}
+            note={
+              older.length === 0
+                ? 'none past their usual update interval'
+                : quietFeeds > 0
+                  ? `including ${quietFeeds} quiet ${quietFeeds === 1 ? 'feed' : 'feeds'}: check the issuers directly`
+                  : 'listed below'
+            }
+          />
+        )}
       </div>
       {unavailable.length > 0 && (
         <ul className="anx-list anx-list--official">
           {unavailable.map((e) => (
             <li key={e.id}>{e.modeNote ?? `${e.issuer} unavailable: check ${e.issuer} directly.`}</li>
+          ))}
+        </ul>
+      )}
+      {older.length > 0 && (
+        <ul className="anx-list anx-list--older" aria-label="Sources older than expected">
+          {older.map((e) => (
+            <li key={e.id}>
+              <strong>{e.name}</strong> ({e.issuer}): {e.age?.text}
+            </li>
           ))}
         </ul>
       )}
@@ -114,7 +159,7 @@ export default function SourcesSection({ input, catalogue }: SourcesSectionProps
             {MODES.map(([mode, text]) => (
               <tr key={mode}>
                 <th scope="row">
-                  <span className="anx-chip">{mode}</span>
+                  <span className={`anx-chip${mode === 'OLDER THAN EXPECTED' || mode === 'FEED QUIET' ? ' anx-chip--older' : ''}`}>{mode}</span>
                 </th>
                 <td>{text}</td>
               </tr>

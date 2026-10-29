@@ -282,6 +282,12 @@ export interface WarningFeedStatus {
   /** "unavailable" must render as "Official feed unavailable: check <issuer> directly", never as "no warnings". */
   status: 'live' | 'cached' | 'snapshot' | 'unavailable';
   retrievedAt: string | null;
+  /**
+   * ISO 8601 UTC: the newest time this feed answered live (live or cached) on this page. It stays when a
+   * later refresh falls back to the snapshot, so "feed quiet" (src/lib/staleness.ts) counts from the last
+   * real answer. Absent when the feed has not answered live since the page loaded.
+   */
+  lastAnswerAt?: string | null;
   /** Readable status or error text. */
   message: string | null;
 }

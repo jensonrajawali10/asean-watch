@@ -1,6 +1,7 @@
 // Every feed the app uses, with its issuer, licence or attribution, mode (live, snapshot, recorded, link),
 // retrieval time and limitations, grouped as Official, Measured, Modelled, Imagery and Reference. Pure:
-// statuses and times come from the loaded data (SituationInput), never from the clock. Used by the
+// statuses and times come from the loaded data (SituationInput), never from the clock; ages are judged only
+// against the page clock the caller passes in (input.nowMs), with src/lib/staleness.ts. Used by the
 // Sources section and by the report export. Licence wording follows data/SOURCES.md and
 // docs/DATA_AND_LIMITATIONS.md, and the attribution constants exported by each adapter.
 import type { WarningFeedStatus } from '../types';
@@ -14,6 +15,8 @@ import { QUAKE_SOURCES, USGS_TSUNAMI_FLAG_NOTE } from './quakesLive';
 import { BUNDLED_SEA_LEVEL_SNAPSHOT, SEA_LEVEL_ATTRIBUTION, SEA_LEVEL_NOTE } from './seaLevel';
 import { ASMC, FIRMS_PAGE, NUS_CRISP } from './situation';
 import type { SituationInput } from './situation';
+import { checkAge, intervalForSource } from './staleness';
+import type { AgeCheck } from './staleness';
 import { GEOBOUNDARIES_ATTRIBUTION } from './tsunamiAreas';
 import { VAA_AVIATION_NOTE, VAAC_TOKYO_ATTRIBUTION, VAAC_WINDOW_NOTE } from './vaac';
 import { VAAC_DARWIN, VAAC_DARWIN_NOT_RELAYED } from './volcanoOfficial';
@@ -52,6 +55,13 @@ export interface SourceEntry {
   modeNote: string | null;
   /** ISO 8601 UTC retrieval or capture time; null when not applicable or unknown. */
   retrievedAt: string | null;
+  /**
+   * The time the age check uses when it is not retrievedAt: the source's own reading time (NEA), the relay's
+   * build time (regional fires) or the feed's last live answer (official feeds).
+   */
+  updatedAt?: string | null;
+  /** Age against the source's expected update interval (src/lib/staleness.ts); null when not judged. */
+  age?: AgeCheck | null;
   licence: string;
   usedFor: string;
   limitations: string[];
@@ -170,6 +180,7 @@ function feedEntry(f: WarningFeedStatus): SourceEntry {
     mode: recorded ? 'RECORDED COPY' : statusMode(f.status),
     modeNote: f.status === 'unavailable' ? `Official feed unavailable: check ${f.issuer} directly.` : f.message,
     retrievedAt: f.retrievedAt,
+    updatedAt: f.lastAnswerAt ?? f.retrievedAt,
     licence: facts.licence,
     usedFor: facts.usedFor,
     limitations: facts.limitations,
@@ -229,6 +240,7 @@ export function buildSourceCatalogue(input: SituationInput): SourceEntry[] {
     mode: nea ? gridMode(nea.haze?.dataMode ?? nea.dataMode) : 'NOT LOADED',
     modeNote: input.neaError ?? null,
     retrievedAt: nea?.retrievedAt ?? null,
+    updatedAt: nea?.haze?.observedAt ?? nea?.observedAt ?? null,
     licence: nea?.attribution ?? `Singapore Open Data Licence v1.0 (${NEA_LICENCE_URL}).`,
     usedFor: "Singapore's measured haze beside the modelled value; wind arrows near Singapore.",
     limitations: [
@@ -283,6 +295,7 @@ export function buildSourceCatalogue(input: SituationInput): SourceEntry[] {
       mode: fires.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT',
       modeNote: null,
       retrievedAt: fires.asOf,
+      updatedAt: fires.retrievedAt ?? fires.asOf,
       licence: 'NASA open data; FIRMS asks for its acknowledgement.',
       usedFor: 'Regional hotspot counts and fire radiative power (the Fires section).',
       limitations: [
@@ -510,7 +523,21 @@ export function buildSourceCatalogue(input: SituationInput): SourceEntry[] {
       limitations: [],
     },
   );
-  return out;
+  return out.map((e) => ({ ...e, age: entryAge(e, input) }));
+}
+
+/** An unavailable feed already says "Official feed unavailable: check <issuer> directly"; it has no age. */
+function entryAge(e: SourceEntry, input: SituationInput): AgeCheck | null {
+  if (e.mode === 'UNAVAILABLE' || e.mode === 'NOT LOADED') return null;
+  return checkAge(intervalForSource(e.id), e.updatedAt ?? e.retrievedAt, input.nowMs, {
+    issuer: e.issuer,
+    checking: e.id.startsWith('feed:') && input.warningFeedsChecking === true,
+  });
+}
+
+/** Entries whose age is past their expected interval (older data, quiet feeds, old recorded copies). */
+export function olderThanExpected(entries: readonly SourceEntry[]): SourceEntry[] {
+  return entries.filter((e) => e.age?.state === 'older');
 }
 
 /** Entries grouped in SOURCE_GROUPS order (empty groups omitted). */

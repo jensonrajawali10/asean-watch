@@ -19,6 +19,8 @@ import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
 import { VAA_AVIATION_NOTE } from '../lib/vaac';
 import { belowTopOfScale, emptyWarningsText, endedLabel, gaugeForWarning, isExpired } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
+import { feedAge } from '../lib/staleness';
+import type { AgeCheck } from '../lib/staleness';
 import { countsText, groupByHazard, HAZARD_GROUP_NAME, isSoutheastAsia, warningCounts } from './shell/alerts';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,8 @@ export interface OfficialWarningsPanelProps {
   /** e.g. "Merapi"; null = APAC-wide list. */
   nearName: string | null;
   loading: boolean;
+  /** True while the feeds are being asked again: a feed past its interval is not called quiet meanwhile. */
+  checking?: boolean;
   selectedWarningId: string | null;
   onInspect: (warningId: string) => void;
   /** Warnings with no coordinates (e.g. JMA tsunami areas), listed in a collapsed "Elsewhere in APAC" group. */
@@ -81,6 +85,7 @@ export default function OfficialWarningsPanel({
   feeds,
   nearName,
   loading,
+  checking = false,
   selectedWarningId,
   onInspect,
   elsewhere = [],
@@ -200,7 +205,7 @@ export default function OfficialWarningsPanel({
         )}
       </div>
 
-      <FeedFooter feeds={feeds} />
+      <FeedFooter feeds={feeds} nowMs={nowMs} checking={checking || loading} />
     </section>
   );
 }
@@ -325,7 +330,7 @@ function WarningItem({
   );
 }
 
-function FeedFooter({ feeds }: { feeds: WarningFeedStatus[] }) {
+function FeedFooter({ feeds, nowMs, checking }: { feeds: WarningFeedStatus[]; nowMs: number; checking: boolean }) {
   const count = (s: WarningFeedStatus['status']) => feeds.filter((f) => f.status === s).length;
   const live = count('live');
   const cached = count('cached');
@@ -337,6 +342,10 @@ function FeedFooter({ feeds }: { feeds: WarningFeedStatus[] }) {
   if (cached > 0) parts.push(`${cached} cached`);
   if (snapshot > 0) parts.push(`${snapshot} snapshot`);
   if (unavailable.length > 0) parts.push(`${unavailable.length} unavailable: ${unavailable.map((f) => f.issuer).join(', ')}`);
+  // Past the expected interval (src/lib/staleness.ts): a quiet feed, or a recorded copy older than expected.
+  const ages = new Map(feeds.map((f) => [f.feedId, feedAge(f, nowMs, checking)]));
+  const quiet = feeds.filter((f) => ages.get(f.feedId)?.state === 'older');
+  if (quiet.length > 0) parts.push(`${quiet.length} quiet or older than expected: ${quiet.map((f) => f.issuer).join(', ')}`);
   const summary = feeds.length === 0 ? 'Feeds: status not retrieved yet' : `Feeds: ${parts.join(' · ')}`;
 
   return (
@@ -344,7 +353,7 @@ function FeedFooter({ feeds }: { feeds: WarningFeedStatus[] }) {
       <summary>{summary}</summary>
       <ul className="ow-feeds-list">
         {feeds.map((f) => (
-          <FeedRow key={f.feedId} feed={f} />
+          <FeedRow key={f.feedId} feed={f} age={ages.get(f.feedId) ?? null} />
         ))}
       </ul>
       <p className="ow-attribution">
@@ -354,7 +363,7 @@ function FeedFooter({ feeds }: { feeds: WarningFeedStatus[] }) {
   );
 }
 
-function FeedRow({ feed: f }: { feed: WarningFeedStatus }) {
+function FeedRow({ feed: f, age }: { feed: WarningFeedStatus; age: AgeCheck | null }) {
   const sentence = unavailableSentence(f.issuer);
   const message = f.message?.trim() ?? '';
   const showMessage = message !== '' && message !== sentence;
@@ -381,6 +390,7 @@ function FeedRow({ feed: f }: { feed: WarningFeedStatus }) {
         </span>
       )}
       {showMessage && <span className="ow-feed-message">{message}</span>}
+      {age?.state === 'older' && <span className="ow-feed-message ow-feed-quiet">{age.text}</span>}
     </li>
   );
 }

@@ -19,7 +19,7 @@ The prototype shows one complete pattern on real data. It replays watch-area evi
 
 - **Scheduled ingestion** to replace the manual `npm run refresh:all`. This needs a small backend that also proxies feeds browsers cannot call (PTWC, FIRMS).
 - **Stored provenance and history.** Keep every snapshot and every relayed message with its retrieval time and original metadata, rather than overwriting them. `data/real/meta.json` already records this for the current snapshot.
-- **Stale-data handling.** Flag evidence older than each source's expected update interval, and alert when an official feed goes quiet. Warning feeds already report their status.
+- **Stale-data handling.** In this build: each source has an expected update interval (`src/lib/staleness.ts`, documented in `docs/DATA_AND_LIMITATIONS.md`). Evidence past it reads "Older than expected", and an official feed that has not answered for an hour reads "Feed quiet … check <issuer> directly". Next: judge gauge feeds (ThaiWater, DSDA) by their newest reading time as well as by whether they answer.
 - **Human acknowledgement.** An analyst acknowledges each workflow prompt, recorded with the evidence that triggered it.
 
 ### 2. Access and terms

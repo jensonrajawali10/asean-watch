@@ -168,7 +168,7 @@ export default function ReportSection({ input, report, incidentBrief = null, chi
     <AnalystSection
       id="ws-report"
       title="Report"
-      meta={<FreshnessChip freshness={r.headline.freshness} chip={r.headline.chip} />}
+      meta={<FreshnessChip freshness={r.headline.freshness} chip={r.headline.chip} age={r.headline.age} />}
       lede={
         <>
           Compose a report from the data on screen. Pick the sections, then download Markdown (headings, tables and a

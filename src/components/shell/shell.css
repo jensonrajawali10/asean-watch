@@ -410,6 +410,18 @@
   letter-spacing: 0;
 }
 
+/* The forecast is past its expected update interval (src/lib/staleness.ts): the words carry it; the dashed
+   outline is the neutral "incomplete" cue, as on "Not counted". */
+.fresh-chip.is-older {
+  border-style: dashed;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.fresh-chip__older-short {
+  display: none;
+}
+
 .topbar__right {
   display: flex;
   flex: none;
@@ -1176,6 +1188,20 @@
   .fresh-chip.is-live .fresh-chip__verb,
   .fresh-chip.is-live .fresh-chip__date {
     display: none;
+  }
+
+  /* Phones show the short form; the sentence stays for screen readers. */
+  .fresh-chip__older-long {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .fresh-chip__older-short {
+    display: inline;
   }
 
   :root[data-detail='simple'] .hscrub__readout {
