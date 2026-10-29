@@ -276,6 +276,12 @@
   color: var(--text-muted);
 }
 
+/* "Feed quiet for N h: … Check <issuer> directly." Ink and weight, no colour of its own. */
+.ow-feed-quiet {
+  color: var(--text);
+  font-weight: 600;
+}
+
 /* ---------- Inspector drawer additions (the drawer itself is styled in App.css) ---------- */
 
 .ow-verbatim {

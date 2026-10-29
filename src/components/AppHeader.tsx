@@ -59,8 +59,11 @@ export interface AppHeaderProps {
   timeLabel: string | null;
   /** ISO time behind `timeLabel`, for the <time> element. */
   timeISO: string | null;
-  /** LIVE or SNAPSHOT with the run time; null while nothing has loaded. */
-  freshness: { mode: 'LIVE' | 'SNAPSHOT'; run: string | null } | null;
+  /**
+   * LIVE or SNAPSHOT with the run time; null while nothing has loaded. `older` is set when the run is past
+   * its expected update interval (src/lib/staleness.ts): the sentence, and a short form for phones.
+   */
+  freshness: { mode: 'LIVE' | 'SNAPSHOT'; run: string | null; older?: { text: string; short: string } | null } | null;
   alerts: { count: number; urgent: boolean; label: string };
   onAlerts: () => void;
   workspaceOpen: boolean;
@@ -168,6 +171,15 @@ export default function AppHeader({ headline, timeLabel, timeISO, freshness, ale
                   <RunTime run={freshness.run} />
                 </span>
               )}
+            </span>
+          )}
+          {/* Past the forecast's expected update interval: words in a dashed outline, never a colour alone. */}
+          {freshness?.older && (
+            <span className="fresh-chip is-older" title={freshness.older.text}>
+              <span className="fresh-chip__older-long">{freshness.older.text}</span>
+              <span className="fresh-chip__older-short" aria-hidden="true">
+                {freshness.older.short}
+              </span>
             </span>
           )}
           <span className="headline-note">Not an official warning service: follow your national agency.</span>

@@ -46,6 +46,13 @@
   border-color: var(--danger-fg);
 }
 
+/* Past the expected update interval (src/lib/staleness.ts): ink in a dashed outline, the neutral
+   "incomplete" cue; the words carry the meaning, no colour of its own. */
+.anx-chip--older {
+  color: var(--text);
+  border-style: dashed;
+}
+
 /* --- Basis tags (MODELLED / MEASURED / OFFICIAL / ESTIMATE): words, never colour alone --- */
 .anx-basis {
   display: inline-block;
@@ -418,6 +425,17 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 4px 10px;
+}
+
+.anx-source__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.anx-source__older {
+  color: var(--text);
+  font-weight: 600;
 }
 
 .anx-source__name {

@@ -22,8 +22,11 @@ export function BasisTag({ basis }: { basis: Basis | 'MIXED' }) {
   );
 }
 
-/** LIVE / SNAPSHOT <time> / NO MODEL DATA, from a headline (or any mode and time). */
-export function FreshnessChip({ freshness, chip }: Pick<Headline, 'freshness' | 'chip'>) {
+/**
+ * LIVE / SNAPSHOT <time> / NO MODEL DATA, from a headline (or any mode and time), plus a dashed
+ * "Older than expected" chip when the model run is past its expected update interval.
+ */
+export function FreshnessChip({ freshness, chip, age }: Pick<Headline, 'freshness' | 'chip'> & { age?: Headline['age'] }) {
   const cls = freshness === 'LIVE' ? 'anx-chip--live' : freshness === 'SNAPSHOT' ? 'anx-chip--snapshot' : 'anx-chip--unavailable';
   const title =
     freshness === 'LIVE'
@@ -31,10 +34,19 @@ export function FreshnessChip({ freshness, chip }: Pick<Headline, 'freshness' | 
       : freshness === 'SNAPSHOT'
         ? 'Bundled snapshot: not current conditions'
         : 'No air-quality model data loaded';
-  return (
+  const chipEl = (
     <span className={`anx-chip ${cls}`} title={title}>
       {chip}
     </span>
+  );
+  if (age?.state !== 'older') return chipEl;
+  return (
+    <>
+      {chipEl}{' '}
+      <span className="anx-chip anx-chip--older" title={age.text}>
+        {age.short}
+      </span>
+    </>
   );
 }
 
