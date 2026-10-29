@@ -110,6 +110,8 @@ export interface RuleContext {
   ingestedAt: Readonly<Record<string, string>>;
   /** Fallback ingestedAt: when the snapshot was retrieved. */
   retrievedAt: string;
+  /** 'live' when the rows came from the /api/watch relay this visit; the bundled snapshot is 'historical' (the default). */
+  dataMode?: 'live' | 'historical';
 }
 
 /**
@@ -245,6 +247,7 @@ export function ruleContext(meta: {
   retrievedAt: string;
   window: { start: string; end: string };
   sources: { id: string; lastModified: string | null }[];
+  dataMode?: 'live' | 'historical';
 }): RuleContext {
   const ingestedAt: Record<string, string> = {};
   for (const s of meta.sources) {
@@ -255,6 +258,7 @@ export function ruleContext(meta: {
     dayCount: buildReplayDays(meta.window).length,
     ingestedAt,
     retrievedAt: meta.retrievedAt,
+    dataMode: meta.dataMode === 'live' ? 'live' : 'historical',
   };
 }
 
@@ -502,7 +506,7 @@ export function volcanoThermalObservations(watch: Watch, rows: readonly FirmsRow
       unit: 'MW',
       sourceName: sensor.sourceName,
       sourceUrl: sensor.sourceUrl,
-      dataMode: 'historical',
+      dataMode: ctx.dataMode ?? 'historical',
       qualityNote: [
         `One record per satellite overpass: ${plural(n, 'FIRMS hotspot', 'FIRMS hotspots')} within ${THERMAL_RADIUS_KM} km at the same acquisition time; the value is the highest fire radiative power, and each hotspot is kept as a member of this record.`,
         `FIRMS ${sensor.instrument} confidence as given: ${confidenceSummary(sensor, list)} (FIRMS version ${versions}).`,
@@ -596,7 +600,7 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
       unit: 'detections',
       sourceName: g.sensor.sourceName,
       sourceUrl: g.sensor.sourceUrl,
-      dataMode: 'historical',
+      dataMode: ctx.dataMode ?? 'historical',
       qualityNote: [
         `Daily total for one sensor; the observed time is the last detection that day, and each hotspot is kept as a member of this record (FIRMS version ${versions}).`,
         'Each satellite is totalled separately, so one fire seen by two satellites is in both totals.',
@@ -688,7 +692,7 @@ export function seismicObservations(watch: Watch, quakes: readonly QuakeRow[], c
       unit: magType ? `M (${magType})` : 'M (type not stated)',
       sourceName,
       sourceUrl: usgs ? (q.url ?? `https://earthquake.usgs.gov/earthquakes/eventpage/${q.eventId}`) : (product?.url as string),
-      dataMode: 'historical',
+      dataMode: ctx.dataMode ?? 'historical',
       qualityNote: [
         usgs
           ? `USGS location and magnitude; USGS can revise them${q.updated ? ` (last updated ${q.updated})` : ''}.`

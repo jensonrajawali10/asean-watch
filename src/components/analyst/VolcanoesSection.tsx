@@ -57,6 +57,8 @@ export interface VolcanoesSectionProps {
   };
   attribution?: ReactNode;
   dataAsOf: string | null;
+  /** True when the evidence is a live /api/watch build (src/lib/watchLive.ts), not the bundled snapshot. */
+  dataLive?: boolean;
   /** "If it erupted now" for every watched volcano (the eruption module's panel). */
   scenarioPanel?: ReactNode;
 }
@@ -85,7 +87,7 @@ export default function VolcanoesSection(p: VolcanoesSectionProps) {
       id="volcanoes"
       title="Volcanoes"
       lede="The five watch areas and what the last seven days of satellite heat and nearby earthquakes say about each. Our workflow states come from stated watch rules and are never official alert levels; the official level is relayed verbatim beside them."
-      meta={p.dataAsOf ? `snapshot ${p.dataAsOf.replace('T', ' ').slice(0, 16)} UTC` : undefined}
+      meta={p.dataAsOf ? `${p.dataLive ? 'live, fetched' : 'snapshot'} ${p.dataAsOf.replace('T', ' ').slice(0, 16)} UTC` : undefined}
       sources={SOURCES}
     >
       <IncidentQueue

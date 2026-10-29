@@ -219,7 +219,7 @@ export function FiresSection(props: FiresSectionProps) {
           Active-fire detections from NASA FIRMS (VIIRS on Suomi NPP, NOAA-20 and NOAA-21, and MODIS), summed by country,
           province and cluster in the style of Copernicus Fire Emissions Watch. Figures are hotspot counts and fire radiative
           power (FRP), a proxy for fire intensity, not emissions; for emissions see{' '}
-          <ExtLink href={FIRE_LINKS.fireEmissionsWatch}>Fire Emissions Watch</ExtLink>. Snapshot retrieved {formatFireTime(s.retrievedAt)}.
+          <ExtLink href={FIRE_LINKS.fireEmissionsWatch}>Fire Emissions Watch</ExtLink>. {s.origin === 'live' ? 'Fetched' : 'Snapshot retrieved'} {formatFireTime(s.retrievedAt)}.
         </>
       }
       sources={fireSourceRefs(s)}
@@ -445,8 +445,17 @@ export function FiresSection(props: FiresSectionProps) {
           the nearest district or province centre (geoBoundaries).
         </li>
         <li>
-          <strong>Snapshot, not live.</strong> FIRMS has no browser access (no CORS), so these figures come from the bundled snapshot
-          (scripts/refresh-fires.mjs); rebuild after a refresh.
+          {s.origin === 'live' ? (
+            <>
+              <strong>Live, rebuilt every few hours.</strong> FIRMS sends no CORS headers, so the browser cannot read its files; these
+              figures come from the site's /api/fires relay, which reads them and was fetched {formatFireTime(s.retrievedAt)}.
+            </>
+          ) : (
+            <>
+              <strong>Saved copy, not live.</strong> The /api/fires relay has not answered, so these figures come from the bundled
+              snapshot retrieved {formatFireTime(s.retrievedAt)}.
+            </>
+          )}
         </li>
       </ul>
 

@@ -1,6 +1,16 @@
 {
   "about": "USGS and BMKG earthquake rows near the watch areas, one row per product; duplicates across agencies and products are kept on purpose.",
   "rows": [
-    {"source":"bmkg","product":"live30event","eventId":"bmg2026uwol","time":"2026-10-24T22:59:47Z","lat":3.11,"lon":98.05,"depthKm":10,"mag":2.6,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null}
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdgq","time":"2026-10-28T15:00:31Z","lat":2.86,"lon":98.53,"depthKm":10,"mag":2.5,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdia","time":"2026-10-28T15:42:10Z","lat":2.88,"lon":98.52,"depthKm":10,"mag":2.6,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdks","time":"2026-10-28T17:04:04Z","lat":2.89,"lon":98.52,"depthKm":10,"mag":2.4,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdlr","time":"2026-10-28T17:33:13Z","lat":2.82,"lon":98.54,"depthKm":10,"mag":2.3,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdmw","time":"2026-10-28T18:09:32Z","lat":2.89,"lon":98.53,"depthKm":10,"mag":1.9,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdmx","time":"2026-10-28T18:09:53Z","lat":2.89,"lon":98.55,"depthKm":10,"mag":2.1,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdni","time":"2026-10-28T18:23:49Z","lat":2.81,"lon":98.52,"depthKm":10,"mag":2,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdof","time":"2026-10-28T18:49:59Z","lat":2.88,"lon":98.56,"depthKm":10,"mag":1.9,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdor","time":"2026-10-28T19:05:01Z","lat":2.88,"lon":98.52,"depthKm":10,"mag":2.4,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vdtk","time":"2026-10-28T21:28:02Z","lat":2.9,"lon":98.53,"depthKm":10,"mag":2.8,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null},
+    {"source":"bmkg","product":"live30event","eventId":"bmg2026vejp","time":"2026-10-29T05:39:03Z","lat":2.86,"lon":98.52,"depthKm":10,"mag":3,"magType":null,"place":"Northern Sumatra, Indonesia","url":null,"status":"confirmed","felt":null}
   ]
 }
