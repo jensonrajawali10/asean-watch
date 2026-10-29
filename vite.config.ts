@@ -53,6 +53,7 @@ export default defineConfig({
     relayDevApi('/api/ptwc', '/src/server/ptwcHandler.ts', 'handlePtwcRequest'),
     relayDevApi('/api/fires', '/src/lib/firesProxy.ts', 'handleFiresRequest'),
     relayDevApi('/api/watch', '/src/lib/watchProxy.ts', 'handleWatchRequest'),
+    relayDevApi('/api/vaac', '/src/lib/vaacProxy.ts', 'handleVaacRequest'),
   ],
   // Bundled geometry and real-data snapshots are intentional: the app must work offline.
   build: {

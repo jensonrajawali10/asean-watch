@@ -543,6 +543,27 @@ async function journeyMap(s) {
     if (recent && !saysRecent) throw new Error(`relay data is from ${rec.saw.reference} but the key says "${rec.saw.keyFires}"`);
     if (!recent && saysRecent) throw new Error(`the key says "the last 24 hours" but the fire data is ${rec.saw.available ? `from ${rec.saw.reference}` : `the bundled copy (relay: ${rec.saw.reason})`}`);
   });
+
+  // The Tokyo VAAC relay answers, and relays only text issued by Tokyo (never VAAC Darwin's, whose terms
+  // forbid it). A failed relay is a 200 { available: false }, shown as a saved copy, never as "no advisories".
+  await s.step('vaac-live', async (rec) => {
+    const res = await fetch(new URL('api/vaac', s.baseUrl), { signal: AbortSignal.timeout(60_000) });
+    rec.did.push('GET /api/vaac');
+    rec.saw.status = res.status;
+    if (res.status !== 200) throw new Error(`/api/vaac answered HTTP ${res.status}`);
+    const body = await res.json();
+    rec.saw.available = body.available === true;
+    if (!rec.saw.available) {
+      rec.saw.reason = body.reason ?? null;
+      throw new Skip(`/api/vaac is unavailable (${body.reason}: ${body.message}); the page shows its saved copy`);
+    }
+    const advisories = Array.isArray(body.data?.advisories) ? body.data.advisories : null;
+    if (!advisories) throw new Error('/api/vaac answered without an advisories list');
+    rec.saw.retrievedAt = body.data.retrievedAt;
+    rec.saw.advisories = advisories.map((a) => `${a.volcano} ${a.number} (${a.listedAt})`);
+    const foreign = advisories.filter((a) => !/^VAAC: TOKYO$/m.test(a.text ?? ''));
+    if (foreign.length > 0) throw new Error(`/api/vaac relayed text not issued by Tokyo VAAC: ${foreign.map((a) => a.url).join(', ')}`);
+  });
 }
 
 async function journeyLayers(s) {
@@ -620,6 +641,10 @@ async function journeyCards(s, cities) {
     rec.saw.card = await openCard(page);
     rec.saw.hash = await hashOf(page);
     if (!(rec.saw.card?.title ?? '').toLowerCase().includes(picked.toLowerCase())) throw new Error(`card title is "${rec.saw.card?.title}", expected ${picked}`);
+    // Ash in the air: VAAC Darwin covers the watched volcanoes and is linked only, saying so.
+    const cardText = (await page.locator('section.mcard').first().innerText()).replace(/\s+/g, ' ');
+    rec.saw.ashLine = /Ash in the air[^.]*\.[^.]*\./.exec(cardText)?.[0] ?? null;
+    if (!/VAAC Darwin/.test(cardText) || !/linked only/.test(cardText)) throw new Error('the volcano card has no link-only VAAC Darwin line');
     await s.shot(rec, 'volcano-card');
     await closeCard(page);
     rec.did.push('close the card');
@@ -766,6 +791,7 @@ async function journeyWorkspace(s) {
       const body = await page.locator('.ws-drawer').innerText();
       rec.saw.chars = body.length;
       if (/could not be shown/i.test(body)) throw new Error('the section shows its error message ("could not be shown")');
+      if (/^warnings/i.test(short) && !/Volcanic ash advisories are for aviation/.test(body)) throw new Error('the Warnings section has no note on volcanic ash advisories');
       if (!rec.saw.hash.includes('ws=')) throw new Error(`expected #ws=<section>, got "${rec.saw.hash}"`);
       await s.shot(rec, `ws-${short.toLowerCase()}`);
       await closeDrawer(page);

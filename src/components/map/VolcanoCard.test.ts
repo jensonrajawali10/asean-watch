@@ -7,6 +7,7 @@ import { magmaRecords } from '../../lib/warnings';
 import { MAGMA_KRB_MAP, VAAC_DARWIN, findMagmaLevel, volcanoOfficialLinks } from '../../lib/volcanoOfficial';
 import EruptionScenarioPanel from '../analyst/EruptionScenarioPanel';
 import VolcanoCard from './VolcanoCard';
+import { vaaToWarning } from '../../lib/vaac';
 
 const merapi = { id: 'watch-merapi', title: 'Merapi', volcanoId: 'gvp-263250', locationName: 'North of Yogyakarta, Central Java, Indonesia', hazard: 'volcano' as const };
 const krakatau = { id: 'watch-anak-krakatau', title: 'Anak Krakatau', volcanoId: 'gvp-262000', locationName: 'Krakatau caldera, Sunda Strait, Indonesia', hazard: 'volcano' as const };
@@ -62,6 +63,39 @@ describe('VolcanoCard', () => {
     expect(html).toContain('not an all-clear');
     expect(html).toContain('Ash scenario unavailable');
     expect(html).not.toContain('Play ash scenario');
+  });
+
+  it('always links VAAC Darwin as link only, saying why and that none shown is not an all-clear', () => {
+    const html = renderToStaticMarkup(createElement(VolcanoCard, { watch: merapi, level: null, ashWind: snap, nowMs: now, onOpenWorkspace: noop }));
+    expect(html).toContain('Ash in the air (aviation advisories)');
+    expect(html).toContain(VAAC_DARWIN.url);
+    expect(html).toContain('linked only');
+    expect(html).toContain('None shown here is not an all-clear');
+    expect(html).not.toContain('Ash advisory (aviation)');
+  });
+
+  it('shows a relayed ash advisory for the volcano as an aviation fact, never as its level', () => {
+    // Real Tokyo VAAC advisory (JMA, 29 Oct 2026), trimmed to the lines the card reads.
+    const text = [
+      'FVFE01 RJTD 291145',
+      'VA ADVISORY',
+      'DTG: 20261029/1145Z',
+      'VAAC: TOKYO',
+      'VOLCANO: SAKURAJIMA (AIRA CALDERA) 282080',
+      'PSN: N3136 E13039',
+      'AREA: JAPAN',
+      'NXT ADVISORY: NO FURTHER ADVISORIES=',
+    ].join('\n');
+    const url = 'https://www.data.jma.go.jp/vaac/data/TextData/2026/20261029_28208001_0332_Text.html';
+    const ashAdvisory = vaaToWarning({ text, url }, { dataMode: 'live', retrievedAt: '2026-10-29T20:00:00Z' });
+    const sakurajima = { id: 'x', title: 'Sakurajima', volcanoId: 'gvp-282080', locationName: 'Kagoshima, Japan', hazard: 'volcano' as const };
+    const html = renderToStaticMarkup(createElement(VolcanoCard, { watch: sakurajima, level: null, ashAdvisory, ashWind: null, nowMs: now, onOpenWorkspace: noop }));
+    expect(html).toContain('Ash advisory (aviation)');
+    expect(html).toContain('VA ADVISORY');
+    expect(html).toContain('Tokyo VAAC · issued 29 Oct, 11:45 UTC · series ended (NO FURTHER ADVISORIES) · not a public warning');
+    expect(html).toContain(url);
+    // The level fact still says the level was not retrieved.
+    expect(html).toContain('Not retrieved');
   });
 
   it('uses a scenario passed in (the one the plume draws) and the toggle label while playing', () => {

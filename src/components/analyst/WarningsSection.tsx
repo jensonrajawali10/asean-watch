@@ -9,6 +9,7 @@ import ErrorBoundary from '../ErrorBoundary';
 import { activeOfficial, isUrgentWarning } from '../shell/alerts';
 import { useNowMs } from '../../lib/useNowMs';
 import { formatUtc } from '../format';
+import { VAAC_DARWIN, VAAC_DARWIN_NOT_RELAYED } from '../../lib/volcanoOfficial';
 import { AnalystSection, KeyFigure } from './AnalystSection';
 import type { SectionSource } from './AnalystSection';
 
@@ -41,6 +42,7 @@ const FEED_WHAT: Readonly<Record<string, string>> = {
   'dsda-jakarta': 'Jakarta floodgates',
   'pub-flood': 'Singapore flood alerts',
   ptwc: 'Pacific tsunami messages',
+  'vaac-tokyo': 'volcanic ash advisories (aviation)',
 };
 
 /** Fetched from the agency during this visit: live now, or the 5-minute session copy of a live fetch. */
@@ -82,6 +84,24 @@ export function UrgentReason({ warnings, onInspect }: { warnings: readonly Offic
   );
 }
 
+/**
+ * What a Volcanic Ash Advisory is, and which VAAC is relayed: Tokyo's advisories are in the list as issued;
+ * VAAC Darwin, which covers Indonesia, is a link (VAAC_DARWIN_NOT_RELAYED says why).
+ */
+function AshAdvisoryNote() {
+  return (
+    <p className="an-note">
+      <strong>Volcanic ash advisories</strong> are for aviation: they tell pilots and airlines where ash is in the air, and are not public warnings.
+      Tokyo VAAC&apos;s (Japan, the northern Philippines, Kamchatka) are listed as issued. For Indonesia, including the four watched volcanoes, see{' '}
+      <a href={VAAC_DARWIN.url} target="_blank" rel="noopener noreferrer">
+        VAAC Darwin advisories
+        <span className="visually-hidden"> (opens in a new tab)</span>
+      </a>
+      . {VAAC_DARWIN_NOT_RELAYED}
+    </p>
+  );
+}
+
 export default function WarningsSection(p: WarningsSectionProps) {
   const nowMs = useNowMs();
   const active = activeOfficial(p.allWarnings, nowMs);
@@ -99,6 +119,7 @@ export default function WarningsSection(p: WarningsSectionProps) {
     >
       <UrgentReason warnings={urgentList} onInspect={p.onInspect} />
       <WarningsHowTo />
+      <AshAdvisoryNote />
       <div className="an-figures">
         <KeyFigure label="Official alerts still active" value={String(active.length)} note="not ended by the agency and not past their expiry time (the number on the alerts button)" />
         <KeyFigure label="Tsunami or evacuation alerts" value={String(urgent)} note={urgent > 0 ? 'active now' : 'none active'} />

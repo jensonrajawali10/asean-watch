@@ -389,8 +389,8 @@ export default function App() {
   const [flyRequest, setFlyRequest] = useState<{ lat: number; lon: number; zoom?: number; seq: number } | null>(null);
   /** null while the NEA context is loading. */
   const [neaResult, setNeaResult] = useState<NeaLoadResult | null>(null);
-  /** Official feeds and PTWC: the bundled snapshot first, then live, refreshed every 5 minutes. */
-  const { feed: warningsResult, ptwc, loading: warningsLoading } = useOfficialWarnings();
+  /** Official feeds, PTWC and Tokyo VAAC: the bundled snapshot first, then live, refreshed every 5 minutes. */
+  const { feed: warningsResult, ptwc, vaac, loading: warningsLoading } = useOfficialWarnings();
   /** Shared page clock (every 5 minutes, on visible, on online): warning expiry and the quake layer's 24 h. */
   const nowMs = useNowMs();
   const detailMode = useDetailMode();
@@ -534,13 +534,20 @@ export default function App() {
     }
   }, [incident, nea]);
 
-  // PTWC messages are official and relayed verbatim alongside the other feeds (its feed status carries the
-  // "for national authorities" note).
+  // PTWC messages and Tokyo VAAC ash advisories are official and relayed verbatim alongside the other feeds
+  // (their feed statuses carry the "for national authorities" and "aviation product" notes).
   // One list, newest first (mergeWarnings re-sorts, so a PTWC message is never stuck behind the feed list).
-  const allWarnings = useMemo(() => mergeWarnings(warningsResult.warnings, ptwc.warnings), [warningsResult.warnings, ptwc.warnings]);
+  const allWarnings = useMemo(
+    () => mergeWarnings(warningsResult.warnings, ptwc.warnings, vaac.warnings),
+    [warningsResult.warnings, ptwc.warnings, vaac.warnings],
+  );
   const allFeeds = useMemo(
-    () => [...warningsResult.feeds, { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') }],
-    [warningsResult.feeds, ptwc],
+    () => [
+      ...warningsResult.feeds,
+      { ...ptwc.status, message: [ptwc.status.message, ptwc.note].filter(Boolean).join(' ') },
+      { ...vaac.status, message: [vaac.status.message, vaac.note].filter(Boolean).join(' ') },
+    ],
+    [warningsResult.feeds, ptwc, vaac],
   );
   /**
    * Warnings near the selected area (or every warning when nothing is selected), and the ones listed apart:

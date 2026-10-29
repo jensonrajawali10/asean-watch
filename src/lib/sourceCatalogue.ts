@@ -15,6 +15,8 @@ import { BUNDLED_SEA_LEVEL_SNAPSHOT, SEA_LEVEL_ATTRIBUTION, SEA_LEVEL_NOTE } fro
 import { ASMC, FIRMS_PAGE, NUS_CRISP } from './situation';
 import type { SituationInput } from './situation';
 import { GEOBOUNDARIES_ATTRIBUTION } from './tsunamiAreas';
+import { VAA_AVIATION_NOTE, VAAC_TOKYO_ATTRIBUTION, VAAC_WINDOW_NOTE } from './vaac';
+import { VAAC_DARWIN, VAAC_DARWIN_NOT_RELAYED } from './volcanoOfficial';
 import { OPEN_METEO_FORECAST_URL, WIND_ATTRIBUTION } from './windField';
 
 export type SourceGroup = 'Official' | 'Measured' | 'Modelled' | 'Imagery' | 'Reference';
@@ -139,6 +141,16 @@ const FEED_FACTS: Record<string, { name: string; licence: string; usedFor: strin
     usedFor: 'The latest PTWC tsunami message, verbatim.',
     limitations: [PTWC_NATIONAL_AUTHORITIES_NOTE, PTWC_LATEST_ONLY_NOTE, 'In local development the proxy does not exist, so the snapshot is shown.'],
   },
+  'vaac-tokyo': {
+    name: 'Tokyo VAAC volcanic ash advisories (advisory list and text pages, via the /api/vaac relay)',
+    licence: VAAC_TOKYO_ATTRIBUTION,
+    usedFor: 'Volcanic ash advisories for Japan, the northern Philippines and Kamchatka, word for word.',
+    limitations: [
+      VAA_AVIATION_NOTE,
+      VAAC_WINDOW_NOTE,
+      "Tokyo VAAC does not cover Indonesia: the watched volcanoes are VAAC Darwin's, which is linked only.",
+    ],
+  },
 };
 
 function feedEntry(f: WarningFeedStatus): SourceEntry {
@@ -189,6 +201,21 @@ export function buildSourceCatalogue(input: SituationInput): SourceEntry[] {
       "Not ingested: ASMC publishes its alert banner and daily haze situation as web pages; its RSS feed and hotspot files only allow browser calls from ASMC's own site; and its WIS2 'regional haze' item is a map image, not figures.",
       "Check ASMC's Warnings and Alerts page for the current level before writing a report.",
     ],
+  });
+
+  out.push({
+    id: 'vaac-darwin',
+    group: 'Official',
+    name: 'VAAC Darwin volcanic ash advisories (Indonesia, Papua New Guinea, the southern Philippines)',
+    issuer: VAAC_DARWIN.issuer,
+    url: VAAC_DARWIN.url,
+    mode: 'LINK ONLY',
+    modeNote: 'Terms checked 30 Oct 2026.',
+    retrievedAt: null,
+    licence:
+      "Bureau of Meteorology copyright notice (https://www.bom.gov.au/copyright): no scraping, and where no other terms are stated, personal or in-house use only, not to be supplied to anyone else. The advisory page states no other terms, so ASEAN Watch links to it and does not copy it.",
+    usedFor: 'The official ash-in-the-air advisories for the four watched volcanoes (Merapi, Semeru, Anak Krakatau, Sinabung).',
+    limitations: [VAAC_DARWIN_NOT_RELAYED, VAA_AVIATION_NOTE],
   });
 
   // --- Measured

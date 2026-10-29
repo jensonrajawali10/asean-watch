@@ -6,12 +6,21 @@
 // - VAAC Darwin (Australian Bureau of Meteorology) covers "the volcanically active regions of Indonesia, Papua
 //   New Guinea and the southern Philippines" (its own page): every watched volcano here.
 // - VAAC Tokyo (Japan Meteorological Agency) covers Japan, the northern Philippines (e.g. Mayon, Kanlaon) and
-//   other parts of East Asia; its advisory list is linked for context.
+//   other parts of East Asia. Its advisories are relayed word for word (src/lib/vaac.ts, /api/vaac): JMA's
+//   Public Data License v1.0 allows reuse with a source citation.
 //
-// Why there is no relay of VAAC Darwin advisories (checked 2026-10-14): the advisories page is filled by a
-// POST to an internal page endpoint (/aviation/php/process.php) that answers 403 to non-browser clients and
-// sends no CORS headers, and the Bureau's anonymous FTP for automated access carries only the graphical
-// advisories (IDY652xx.png), not the text. That is not a simple, keyless public feed, so we link instead.
+// Why VAAC Darwin's advisories are linked, not relayed (checked 2026-10-14 and again 2026-10-30):
+// - the advisories page is filled by a POST to an internal page endpoint (/aviation/php/process.php); to a
+//   script that names itself, the Bureau answers "The Bureau of Meteorology website does not support web
+//   scraping" and blocks it. Getting round that with a browser disguise is not something we do;
+// - the Bureau's copyright notice (https://www.bom.gov.au/copyright) forbids scraping, and where no other
+//   terms are stated (the advisory page states none) allows personal or in-house use only: "You must not
+//   supply it to any other person". The page also says the information is "produced solely for use by the
+//   aviation industry";
+// - the Bureau's anonymous FTP carries only the graphical advisories (IDY652xx.png), not the text, and its
+//   Registered User service is paid;
+// - copies elsewhere do not change the owner: JMA's "Darwin VAAC Backup" page and NOAA's tgftp server
+//   (fvau0N.adrm) carry Darwin's own text ("VAAC: DARWIN"), which is still the Bureau's.
 //
 // Volcano level and hazard map: PVMBG (Badan Geologi) via MAGMA Indonesia. Per-volcano report pages on MAGMA
 // are signed, short-lived URLs, so the card links the public level list and the hazard map (KRB) list, plus
@@ -35,6 +44,11 @@ export const VAAC_DARWIN: OfficialVolcanoLink = {
   issuer: 'Darwin Volcanic Ash Advisory Centre (Australian Bureau of Meteorology)',
   note: 'Official advisories for ash in the air over Indonesia (aviation)',
 };
+
+/** Plain words for every place that shows VAAC Darwin as a link instead of advisories. */
+export const VAAC_DARWIN_NOT_RELAYED =
+  "VAAC Darwin's advisories are linked, not copied here: the Bureau of Meteorology does not allow automated access to its website, " +
+  'and its terms do not allow passing its text on. No advisory shown here is not an all-clear.';
 
 export const VAAC_DARWIN_HOME: OfficialVolcanoLink = {
   label: 'VAAC Darwin',
@@ -137,6 +151,20 @@ export function findMagmaLevel(
   if (!warnings || warnings.length === 0) return null;
   const magma = warnings.filter((w) => w.id.startsWith(`${MAGMA_FEED_ID}:`) && namesVolcano(w, watch));
   return officialLevelFor({ hazard: 'volcano', volcanoId: watch.volcanoId, title: watch.title }, magma, nowMs ?? Number.NEGATIVE_INFINITY);
+}
+
+/**
+ * The newest relayed Volcanic Ash Advisory (hazard 'ash') that names this volcano by its GVP number or name,
+ * ended ones included (they carry the issuer's "NO FURTHER ADVISORIES"); null when none. An advisory is an
+ * aviation product, never the volcano's level. The watched Indonesian volcanoes are VAAC Darwin's, which is
+ * not relayed, so for them this stays null unless Tokyo VAAC issues one.
+ */
+export function findAshAdvisory(
+  warnings: readonly OfficialWarning[] | null | undefined,
+  watch: { volcanoId: string | null; title: string },
+): OfficialWarning | null {
+  const named = (warnings ?? []).filter((w) => w.hazard === 'ash' && w.authority === 'official' && namesVolcano(w, watch));
+  return named.reduce<OfficialWarning | null>((best, w) => (!best || (w.issuedAt ?? '') > (best.issuedAt ?? '') ? w : best), null);
 }
 
 /** One source line for the workspace (same shape as AnalystSection's SectionSource). */

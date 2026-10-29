@@ -1,0 +1,29 @@
+{
+ "capturedAt": "2026-10-29T20:09:24Z",
+ "note": "HISTORICAL copy of the Tokyo VAAC advisories issued in the 24 hours before capture. Not current: check https://www.data.jma.go.jp/vaac/data/vaac_list.html.",
+ "source": "Tokyo Volcanic Ash Advisory Center (Japan Meteorological Agency)",
+ "licence": "Source: Japan Meteorological Agency website (https://www.data.jma.go.jp/vaac/data/vaac_list.html). JMA Website Terms of Use: Public Data License (Version 1.0), compatible with CC BY 4.0.",
+ "listUrl": "https://www.data.jma.go.jp/vaac/data/vaac_list.html",
+ "retrievedAt": "2026-10-29T20:09:24Z",
+ "windowHours": 24,
+ "listRows": 245,
+ "listUpdated": "Updated at 11:45 UTC, 29 October 2026",
+ "advisories": [
+  {
+   "url": "https://www.data.jma.go.jp/vaac/data/TextData/2026/20261029_28208001_0332_Text.html",
+   "listedAt": "2026-10-29T11:45:00Z",
+   "volcano": "SAKURAJIMA (AIRA CALDERA)",
+   "area": "JAPAN",
+   "number": "2026/332",
+   "text": "FVFE01 RJTD 291145\nVA ADVISORY\nDTG: 20261029/1145Z\nVAAC: TOKYO\nVOLCANO: SAKURAJIMA (AIRA CALDERA) 282080\nPSN: N3136 E13039\nAREA: JAPAN\nSOURCE ELEV: 1117M AMSL\nADVISORY NR: 2026/332\nINFO SOURCE: JMA HIMAWARI-9\nERUPTION DETAILS: ERUPTED AT 20261029/1129Z FL110 EXTD NE\nOBS VA DTG: 29/1130Z\nOBS VA CLD: VA NOT IDENTIFIABLE FM SATELLITE DATA WIND FL110 240/27KT\nFCST VA CLD +6 HR: NOT AVBL\nFCST VA CLD +12 HR: NOT AVBL\nFCST VA CLD +18 HR: NOT AVBL\nRMK: WE WILL ISSUE FURTHER ADVISORY IF VA IS DETECTED IN SATELLITE\nIMAGERY.\nNXT ADVISORY: NO FURTHER ADVISORIES="
+  },
+  {
+   "url": "https://www.data.jma.go.jp/vaac/data/TextData/2026/20261029_30027000_0361_Text.html",
+   "listedAt": "2026-10-29T06:22:00Z",
+   "volcano": "SHEVELUCH",
+   "area": "RUSSIA",
+   "number": "2026/361",
+   "text": "FVFE01 RJTD 290622\nVA ADVISORY\nDTG: 20261029/0622Z\nVAAC: TOKYO\nVOLCANO: SHEVELUCH 300270\nPSN: N5639 E16122\nAREA: RUSSIA\nSOURCE ELEV: 3283M AMSL\nADVISORY NR: 2026/361\nINFO SOURCE: KBGS HIMAWARI-9\nERUPTION DETAILS: ERUPTION AT 20261029/0358Z FL350 REPORTED\nOBS VA DTG: 29/0600Z\nOBS VA CLD: VA NOT IDENTIFIABLE FM SATELLITE DATA WIND FL350 190/18KT\nFCST VA CLD +6 HR: NOT AVBL\nFCST VA CLD +12 HR: NOT AVBL\nFCST VA CLD +18 HR: NOT AVBL\nRMK: WE WILL ISSUE FURTHER ADVISORY IF VA IS DETECTED IN SATELLITE\nIMAGERY. VA HEIGHT ESTIMATED FROM SEISMIC DATA.\nNXT ADVISORY: NO FURTHER ADVISORIES="
+  }
+ ]
+}

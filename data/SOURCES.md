@@ -141,8 +141,14 @@ Tsunami warning areas and observed heights are BMKG InaTEWS (`last30tsunamievent
 | `data/fire-admin-lookup.json` | The province or state of each district centre, plus first-level unit centres, used to name fire clusters and rollups. Only `scripts/refresh-fires.mjs` reads it; it is not bundled. Names are approximate, taken from the nearest district or province centre; the 2022 Papua split is applied by regency name. | geoBoundaries gbOpen: IDN ADM2 (CC BY 3.0 IGO); IDN ADM1 (2017; OpenStreetMap, Wambacher; **ODbL 1.0, © OpenStreetMap contributors**); MYS ADM2 and ADM1 (CC BY 3.0); and ADM1 for the other ASEAN members and Papua New Guinea. Each unit's licence is stored in the file's `sources`. | `npm run build:fire-admin` |
 | `data/ash-wind-snapshot.json` | Now 96 h (yesterday plus three days), so the "If it erupted now" scenario (`src/lib/eruptionScenario.ts`) can run 48 h from the scrubber's "now". It is a MODELLED SCENARIO: hourly puffs at about 3, 5.5 and 9 km carried by the summit winds, with an illustrative spread rate (Heffter 1965). It is not a dispersion model and not a VAAC advisory. Town coordinates come from GeoNames, with ids in the code. | Open-Meteo, CC BY 4.0 | `npm run refresh:ashwind` |
 
+## Volcanic ash advisories (added 2026-10-30)
+
+| File | What | Source and licence | Refresh |
+|---|---|---|---|
+| `data/vaac-snapshot.json` | OFFICIAL, aviation. The newest Tokyo VAAC Volcanic Ash Advisory per volcano issued in the 24 hours before capture, each text word for word (only the HTML line breaks become newlines). The offline fallback for the live relay `GET /api/vaac`, which runs the same builder (`scripts/lib/vaacBuild.mjs`). The browser applies the 24-hour window again on the visitor's clock, so an old capture shows nothing as current. Only texts that say `VAAC: TOKYO` are kept. | Tokyo Volcanic Ash Advisory Center, Japan Meteorological Agency: list https://www.data.jma.go.jp/vaac/data/vaac_list.html and the text pages it links. CORS open (`Access-Control-Allow-Origin: *`), `Cache-Control: max-age=600`. JMA Website Terms of Use: Public Data License (Version 1.0), compatible with CC BY 4.0; source cited as "Source: Japan Meteorological Agency website (URL)". | `npm run refresh:vaac` (part of `refresh:all`) |
+
 Linked, not relayed:
 - **ASEAN Specialised Meteorological Centre (ASMC).** Its regional haze alert levels and hotspot maps are linked only. It has no keyless machine-readable feed, and its terms require written permission from the Meteorological Service Singapore to republish.
 - **NUS CRISP satellite imagery.** Linked only.
-- **VAAC Darwin and VAAC Tokyo ash advisories.** Linked only; neither has a simple public feed.
+- **VAAC Darwin ash advisories** (Bureau of Meteorology; Indonesia, including the four watched volcanoes). Linked only: the Bureau blocks automated access to its advisory page, and its copyright notice allows personal or in-house use only where no other terms are stated. Copies on JMA's "Darwin VAAC Backup" page and NOAA's tgftp server are still the Bureau's text, so they are not used either.
 - **MAGMA hazard maps (KRB).** Linked only.

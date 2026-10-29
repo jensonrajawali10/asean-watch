@@ -3,10 +3,12 @@
 // - "If it erupted now": where ash at about 5.5–9 km would drift and the first listed towns it would reach,
 //   with times (MODELLED SCENARIO from src/lib/eruptionScenario.ts; never a prediction or a warning).
 // - The distance-rings note ("distance only; the agency's hazard map is the authority") with the hazard map
-//   link, and VAAC Darwin for ash in the air.
+//   link.
+// - Ash in the air: a relayed Volcanic Ash Advisory naming this volcano when there is one (OFFICIAL, aviation),
+//   and always the VAAC Darwin link, which is linked only (VAAC_DARWIN_NOT_RELAYED in volcanoOfficial.ts).
 // - "Play ash scenario" and "Open in workspace". No evidence records, watch rules or workflow states here.
 import { useId, useMemo } from 'react';
-import type { Incident } from '../../types';
+import type { Incident, OfficialWarning } from '../../types';
 import type { AshWindData } from '../../lib/ashDrift';
 import { SCENARIO_DEFAULT_HOURS, buildEruptionScenario, hoursShort, levelWords, scenarioPlaceRef } from '../../lib/eruptionScenario';
 import type { EruptionScenario } from '../../lib/eruptionScenario';
@@ -44,6 +46,8 @@ export interface VolcanoCardProps {
   region?: string;
   /** The official level for this volcano, verbatim. Null or undefined: "not retrieved", never an all-clear. */
   level: VolcanoLevelInput | null | undefined;
+  /** The newest relayed ash advisory naming this volcano (findAshAdvisory); an aviation product, never its level. */
+  ashAdvisory?: OfficialWarning | null;
   /** Modelled pressure-level winds (loadAshWind result data). Used when `scenario` is not given. */
   ashWind?: AshWindData | null;
   /** The scenario's "now" (ms): the map scrubber's anchor step, so the card and the plume agree. */
@@ -83,6 +87,7 @@ export default function VolcanoCard({
   name,
   region,
   level,
+  ashAdvisory = null,
   ashWind = null,
   nowMs,
   scenario: given,
@@ -121,6 +126,22 @@ export default function VolcanoCard({
       }
     : { label: 'Official level', value: 'Not retrieved', tone: 'muted', note: 'Check MAGMA Indonesia; no level here is not an all-clear' };
 
+  const ashFact: MapCardFact | null = ashAdvisory
+    ? {
+        label: 'Ash advisory (aviation)',
+        value: ashAdvisory.level,
+        tone: ashAdvisory.ended ? 'muted' : 'official',
+        note: [
+          ashAdvisory.issuer.replace(/\s*\(.*\)$/, ''),
+          ashAdvisory.issuedAt ? `issued ${utcShort(ashAdvisory.issuedAt)}` : null,
+          ashAdvisory.ended ? 'series ended (NO FURTHER ADVISORIES)' : null,
+          'not a public warning',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      }
+    : null;
+
   const wind = scenario?.wind ?? (ashWind ? { dataMode: ashWind.dataMode, retrievedAt: ashWind.retrievedAt } : null);
 
   return (
@@ -132,7 +153,7 @@ export default function VolcanoCard({
       kind="official"
       kindLabel={level ? 'OFFICIAL LEVEL' : 'LEVEL NOT RETRIEVED'}
       onClose={onClose}
-      facts={[levelFact]}
+      facts={ashFact ? [levelFact, ashFact] : [levelFact]}
       primaryAction={
         scenario && onPlayScenario
           ? {
@@ -151,6 +172,13 @@ export default function VolcanoCard({
             <>
               {' '}
               Wind: Open-Meteo pressure-level forecast (CC BY 4.0), {wind.dataMode === 'live' ? 'fetched' : 'saved run'} {utcShort(wind.retrievedAt)}.
+            </>
+          )}
+          {ashAdvisory && (
+            <>
+              {' '}
+              Ash advisory: <ExternalLink href={ashAdvisory.sourceUrl}>advisory text</ExternalLink> (JMA)
+              {ashAdvisory.dataMode === 'historical' ? ', saved copy' : ''}.
             </>
           )}
         </>
@@ -194,8 +222,11 @@ export default function VolcanoCard({
       </section>
       <p className="vcard-line">
         Rings show distance only; the agency&apos;s hazard map is the authority:{' '}
-        <ExternalLink href={links.hazardMap.url}>{links.hazardMap.label}</ExternalLink>. Ash in the air:{' '}
-        <ExternalLink href={VAAC_DARWIN.url}>VAAC Darwin advisories</ExternalLink>.
+        <ExternalLink href={links.hazardMap.url}>{links.hazardMap.label}</ExternalLink>.
+      </p>
+      <p className="vcard-line">
+        Ash in the air (aviation advisories): <ExternalLink href={VAAC_DARWIN.url}>VAAC Darwin advisories</ExternalLink>, linked only: the Bureau of
+        Meteorology&apos;s terms do not allow copying them here. None shown here is not an all-clear.
       </p>
     </MapCard>
   );

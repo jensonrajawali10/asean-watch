@@ -35,7 +35,7 @@ USGS identifies four principal types of satellite observation for volcanoes: def
 | Earthquakes (category `seismic`) | USGS ComCat; BMKG Data Terbuka and InaTEWS lists | **Used.** No event fell within range of any watch area in the current snapshot. |
 | Volcanic gas (SO2) | Sentinel-5P [5] | **Not shown.** There is no open, keyless numeric feed; Copernicus downloads need an account and NetCDF processing. Each volcano links to MOUNTS (independent research, not official). It is never filled with modelled values. |
 | Ground deformation | Sentinel-1 radar and InSAR [2][3] | **Not shown.** MOUNTS link only. |
-| Ash | Volcanic Ash Advisory Centres | **Not shown.** Darwin VAAC, which covers Indonesia, blocked scripted requests. |
+| Ash | Volcanic Ash Advisory Centres | **Not evidence.** Tokyo VAAC advisories are relayed as official aviation messages (see Official warnings), never as watch-area evidence. VAAC Darwin, which covers the four watched volcanoes, is linked only. |
 
 ## The snapshot
 
@@ -78,6 +78,8 @@ ASEAN Watch exists to make people aware of potential evacuation. It does this **
 | PUB Singapore (via data.gov.sg) | Flood alerts | Live, snapshot fallback |
 | PVMBG via MAGMA Indonesia | Volcano activity level (Level III Siaga for the four volcanoes) | Bundled record from the public level list, retrieved 2026-10-13T06:52:03Z. The API is token-only, and no refresh updates it. |
 | GDACS | Cross-hazard impact estimates | Live, snapshot fallback. An **aggregator**, labelled as an estimate, not a warning |
+| Tokyo VAAC (Japan Meteorological Agency) | Volcanic Ash Advisories for aviation: Japan, the northern Philippines, the Kuril Islands and Kamchatka | Live through the relay `/api/vaac` (10-minute cache), snapshot fallback. The newest advisory per volcano issued in the last 24 hours, text word for word. An **aviation product**, not a public warning |
+| VAAC Darwin (Bureau of Meteorology) | Volcanic Ash Advisories for aviation: Indonesia, Papua New Guinea, the southern Philippines | **Linked only**, on each volcano card, in the Warnings section and in Sources. See "Volcanic ash advisories" below |
 
 Relay rules:
 
@@ -86,6 +88,17 @@ Relay rules:
 - **Absence is not safety.** A failed feed reads "Official feed unavailable: check <issuer> directly". An empty list says "This is not an all-clear". Expired or ended messages are labelled with their time.
 - **Mode.** LIVE means fetched in this session. HISTORICAL means a bundled snapshot with its original times, and it must never look current.
 - **Near a watch area** means within 150 km. With nothing selected, the panel lists every relayed item in the Asia-Pacific.
+
+### Volcanic ash advisories
+
+A Volcanic Ash Advisory (VAA) is an aviation product of the ICAO International Airways Volcano Watch. It tells pilots and airlines where volcanic ash is, or is forecast, in the air. It is not a public warning and gives no instruction to people on the ground. Every advisory shown carries that note.
+
+- **Tokyo VAAC is relayed.** Source: the advisory list <https://www.data.jma.go.jp/vaac/data/vaac_list.html> (HTML, about 170 KB, about two months of advisories) and the text page each row links, e.g. `TextData/2026/20261029_28208001_0332_Text.html`. Both answer browser calls (`Access-Control-Allow-Origin: *`) and are cached for ten minutes (`max-age=600`). Terms: JMA Website Terms of Use, Public Data License (Version 1.0), compatible with CC BY 4.0, source cited.
+- **Why a relay, although CORS is open:** one advisory takes two downloads, and every open tab would repeat them every five minutes. `/api/vaac` builds the set once and keeps it at the Vercel CDN for ten minutes, like JMA's own cache.
+- **What is shown:** the newest advisory per volcano issued in the last 24 hours, judged again on the visitor's clock, so a saved copy never looks current. Earlier advisories in a series are superseded. The whole text is shown as issued, with the issuing VAAC, the issue time (`DTG`) and a link to the advisory's page. An advisory whose `NXT ADVISORY` line says `NO FURTHER ADVISORIES` is labelled ENDED; nothing else ends one. Only texts that say `VAAC: TOKYO` are relayed.
+- **Where:** in the Warnings section under "Volcanic ash advisories (aviation)", Southeast Asia when the advisory's `AREA` is an ASEAN country (the Philippines), otherwise the wider Asia-Pacific; and on a volcano card when an advisory names that volcano by its Smithsonian number. Advisories are never drawn as warning pins on the map, never counted as a volcano's alert level, and never change a workflow state. They do count in the alerts button's number of official messages in force.
+- **VAAC Darwin is linked only** (checked 14 and 30 October 2026). Darwin covers Indonesia, including Merapi, Semeru, Anak Krakatau and Sinabung. Its advisory page <https://www.bom.gov.au/aviation/volcanic-ash/darwin-va-advisory.shtml> fills its list from an internal endpoint; to a script that names itself, the Bureau answers that its website "does not support web scraping" and blocks it. The Bureau's copyright notice <https://www.bom.gov.au/copyright> forbids scraping and, where no other terms are stated, allows personal or in-house use only, "You must not supply it to any other person". The advisory page states no other terms and says the information is "produced solely for use by the aviation industry". The anonymous FTP has only the graphical advisories, not the text, and the Registered User service is paid. Copies on JMA's "Darwin VAAC Backup" page and NOAA's tgftp server carry Darwin's own text, which is still the Bureau's.
+- **None shown is not an all-clear.** In particular, no Tokyo advisory says nothing about Indonesia.
 
 Example from the bundled snapshot: ThaiWater gauge C.35 (Ban Pom, Phra Nakhon Si Ayutthaya, Chao Phraya basin) read 4.97 m MSL, at 104.56% of bank capacity, at 13:00 ICT on 13 October 2026, situation level 5, "overflowing bank". A ThaiWater situation level is a gauge category, not an evacuation order.
 
@@ -110,7 +123,7 @@ Example from the bundled snapshot: ThaiWater gauge C.35 (Ban Pom, Phra Nakhon Si
 - **A hotspot is not an eruption or a confirmed fire.** Near a volcano it can be volcanic heat, a vegetation fire or other hot ground. In the haze box it can be a fire, a gas flare or other hot ground. Every hotspot needs contextual review [6]. Satellite anomalies alone do not establish that an eruption will occur [1].
 - **Missing detections are not evidence of no heat.** Cloud and thick smoke hide hotspots, so daily counts are lower bounds. FIRMS near-real-time data are preliminary and can change. Each satellite is counted separately, so one fire seen by two satellites appears in two daily totals.
 - **Earthquake coverage is partial.** BMKG's lists are rolling (the latest 15, or about 200, events), so small unfelt events before the list's start are missing. PVMBG's own volcano-seismic network, which records small volcano-tectonic events, has no open feed. Magnitudes differ between agencies and products.
-- **No gas, deformation or ash evidence.** As a result, a watch area cannot reach Review needed unless an earthquake of M 3.0 or more occurs within range.
+- **No gas, deformation or ash evidence.** As a result, a watch area cannot reach Review needed unless an earthquake of M 3.0 or more occurs within range. Relayed ash advisories are official messages, not evidence.
 - **Optical and radar caveats.** Optical and thermal views are lost under cloud. Radar works through cloud and at night [2], and InSAR measures change between acquisitions but can contain atmospheric artefacts [3]. Revisit time, resolution and product latency differ between satellites.
 - **The snapshot ages.** Satellite and earthquake data are only as fresh as the last refresh, and nothing refreshes automatically. The header shows the time.
 - **Official items can be stale or incomplete.** Live feeds can fail, change format or tighten browser access without notice. GeoNet's alert level carries no timestamp. The MAGMA levels are a copy from 13 October 2026. PHIVOLCS, PTWC and Malaysian and Philippine flood feeds are not relayed: they have no browser-callable feed, or need a proxy.
@@ -137,9 +150,10 @@ Example from the bundled snapshot: ThaiWater gauge C.35 (Ban Pom, Phra Nakhon Si
 - **BMKG:** "Sumber data: BMKG (Badan Meteorologi, Klimatologi, dan Geofisika)". Must be credited in the app; 60 requests per minute per IP.
 - **Smithsonian GVP:** Global Volcanism Program, Volcanoes of the World, Smithsonian Institution (terms page blocked to scripts).
 - **MAGMA Indonesia (PVMBG):** the site states all rights reserved. The app shows four recorded levels with a link, and does not ingest bulk data.
-- **JMA:** Public Data License v1.0. **GeoNet:** CC BY 3.0 NZ. **US NWS:** US Government work. **GDACS:** terms ambiguous (its feeds say both "public domain" and "Copyright, GDACS").
+- **JMA:** Public Data License v1.0. Tokyo VAAC advisories: "Source: Japan Meteorological Agency website (https://www.data.jma.go.jp/vaac/data/vaac_list.html)". **GeoNet:** CC BY 3.0 NZ. **US NWS:** US Government work. **GDACS:** terms ambiguous (its feeds say both "public domain" and "Copyright, GDACS").
 - **ThaiWater (HII)** and **Dinas Sumber Daya Air DKI Jakarta:** attributed on screen; terms not found.
 - **NEA and PUB via data.gov.sg:** Singapore Open Data Licence v1.0.
+- **Bureau of Meteorology (VAAC Darwin):** © Commonwealth of Australia. Linked only; nothing is copied.
 - **Boundaries:** Natural Earth (public domain) via the `world-atlas` package.
 
 ## References
@@ -160,6 +174,8 @@ Data sources and issuer pages (exact download URLs are in `data/real/meta.json` 
 - BMKG: <https://data.bmkg.go.id/gempabumi/> and <https://inatews.bmkg.go.id/>
 - MAGMA Indonesia volcano levels: <https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas>
 - JMA: <https://www.jma.go.jp/bosai/map.html>
+- Tokyo VAAC advisory list: <https://www.data.jma.go.jp/vaac/data/vaac_list.html>; JMA terms <https://www.jma.go.jp/jma/en/copyright.html>
+- VAAC Darwin advisories (linked only): <https://www.bom.gov.au/aviation/volcanic-ash/darwin-va-advisory.shtml>; Bureau of Meteorology copyright <https://www.bom.gov.au/copyright>
 - GeoNet: <https://www.geonet.org.nz/volcano>
 - US National Weather Service: <https://www.weather.gov/>
 - GDACS: <https://www.gdacs.org/>

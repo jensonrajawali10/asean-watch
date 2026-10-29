@@ -8,6 +8,7 @@ Each watched volcano (Merapi, Semeru, Anak Krakatau, Sinabung) is a triangle rin
 - `volcano-level` the card shows the official level verbatim with its issuer (PVMBG via MAGMA Indonesia).
 - `volcano-close` the card's close button (or Esc) closes it and clears `sel`.
 - `volcano-link` a link with `#sel=watch-merapi` opens the same card.
+- `volcano-ash` the card links VAAC Darwin for ash in the air and says it is linked only (the Bureau of Meteorology's terms). A relayed Tokyo VAAC advisory naming the volcano would show as an "Ash advisory (aviation)" fact; for the four Indonesian volcanoes that does not happen.
 
 ## How to get to it (user POV)
 
@@ -23,6 +24,7 @@ Preconditions:
 
 - **Click a triangle.** Run `npm run verify -- run --journey cards`. Step `card-volcano` clicks the first of Merapi, Semeru, Anak Krakatau, Sinabung whose triangle is not under another marker's name tag, and records the ones it passed over in `saw.tried`.
 - **Card.** Same step. `section.mcard` appears on top, its title contains the volcano clicked, and the hash is `#sel=watch-<name>`. Screenshot `<viewport>-<nn>-volcano-card.png`.
+- **Ash line.** Same step. The card text contains "VAAC Darwin" and "linked only"; `saw.ashLine` holds the sentence.
 - **Close.** Same step. The card's "Close ..." button removes `section.mcard`.
 - **Link.** Run `npm run verify -- open --hash "sel=watch-merapi"`. `card.title` is "Merapi" and `cardOnTop` is `true`.
 

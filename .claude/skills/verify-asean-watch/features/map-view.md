@@ -10,6 +10,7 @@ The first screen: a full-screen map of the region with the haze forecast, wind s
 - `map-markers` the volcano triangles and warning pins are on the map as buttons.
 - `map-fit` the page never scrolls sideways at desktop or phone width.
 - `map-fires-live` `/api/fires` answers, and the map key's fire line matches the data's age: "in the last 24 hours" for data under 12 hours old, otherwise a named day ("in the 24 h to 24 Oct"). A failed relay is never read as "no fires".
+- `map-vaac-live` `/api/vaac` answers, and every advisory it relays says `VAAC: TOKYO` (VAAC Darwin's text is never relayed). Ash advisories are aviation products and are never drawn as warning pins.
 
 ## How to get to it (user POV)
 
@@ -28,6 +29,7 @@ Preconditions:
 - **Markers.** Same step. `saw.volcanoMarkers` is 4 (Merapi, Semeru, Anak Krakatau, Sinabung) and `saw.warningPins` is the number of official messages drawn.
 - **Fit.** Same step. `saw.layout.scrollWidth` equals `saw.layout.innerWidth` at both viewports.
 - **Live fires.** Same run, step `fires-live`: `GET /api/fires` must answer HTTP 200. `saw.available`, `saw.reference` (the data's time) and `saw.keyShouldSay` say what the key must read. The step opens the key if folded, reads the fire line (`saw.keyFires`) and fails if it claims "the last 24 hours" for older data, or misses it for fresh data. Screenshot `<viewport>-<nn>-map-key-fires.png`.
+- **Ash advisories.** Same run, step `vaac-live`: `GET /api/vaac` must answer HTTP 200. `saw.advisories` lists what it relays (often empty: the last 24 hours only). It fails on any text not issued by Tokyo, and reports `skip` when the relay answers `{ "available": false }` (the page then shows its saved copy).
 - **Proof.** Screenshot `<viewport>-01-map.png`, plus `open` for an ARIA snapshot: `npm run verify -- open --viewport phone`.
 
 ## Gotchas

@@ -16,6 +16,7 @@ import Dialog from './Dialog';
 import { EndedChip, ExternalLink, ModeBadge, OfficialLevelChip, OfficialTag } from './Badges';
 import { formatCoords, formatUtc, formatValue, safeHttpUrl } from './format';
 import { PTWC_ISSUER, PTWC_NATIONAL_AUTHORITIES_NOTE } from '../lib/ptwc';
+import { VAA_AVIATION_NOTE } from '../lib/vaac';
 import { belowTopOfScale, emptyWarningsText, endedLabel, gaugeForWarning, isExpired } from '../lib/warningsView';
 import { useNowMs } from '../lib/useNowMs';
 import { countsText, groupByHazard, HAZARD_GROUP_NAME, isSoutheastAsia, warningCounts } from './shell/alerts';
@@ -249,6 +250,7 @@ function WarningItem({
         {headline}
       </p>
       {w.issuer === PTWC_ISSUER && <p className="ow-meta">{PTWC_NATIONAL_AUTHORITIES_NOTE}</p>}
+      {w.hazard === 'ash' && <p className="ow-meta">{VAA_AVIATION_NOTE}</p>}
 
       <p className="ow-meta">
         {w.issuedAt ? (
@@ -301,6 +303,15 @@ function WarningItem({
         </details>
       )}
 
+      {w.text?.trim() && (
+        <details className="ow-instruction">
+          <summary>Advisory text, as issued</summary>
+          <pre className="ow-fulltext" lang={lang}>
+            {w.text.trim()}
+          </pre>
+        </details>
+      )}
+
       <div className="ow-actions">
         <button type="button" className="link-button" onClick={() => onInspect(w.id)}>
           Details
@@ -337,7 +348,7 @@ function FeedFooter({ feeds }: { feeds: WarningFeedStatus[] }) {
         ))}
       </ul>
       <p className="ow-attribution">
-        Sources: BMKG, JMA, GeoNet (CC BY), NWS, GDACS, ThaiWater/HII, DSDA Jakarta, PUB via data.gov.sg, MAGMA Indonesia
+        Sources: BMKG, JMA, GeoNet (CC BY), NWS, GDACS, ThaiWater/HII, DSDA Jakarta, PUB via data.gov.sg, MAGMA Indonesia, Tokyo VAAC (JMA)
       </p>
     </details>
   );
@@ -453,6 +464,12 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
                 </Field>
               )}
 
+              {w.hazard === 'ash' && (
+                <Field label="Audience">
+                  <span>{VAA_AVIATION_NOTE}</span>
+                </Field>
+              )}
+
               <Field label="Area">
                 {w.areaDescription.trim() ? (
                   <span className="ow-verbatim ow-prewrap" lang={lang}>
@@ -512,6 +529,14 @@ export function WarningInspector({ warning: w, gauge, feed, onClose }: WarningIn
                   'No instruction published by the issuer'
                 )}
               </Field>
+
+              {w.text?.trim() && (
+                <Field label="Full text">
+                  <pre className="ow-fulltext" lang={lang}>
+                    {w.text.trim()}
+                  </pre>
+                </Field>
+              )}
 
               <Field label="Language">{languageName(w.language)}</Field>
 
