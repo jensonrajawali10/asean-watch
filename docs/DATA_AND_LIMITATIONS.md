@@ -22,6 +22,7 @@ Everything shown is real. The earlier simulated Merapi scenario and the Ayutthay
 | Anak Krakatau | -6.1009, 105.4233 | same | GVP 262000 (Krakatau). The GVP catalogs Anak Krakatau under Krakatau; the watch uses that entry's point, which may not mark the active cone exactly. |
 | Sinabung | 3.17, 98.392 | same | GVP 261080 |
 | Riau peatland hotspots | 0.50, 102.55 (Siak-Kampar peatlands) | Box: latitude -0.5 to 1.6, longitude 101.0 to 103.2 | Chosen to exclude Malaysian and Singapore land. It approximates the Riau mainland; province boundaries were not checked. |
+| Central Kalimantan peatlands | -2.5, 114.0 (box centre, south-east of Palangka Raya) | Box: latitude -3.5 to -1.5, longitude 113.0 to 115.0 | The peatland fire study area of Usup and Hayasaka (2023), *Fire* 6(5) 182 (doi:10.3390/fire6050182): the ex-Mega Rice Project and part of Sebangau National Park. It also takes in the lower Barito near Banjarmasin (South Kalimantan). Inside a haze box the snapshot keeps the 10 strongest hotspots per satellite per day and counts the rest in a daily total. |
 
 The four volcanoes were chosen because MAGMA Indonesia listed them at Level III (Siaga) on 13 October 2026.
 

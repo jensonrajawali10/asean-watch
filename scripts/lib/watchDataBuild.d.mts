@@ -3,7 +3,7 @@
 // with that file's exports.
 export interface WatchBuildResult {
   files: { firms: string; quakes: string; meta: string };
-  firms: { about: string; rows: unknown[] };
+  firms: { about: string; rows: unknown[]; hazeDayTotals: unknown[] };
   quakes: { about: string; rows: unknown[] };
   meta: { retrievedAt: string; window: { start: string; end: string; days: number }; sources: unknown[] } & Record<string, unknown>;
   scenarioWindow: { start: string; end: string };

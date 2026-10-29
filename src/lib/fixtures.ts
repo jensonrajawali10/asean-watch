@@ -15,12 +15,13 @@ import {
   WATCH_HAZARDS,
   buildReplayDays,
   describeWatchArea,
+  firmsConfidence,
   isWatchArea,
   observationsForWatch,
   ruleContext,
   rulesForWatch,
 } from './watchRules';
-import type { FirmsRow, HotspotMember, QuakeRow, Watch, WatchArea } from './watchRules';
+import type { FirmsRow, HazeDayTotal, HotspotMember, QuakeRow, Watch, WatchArea } from './watchRules';
 
 // Everything the UI needs about watches and rules can be imported from this module.
 export type { HotspotMember, Watch, WatchArea } from './watchRules';
@@ -166,6 +167,40 @@ function rowsOf(raw: unknown): unknown[] {
   return isRecord(raw) && Array.isArray(raw.rows) ? raw.rows : [];
 }
 
+function isCount(n: unknown): n is number {
+  return Number.isInteger(n) && (n as number) >= 0;
+}
+
+/** Why a haze daily total from data/real/firms.json cannot be used, or null when it can. */
+function hazeTotalProblem(t: unknown): string | null {
+  if (!isRecord(t)) return 'not a record';
+  if (typeof t.watchId !== 'string' || typeof t.satellite !== 'string') return 'watchId or satellite is missing';
+  if (typeof t.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.date)) return `date ${JSON.stringify(t.date)} is not a UTC date`;
+  if (!isCount(t.rows) || !isCount(t.kept) || t.kept > t.rows) return 'rows and kept must be counts, kept no more than rows';
+  if (!Array.isArray(t.times) || t.times.length === 0 || !t.times.every((x) => typeof x === 'string' && /^\d{4}$/.test(x))) {
+    return 'times must be a list of HHMM times';
+  }
+  if (!isRecord(t.confidence)) return 'confidence must map confidence values to [hotspots, summed FRP]';
+  let n = 0;
+  for (const [value, pair] of Object.entries(t.confidence)) {
+    if (!firmsConfidence({ satellite: t.satellite, confidence: value })) return `confidence ${JSON.stringify(value)} is not a FIRMS confidence value for satellite ${JSON.stringify(t.satellite)}`;
+    if (!Array.isArray(pair) || !isCount(pair[0]) || typeof pair[1] !== 'number' || !Number.isFinite(pair[1])) return `confidence ${JSON.stringify(value)} must be [hotspots, summed FRP]`;
+    n += pair[0];
+  }
+  if (n !== t.rows) return `the confidence counts add up to ${n}, not ${t.rows}`;
+  return null;
+}
+
+/** The usable haze daily totals; each unusable one is reported. */
+function readHazeTotals(raw: unknown, issues: ValidationIssue[]): HazeDayTotal[] {
+  const list = isRecord(raw) && Array.isArray(raw.hazeDayTotals) ? raw.hazeDayTotals : [];
+  return list.filter((t: unknown, index): t is HazeDayTotal => {
+    const problem = hazeTotalProblem(t);
+    if (problem) issues.push({ recordId: null, index, message: `Haze daily total ${index} in data/real/firms.json skipped: ${problem}.` });
+    return problem === null;
+  });
+}
+
 interface MetaShape {
   retrievedAt: string;
   window: { start: string; end: string };
@@ -217,9 +252,10 @@ export function buildFixtures(raw: {
     const ctx = ruleContext(meta);
     const firms = rowsOf(raw.firms) as FirmsRow[];
     const quakes = rowsOf(raw.quakes) as QuakeRow[];
+    const hazeDayTotals = readHazeTotals(raw.firms, issues);
     const reported = new Set<string>();
     for (const watch of watches) {
-      const result = observationsForWatch(watch, { firms, quakes }, ctx);
+      const result = observationsForWatch(watch, { firms, quakes, hazeDayTotals }, ctx);
       generated.push(...result.observations);
       Object.assign(allMembers, result.members);
       // A bad raw row is reported once, not once per watch.

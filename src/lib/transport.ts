@@ -89,6 +89,8 @@ export interface HotspotSource {
   count: number;
   /** Sum of fire radiative power, MW. */
   frpSum: number;
+  /** True when the day had more hotspots than the snapshot keeps, so `count` and `frpSum` are lower bounds. */
+  countIsLowerBound?: boolean;
 }
 
 /**
@@ -275,7 +277,7 @@ function fmtLatLon(lat: number, lon: number): string {
 
 /** One plain sentence per trajectory, always with the caveat. */
 export function summariseTrajectory(source: HotspotSource, points: readonly TrajectoryPoint[], r: ReceptorResult, level: string): string {
-  const from = `${source.label} near ${fmtLatLon(source.lat, source.lon)} (${source.count} hotspot${source.count === 1 ? '' : 's'})`;
+  const from = `${source.label} near ${fmtLatLon(source.lat, source.lon)} (${source.countIsLowerBound ? 'at least ' : ''}${source.count} hotspot${source.count === 1 ? '' : 's'})`;
   const last = points[points.length - 1];
   const hours = Math.round((Date.parse(last.time) - Date.parse(points[0].time)) / 3_600_000);
   if (r.reaches) {
@@ -314,7 +316,8 @@ export function computeTrajectories(
 
 /**
  * Haze sources for one UTC day (default: each watch's latest day with thermal records): the confident
- * FIRMS members of every wildfire (haze box) watch, clustered per watch. Use with loadFixtures().
+ * FIRMS members of every wildfire (haze box) watch, clustered per watch. Use with loadFixtures(). When a
+ * record counts more confident hotspots than it keeps as members, the counts are marked lower bounds.
  */
 export function hazeSourcesFromFixtures(
   fx: {
@@ -330,11 +333,12 @@ export function hazeSourcesFromFixtures(
     const thermal = fx.observations.filter((o) => o.incidentId === w.id && o.category === 'thermal');
     if (thermal.length === 0) continue;
     const day = opts?.day ?? thermal.map((o) => o.observedAt.slice(0, 10)).sort().at(-1);
-    const pts = thermal
-      .filter((o) => o.observedAt.slice(0, 10) === day)
-      .flatMap((o) => fx.members[o.id] ?? [])
-      .filter((m) => m.meetsRule);
-    out.push(...clusterHotspots(w.id, w.title, pts, { cellDeg: opts?.cellDeg, max: opts?.maxPerWatch }));
+    const records = thermal.filter((o) => o.observedAt.slice(0, 10) === day);
+    const confidentOf = (id: string) => (fx.members[id] ?? []).filter((m) => m.meetsRule);
+    const pts = records.flatMap((o) => confidentOf(o.id));
+    const lowerBound = records.some((o) => typeof o.value === 'number' && confidentOf(o.id).length < o.value);
+    const clusters = clusterHotspots(w.id, w.title, pts, { cellDeg: opts?.cellDeg, max: opts?.maxPerWatch });
+    out.push(...(lowerBound ? clusters.map((c) => ({ ...c, countIsLowerBound: true })) : clusters));
   }
   return out;
 }

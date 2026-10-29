@@ -15,7 +15,7 @@
     "dataMode": "historical",
     "scenarioWindow": {
       "start": "2026-10-23T00:00:00Z",
-      "end": "2026-10-29T07:52:08Z"
+      "end": "2026-10-29T20:10:15Z"
     },
     "replayable": true,
     "summary": "Watch area around Merapi's summit (Smithsonian GVP 263250). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -46,7 +46,7 @@
     "dataMode": "historical",
     "scenarioWindow": {
       "start": "2026-10-23T00:00:00Z",
-      "end": "2026-10-29T07:52:08Z"
+      "end": "2026-10-29T20:10:15Z"
     },
     "replayable": true,
     "summary": "Watch area around Semeru's summit (Smithsonian GVP 263300). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -77,7 +77,7 @@
     "dataMode": "historical",
     "scenarioWindow": {
       "start": "2026-10-23T00:00:00Z",
-      "end": "2026-10-29T07:52:08Z"
+      "end": "2026-10-29T20:10:15Z"
     },
     "replayable": true,
     "summary": "Watch area around Anak Krakatau, the active cone inside the Krakatau caldera. The Smithsonian GVP catalogues it under Krakatau (262000); the watch is centred on the GVP point for Krakatau. Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -108,7 +108,7 @@
     "dataMode": "historical",
     "scenarioWindow": {
       "start": "2026-10-23T00:00:00Z",
-      "end": "2026-10-29T07:52:08Z"
+      "end": "2026-10-29T20:10:15Z"
     },
     "replayable": true,
     "summary": "Watch area around Sinabung's summit (Smithsonian GVP 261080). Shows real NASA FIRMS satellite hotspots and USGS and BMKG earthquakes from the data snapshot, one replay step per UTC day. There is no open numeric SO2 feed, so gas is not shown; see MOUNTS. The official volcano level comes from PVMBG (MAGMA Indonesia) and is shown separately.",
@@ -143,7 +143,7 @@
     "dataMode": "historical",
     "scenarioWindow": {
       "start": "2026-10-23T00:00:00Z",
-      "end": "2026-10-29T07:52:08Z"
+      "end": "2026-10-29T20:10:15Z"
     },
     "replayable": true,
     "summary": "Haze watch box over the Riau mainland peatlands, latitude -0.5 to 1.6 and longitude 101.0 to 103.2 (the marker is the Siak-Kampar peatlands). Shows real NASA FIRMS satellite hotspots as one daily total per sensor, from the data snapshot, one replay step per UTC day. The box stops short of the Malaysian and Singapore coasts so their heat sources are not counted. A hotspot can be a fire, a flare or other hot ground and needs contextual review.",
@@ -151,6 +151,49 @@
       {
         "name": "ASEAN Specialised Meteorological Centre (ASMC): regional hotspot and haze information",
         "url": "https://asmc.asean.org/"
+      }
+    ]
+  },
+  {
+    "id": "watch-kalteng-haze",
+    "key": "kalteng",
+    "title": "Central Kalimantan peatlands",
+    "hazard": "wildfire",
+    "volcanoId": null,
+    "locationName": "Peatlands around Palangka Raya, Central Kalimantan, Indonesia",
+    "country": "Indonesia",
+    "lat": -2.5,
+    "lon": 114,
+    "area": {
+      "kind": "bbox",
+      "minLat": -3.5,
+      "maxLat": -1.5,
+      "minLon": 113,
+      "maxLon": 115
+    },
+    "dataMode": "historical",
+    "scenarioWindow": {
+      "start": "2026-10-23T00:00:00Z",
+      "end": "2026-10-29T20:10:15Z"
+    },
+    "replayable": true,
+    "summary": "Haze watch box over the Central Kalimantan peatlands around Palangka Raya, latitude -3.5 to -1.5 and longitude 113.0 to 115.0 (the marker is the box centre, south-east of Palangka Raya). The box is the study area of Usup and Hayasaka (2023), who chose it because it holds the province's major peatland, the ex-Mega Rice Project and part of Sebangau National Park, and one of Indonesia's highest hotspot densities. Shows real NASA FIRMS satellite hotspots as one daily total per sensor, from the data snapshot, one replay step per UTC day. The box also takes in the lower Barito around Banjarmasin, South Kalimantan, so hotspots there are counted too. A hotspot can be a fire, a flare or other hot ground and needs contextual review.",
+    "references": [
+      {
+        "name": "ASEAN Specialised Meteorological Centre (ASMC): regional hotspot and haze information",
+        "url": "https://asmc.asean.org/"
+      },
+      {
+        "name": "BMKG forest and land fire warnings (Peringatan Karhutla): hotspot, smoke and fire-weather maps (official)",
+        "url": "https://www.bmkg.go.id/cuaca/karhutla"
+      },
+      {
+        "name": "BMKG measured PM2.5, including the Palangka Raya station (official)",
+        "url": "https://www.bmkg.go.id/kualitas-udara/pm25"
+      },
+      {
+        "name": "Where the box comes from: Usup and Hayasaka (2023), Peatland Fire Weather Conditions in Central Kalimantan, Indonesia, Fire 6(5) 182 (independent research, not official)",
+        "url": "https://doi.org/10.3390/fire6050182"
       }
     ]
   }

@@ -98,7 +98,7 @@ Decision (Jenson, 2026-10-13): the product exists to make people aware of potent
 
 Jenson: "make it all real data". Simulated fixtures are retired. Everything shown comes from a named real source with its real timestamps.
 
-- **Watch areas replace scenarios.** `data/watches.json` lists real places: volcanoes by Smithsonian GVP number and coordinates, and haze regions by bounding box. These were Merapi plus Riau, and v1 adds the Indonesian volcanoes MAGMA listed at Level III (Siaga) on 2026-10-13: Semeru, Anak Krakatau, Sinabung.
+- **Watch areas replace scenarios.** `data/watches.json` lists real places: volcanoes by Smithsonian GVP number and coordinates, and haze regions by bounding box. These were Merapi plus Riau, and v1 adds the Indonesian volcanoes MAGMA listed at Level III (Siaga) on 2026-10-13: Semeru, Anak Krakatau, Sinabung. On 2026-10-30 a second haze box was added for the Central Kalimantan peatlands around Palangka Raya, the cited study area in `data/SOURCES.md`. Inside a haze box, `data/real/firms.json` keeps the strongest 10 hotspots per satellite per UTC day; `hazeDayTotals` counts every hotspot of a satellite-day over that limit, and the haze rule counts from it.
 - **Observations come from adapters.**
   - NASA FIRMS VIIRS/MODIS active-fire CSVs (open, no key, no CORS) give `thermal`.
   - USGS and BMKG earthquakes within a stated radius give `seismic`.
