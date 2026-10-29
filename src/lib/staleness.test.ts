@@ -9,6 +9,7 @@ import { loadFixtures } from './fixtures';
 import { bundledFloodSnapshot, loadFloodModelSnapshot } from './floodModel';
 import { loadNeaSnapshot } from './nea';
 import { loadPtwcSnapshot } from './ptwc';
+import { loadVaacSnapshot } from './vaac';
 import { bundledQuakesSnapshot, loadQuakesSnapshot } from './quakesLive';
 import { firesSummaryFromSnapshot, headline, situationReport } from './situation';
 import type { SituationInput } from './situation';
@@ -64,6 +65,8 @@ describe('UPDATE_INTERVALS (the documented table)', () => {
     expect(staleAfterMs(rule('watch-relay'))).toBe(4.5 * H);
     expect(staleAfterMs(rule('usgs-quakes'))).toBe(H);
     expect(staleAfterMs(rule('magma-copy'))).toBe(12 * H);
+    expect(staleAfterMs(rule('vaac-tokyo'))).toBe(H);
+    expect(rule('vaac-tokyo').kind).toBe('feed');
   });
 
   it('is mirrored row for row in docs/DATA_AND_LIMITATIONS.md', () => {
@@ -87,12 +90,12 @@ describe('UPDATE_INTERVALS (the documented table)', () => {
       wind925: null,
       hotspotSnapshot: fx.snapshot,
       nea: loadNeaSnapshot(),
-      warningFeeds: [...ws.feeds, loadPtwcSnapshot().status],
+      warningFeeds: [...ws.feeds, loadPtwcSnapshot().status, loadVaacSnapshot().status],
       fires: firesSummaryFromSnapshot(loadFireSnapshot() as NonNullable<ReturnType<typeof loadFireSnapshot>>),
       ashWind: loadAshWindSnapshot(),
     });
     // No expected update: a link, map tiles, a bundled catalogue or station list, or a browser computation.
-    const none = new Set(['asmc', 'ioc-sea-level', 'trajectories', 'gibs-himawari', 'gibs-truecolour', 'nus-crisp', 'gvp', 'geoboundaries', 'natural-earth', 'basemaps']);
+    const none = new Set(['asmc', 'vaac-darwin', 'ioc-sea-level', 'trajectories', 'gibs-himawari', 'gibs-truecolour', 'nus-crisp', 'gvp', 'geoboundaries', 'natural-earth', 'basemaps']);
     for (const e of cat) {
       if (none.has(e.id)) expect(intervalForSource(e.id), e.id).toBeNull();
       else expect(intervalForSource(e.id), e.id).not.toBeNull();
@@ -101,6 +104,7 @@ describe('UPDATE_INTERVALS (the documented table)', () => {
     expect(intervalForSource('feed:ptwc')?.id).toBe('official-feed');
     expect(intervalForSource('feed:gdacs')?.id).toBe('official-feed');
     expect(intervalForSource('feed:magma-level-list')?.id).toBe('magma-copy');
+    expect(intervalForSource('feed:vaac-tokyo')?.id).toBe('vaac-tokyo');
     expect(intervalForSource('quakes:bmkg-gempaterkini')?.id).toBe('bmkg-quakes');
     expect(intervalForSource('quakes:usgs-quakes')?.id).toBe('usgs-quakes');
     expect(intervalForSource('firms:firms-viirs-snpp')?.id).toBe('watch-relay');
@@ -282,7 +286,7 @@ describe('in the Sources catalogue and the Overview', () => {
       wind925: await loadWindSnapshot('925hPa'),
       hotspotSnapshot: fx.snapshot,
       nea,
-      warningFeeds: [...ws.feeds, loadPtwcSnapshot().status],
+      warningFeeds: [...ws.feeds, loadPtwcSnapshot().status, loadVaacSnapshot().status],
       ashWind: loadAshWindSnapshot(),
       riverFlow: flood,
       quakes: loadQuakesSnapshot(await bundledQuakesSnapshot()),

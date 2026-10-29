@@ -66,20 +66,22 @@ const SEA_COUNTRIES = /\b(Indonesia|Malaysia|Singapore|Thailand|Viet ?Nam|Cambod
 
 /**
  * True for a message about Southeast Asia: from a Southeast Asian agency (BMKG, MAGMA/PVMBG, ThaiWater, Jakarta
- * DSDA, Singapore PUB), or a GDACS estimate whose country is an ASEAN member. JMA, GeoNet, NWS and PTWC
- * messages (Japan, New Zealand, US Pacific, the wider Pacific) are the wider Asia-Pacific.
+ * DSDA, Singapore PUB), or a GDACS estimate or Tokyo VAAC advisory whose country is an ASEAN member. JMA,
+ * GeoNet, NWS and PTWC messages (Japan, New Zealand, US Pacific, the wider Pacific) are the wider Asia-Pacific.
  */
 export function isSoutheastAsia(w: Pick<OfficialWarning, 'id' | 'areaDescription'>): boolean {
   if (SEA_FEEDS.some((p) => w.id.startsWith(p))) return true;
-  if (w.id.startsWith('gdacs:')) return SEA_COUNTRIES.test(w.areaDescription ?? '');
+  // GDACS and Tokyo VAAC cover several countries: by the country they name (VAAC: the advisory's AREA line).
+  if (w.id.startsWith('gdacs:') || w.id.startsWith('vaac-tokyo:')) return SEA_COUNTRIES.test(w.areaDescription ?? '');
   return false;
 }
 
 /** Hazards in the order the warnings list groups them (most life-threatening first), with plain names. */
-export const HAZARD_ORDER: readonly WarningHazard[] = ['tsunami', 'volcano', 'earthquake', 'flood', 'haze', 'weather', 'other'];
+export const HAZARD_ORDER: readonly WarningHazard[] = ['tsunami', 'volcano', 'ash', 'earthquake', 'flood', 'haze', 'weather', 'other'];
 export const HAZARD_GROUP_NAME: Record<WarningHazard, string> = {
   tsunami: 'Tsunami',
   volcano: 'Volcanoes',
+  ash: 'Volcanic ash advisories (aviation)',
   earthquake: 'Earthquakes',
   flood: 'Floods and river levels',
   haze: 'Haze and air',
@@ -89,6 +91,7 @@ export const HAZARD_GROUP_NAME: Record<WarningHazard, string> = {
 const HAZARD_WORD: Record<WarningHazard, [string, string]> = {
   tsunami: ['tsunami', 'tsunami'],
   volcano: ['volcano', 'volcanoes'],
+  ash: ['ash advisory', 'ash advisories'],
   earthquake: ['earthquake', 'earthquakes'],
   flood: ['flood', 'floods'],
   haze: ['haze', 'haze'],

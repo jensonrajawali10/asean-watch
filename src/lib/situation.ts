@@ -1034,6 +1034,7 @@ function asmcCitation(): Citation {
 const HAZARD_NAMES: Record<WarningHazard, string> = {
   tsunami: 'Tsunami',
   volcano: 'Volcano',
+  ash: 'Volcanic ash advisory (aviation)',
   earthquake: 'Earthquake',
   flood: 'Flood',
   haze: 'Haze',

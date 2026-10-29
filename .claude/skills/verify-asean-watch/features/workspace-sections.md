@@ -34,3 +34,4 @@ Preconditions:
 - On a phone the sheet covers the map and the cards. Any section action that should show something on the map must close the sheet on phones ("Play ash scenario" and every "Fly to" row do).
 - Sections fill in from live feeds after they open; the step waits for network idle up to 5 s, then screenshots what is there.
 - Warnings text is copied word for word from the agencies, in their languages. Never assert translated wording.
+- The Warnings step also checks for our note on volcanic ash advisories ("Volcanic ash advisories are for aviation ..."), which says Tokyo VAAC's are listed and VAAC Darwin is linked only.

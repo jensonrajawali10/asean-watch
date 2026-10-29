@@ -24,6 +24,8 @@ import VolcanoCard from './VolcanoCard';
 import type { FirePick } from './fireLayers';
 import type { HazeHour } from './useHazeHour';
 import type { OfficialVolcanoLevel } from './volcanoLevels';
+import { findAshAdvisory } from '../../lib/volcanoOfficial';
+import { VAA_AVIATION_NOTE } from '../../lib/vaac';
 
 export interface MapCardsProps {
   selection: MapSelection | null;
@@ -108,6 +110,7 @@ export default function MapCards(p: MapCardsProps) {
         watch={incident}
         name={name}
         level={p.levels[incident.id] ?? null}
+        ashAdvisory={findAshAdvisory(p.warnings, incident)}
         scenario={p.scenario && p.scenario.volcanoId === incident.volcanoId ? p.scenario : null}
         nowMs={p.anchorMs}
         ashWind={p.ashWind}
@@ -185,6 +188,7 @@ function WarningCard({ w, onClose, onInspect, onOpenWorkspace }: { w: OfficialWa
         {w.headline.trim()}
       </p>
       <p className="warning-card__meta">{w.issuedAt ? <>Issued {formatUtc(w.issuedAt)}</> : <>No issue time published</>}</p>
+      {w.hazard === 'ash' && <p className="warning-card__meta">{VAA_AVIATION_NOTE}</p>}
       <p className="warning-card__links">
         <ExternalLink href={w.issuerUrl}>{estimate ? `Open ${w.issuer}` : `Follow ${w.issuer}`}</ExternalLink>
         <button type="button" className="link-button" onClick={onInspect}>

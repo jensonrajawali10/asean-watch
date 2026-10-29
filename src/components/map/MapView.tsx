@@ -556,6 +556,8 @@ export default function MapView({
     () =>
       (warnings ?? [])
         .filter((w) => w.location && Number.isFinite(w.location.lat) && Number.isFinite(w.location.lon))
+        // Ash advisories are aviation products, not warnings: listed in the workspace, not pinned as warnings.
+        .filter((w) => w.hazard !== 'ash')
         .filter((w) => !isExpired(w, nowMs) || w.id === selectedWarningId)
         .filter((w) => !levelWarningIds.has(w.id) || w.id === selectedWarningId)
         .sort(compareWarningMarkers)

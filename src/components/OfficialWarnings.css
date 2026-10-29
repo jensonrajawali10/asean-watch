@@ -179,8 +179,23 @@
 }
 
 .ow-item--estimate .ow-instruction > p,
-.ow-item--ended .ow-instruction > p {
+.ow-item--ended .ow-instruction > p,
+.ow-item--ended .ow-fulltext {
   border-color: var(--border);
+}
+
+/* A whole message as issued (VAAC advisories): the issuer's own line breaks, in mono. */
+.ow-fulltext {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--official-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .ow-actions {

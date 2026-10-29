@@ -104,6 +104,7 @@ The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). The UX rules 
 | Volcano identity and summit points | Smithsonian Global Volcanism Program | Catalog | Watch-area centres |
 | Workflow state | Stated watch rules in `src/lib/watchRules.ts` | Derived | Analyst prompt, not an alert level |
 | Official warnings | BMKG, JMA, GeoNet, US NWS, ThaiWater, Jakarta DSDA, PUB Singapore | LIVE if fetched this session, else HISTORICAL | Relayed verbatim; never changes a workflow state |
+| Volcanic ash advisories | Tokyo VAAC (JMA), through `/api/vaac`; VAAC Darwin linked only | LIVE if fetched this session, else HISTORICAL | Aviation products, not public warnings; text verbatim; the last 24 hours only |
 | Volcano levels | PVMBG via MAGMA Indonesia (Merapi, Semeru, Anak Krakatau, Sinabung at Level III) | HISTORICAL, recorded 2026-10-13 06:52 UTC | Relayed verbatim beside the watch, linked to MAGMA |
 | Impact estimates | GDACS | LIVE or HISTORICAL | Aggregator; labelled as an estimate, not a warning |
 | Wind and haze | NEA Singapore via data.gov.sg | LIVE or HISTORICAL SNAPSHOT | Context only; shown for Riau (within 600 km of Singapore) |
@@ -120,7 +121,7 @@ The timed script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md). The UX rules 
 
 ## Architecture
 
-There is no database. The site is static, with a few Vercel functions that relay feeds browsers cannot call directly, and it calls no AI service. `api/ptwc.ts` proxies PTWC's feed. `api/open-meteo.ts` relays the four Open-Meteo model feeds (wind, CAMS PM2.5, summit winds, GloFAS) with the two wind levels in one request, cached at the Vercel CDN, so visitors' browsers never hit Open-Meteo's per-IP rate limit. `api/dsda.ts` relays Jakarta DSDA's floodgate XML, because browsers reject DSDA's certificate; it keeps TLS verification on, so the app shows the HISTORICAL snapshot until DSDA fixes the certificate. `api/sg.ts` relays the five data.gov.sg feeds (NEA wind, PSI and PM2.5, PUB flood alerts), cached for a minute or two at the Vercel CDN: data.gov.sg allows only a few keyless requests a second per IP, and its 429 reached the browser as a CORS error. The UI is a full-screen MapLibre and deck.gl map (`src/components/map/`), a taskbar and workspace drawer (`src/components/shell/`) and the workspace sections (`src/components/analyst/`). Data flow:
+There is no database. The site is static, with a few Vercel functions that relay feeds browsers cannot call directly, and it calls no AI service. `api/ptwc.ts` proxies PTWC's feed. `api/open-meteo.ts` relays the four Open-Meteo model feeds (wind, CAMS PM2.5, summit winds, GloFAS) with the two wind levels in one request, cached at the Vercel CDN, so visitors' browsers never hit Open-Meteo's per-IP rate limit. `api/dsda.ts` relays Jakarta DSDA's floodgate XML, because browsers reject DSDA's certificate; it keeps TLS verification on, so the app shows the HISTORICAL snapshot until DSDA fixes the certificate. `api/vaac.ts` relays the Tokyo VAAC ash advisory list and the text pages it links, cached for ten minutes. `api/sg.ts` relays the five data.gov.sg feeds (NEA wind, PSI and PM2.5, PUB flood alerts), cached for a minute or two at the Vercel CDN: data.gov.sg allows only a few keyless requests a second per IP, and its 429 reached the browser as a CORS error. The UI is a full-screen MapLibre and deck.gl map (`src/components/map/`), a taskbar and workspace drawer (`src/components/shell/`) and the workspace sections (`src/components/analyst/`). Data flow:
 
 ```
 refresh scripts → data/real/*.json, data/watches.json (snapshot, bundled at build)
@@ -168,10 +169,11 @@ The workflow state counts distinct evidence categories among the flagged records
 - Levels are never re-scored, merged, translated on the fly, or restyled as workflow states. Official items have their own style.
 - A failed feed reads "Official feed unavailable: check <issuer> directly". An empty list says it is not an all-clear. Expired or ended messages are labelled.
 - GDACS is an aggregator. Its items are labelled as impact estimates, not warnings.
+- Volcanic Ash Advisories (Tokyo VAAC) are aviation products and say so on every card. VAAC Darwin, which covers Indonesia, is linked only: the Bureau of Meteorology's terms do not allow automated access or passing its text on.
 
 ## Data and attribution
 
-NASA FIRMS (LANCE/ESDIS) hotspots; U.S. Geological Survey earthquakes (public domain); "Sumber data: BMKG" (required by BMKG's terms); Smithsonian Institution Global Volcanism Program catalog; PVMBG/MAGMA Indonesia levels (all rights reserved by MAGMA; recorded and linked, not redistributed in bulk); JMA (Public Data License v1.0); GeoNet (CC BY 3.0 NZ); US National Weather Service; GDACS; ThaiWater (Hydro-Informatics Institute, RID gauges); Dinas Sumber Daya Air DKI Jakarta; PUB and NEA via data.gov.sg (Singapore Open Data Licence v1.0); Natural Earth boundaries (public domain) via `world-atlas`. The full attribution texts are in `data/SOURCES.md` and [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md).
+NASA FIRMS (LANCE/ESDIS) hotspots; U.S. Geological Survey earthquakes (public domain); "Sumber data: BMKG" (required by BMKG's terms); Smithsonian Institution Global Volcanism Program catalog; PVMBG/MAGMA Indonesia levels (all rights reserved by MAGMA; recorded and linked, not redistributed in bulk); JMA, including Tokyo VAAC advisories (Public Data License v1.0, source cited); GeoNet (CC BY 3.0 NZ); US National Weather Service; GDACS; ThaiWater (Hydro-Informatics Institute, RID gauges); Dinas Sumber Daya Air DKI Jakarta; PUB and NEA via data.gov.sg (Singapore Open Data Licence v1.0); Natural Earth boundaries (public domain) via `world-atlas`. The full attribution texts are in `data/SOURCES.md` and [docs/DATA_AND_LIMITATIONS.md](docs/DATA_AND_LIMITATIONS.md).
 
 ## Documentation
 

@@ -160,6 +160,21 @@ export const UPDATE_INTERVALS: readonly UpdateInterval[] = [
     kind: 'feed',
   },
   {
+    id: 'vaac-tokyo',
+    source: 'Tokyo VAAC volcanic ash advisories (through /api/vaac)',
+    usually: 'every 5 min',
+    everyMs: 5 * MINUTE_MS,
+    graceMs: 55 * MINUTE_MS,
+    clock: 'the time the relay built its copy from the Tokyo VAAC pages',
+    why:
+      'Tokyo VAAC issues an advisory when there is ash, so days without one are normal. What is checked is that the relay ' +
+      "answers with a fresh build: it rebuilds from JMA's pages every 10 min (JMA caches them for 10 min too) and this page " +
+      'asks every 5 min, so an hour is several missed rebuilds in a row. While JMA fails the relay serves its last build for ' +
+      'up to 6 h, and that build ages here.',
+    docUrl: null,
+    kind: 'feed',
+  },
+  {
     id: 'magma-copy',
     source: 'PVMBG MAGMA Indonesia volcano levels (recorded copy)',
     usually: 'every 6 h',
@@ -186,6 +201,7 @@ export function intervalById(id: string): UpdateInterval | null {
  */
 export function intervalForSource(sourceId: string): UpdateInterval | null {
   if (sourceId === 'feed:magma-level-list') return intervalById('magma-copy');
+  if (sourceId === 'feed:vaac-tokyo') return intervalById('vaac-tokyo');
   if (sourceId.startsWith('feed:')) return intervalById('official-feed');
   if (sourceId === 'nea') return intervalById('nea-haze');
   if (sourceId === 'cams') return intervalById('cams-pm25');
