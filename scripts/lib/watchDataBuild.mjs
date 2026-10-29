@@ -8,6 +8,13 @@ const WINDOW_DAYS = 7;
 /** Collection margins. The watch rules (5 km thermal, 30 km seismic) must stay inside these. */
 const COLLECT_THERMAL_RADIUS_KM = 10;
 const COLLECT_SEISMIC_RADIUS_KM = 50;
+/**
+ * Haze boxes: rows kept per satellite per UTC day, highest fire radiative power first. In a heavy fire
+ * season one box can hold thousands of hotspots a day (the Central Kalimantan box had 19,861 in the four
+ * FIRMS files on 22 Oct 2026),
+ * so the rest are counted in hazeDayTotals instead of kept, and the snapshot stays inside its budget.
+ */
+const HAZE_KEEP_PER_SATELLITE_DAY = 10;
 const SIZE_BUDGET_BYTES = 300 * 1024;
 const USER_AGENT = 'asean-watch refresh-data script (open-data snapshot for a prototype)';
 
@@ -140,6 +147,60 @@ function nearAnyArea(areas, bounds, lat, lon, radiusKm) {
     if (a.kind === 'bbox' || haversineKm(a.lat, a.lon, lat, lon) <= radiusKm) return true;
   }
   return false;
+}
+
+/**
+ * Inside each haze box, keeps at most HAZE_KEEP_PER_SATELLITE_DAY rows per satellite per UTC day (highest
+ * fire radiative power first). A satellite-day over the limit gets one daily total of every row in the box:
+ * counts and summed FRP per confidence value as given, and the detection times, so the watch rule still
+ * counts every hotspot. Rows near a volcano summit, or kept for another box, are always kept. No rule
+ * decisions here: confidence values are counted as given.
+ */
+function capHazeRows(areas, rows) {
+  const keep = new Set();
+  const capped = [];
+  for (const a of areas) {
+    if (a.kind !== 'bbox') continue;
+    const groups = new Map();
+    for (const r of rows) {
+      if (!inBox(a, r.latitude, r.longitude)) continue;
+      const key = `${r.satellite}|${r.acq_date}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    for (const list of groups.values()) {
+      const strongest = list.length <= HAZE_KEEP_PER_SATELLITE_DAY ? list : [...list].sort((x, y) => y.frp - x.frp).slice(0, HAZE_KEEP_PER_SATELLITE_DAY);
+      for (const r of strongest) keep.add(r);
+      if (list.length > HAZE_KEEP_PER_SATELLITE_DAY) capped.push({ watchId: a.id, list });
+    }
+  }
+  const summits = areas.filter((a) => a.kind === 'summit');
+  const kept = rows.filter(
+    (r) =>
+      keep.has(r) ||
+      !areas.some((a) => a.kind === 'bbox' && inBox(a, r.latitude, r.longitude)) ||
+      summits.some((s) => haversineKm(s.lat, s.lon, r.latitude, r.longitude) <= COLLECT_THERMAL_RADIUS_KM),
+  );
+  const keptSet = new Set(kept);
+  const hazeDayTotals = capped.map(({ watchId, list }) => {
+    const confidence = {};
+    for (const r of list) {
+      const c = (confidence[String(r.confidence)] ??= [0, 0]);
+      c[0] += 1;
+      c[1] += r.frp;
+    }
+    for (const c of Object.values(confidence)) c[1] = Math.round(c[1] * 100) / 100;
+    return {
+      watchId,
+      satellite: list[0].satellite,
+      date: list[0].acq_date,
+      rows: list.length,
+      kept: list.filter((r) => keptSet.has(r)).length,
+      confidence,
+      times: [...new Set(list.map((r) => r.acq_time))].sort(),
+    };
+  });
+  return { kept, hazeDayTotals: sortRows(hazeDayTotals, (t) => `${t.watchId}|${t.date}|${t.satellite}`) };
 }
 
 // ---------------------------------------------------------------------------
@@ -465,9 +526,11 @@ async function fetchBmkg(ctx) {
 // ---------------------------------------------------------------------------
 // Output
 
-function rowsFile(about, rows) {
-  const body = rows.map((r) => `    ${JSON.stringify(r)}`).join(',\n');
-  return `{\n  "about": ${JSON.stringify(about)},\n  "rows": [\n${body}${rows.length ? '\n' : ''}  ]\n}\n`;
+/** `{ about, rows, ...lists }` with one record per line. */
+function rowsFile(about, rows, lists = {}) {
+  const block = (name, list) => `  ${JSON.stringify(name)}: [\n${list.map((r) => `    ${JSON.stringify(r)}`).join(',\n')}${list.length ? '\n' : ''}  ]`;
+  const blocks = [block('rows', rows), ...Object.entries(lists).map(([name, list]) => block(name, list))];
+  return `{\n  "about": ${JSON.stringify(about)},\n${blocks.join(',\n')}\n}\n`;
 }
 
 function sortRows(rows, keyFn) {
@@ -479,7 +542,11 @@ function sortRows(rows, keyFn) {
 }
 
 
-export const FIRMS_ABOUT = 'NASA FIRMS hotspot rows near the watch areas; columns as in the FIRMS CSVs, plus "file" (which CSV).';
+export const FIRMS_ABOUT =
+  'NASA FIRMS hotspot rows near the watch areas; columns as in the FIRMS CSVs, plus "file" (which CSV). ' +
+  `Inside a haze box at most ${HAZE_KEEP_PER_SATELLITE_DAY} rows per satellite per UTC day are kept (highest frp first); ` +
+  'a satellite-day with more has a "hazeDayTotals" entry counting every row in the box: per confidence value as given, ' +
+  '[rows, summed frp], plus the detection times.';
 export const QUAKES_ABOUT =
   'USGS and BMKG earthquake rows near the watch areas, one row per product; duplicates across agencies and products are kept on purpose.';
 export const utf8Bytes = (text) => new TextEncoder().encode(text).length;
@@ -519,10 +586,18 @@ export async function buildWatchData({ watches, fetchImpl = fetch, now = Date.no
     fetchBmkg(ctx),
   ]);
 
-  const firmsRows = sortRows(
-    firmsResults.flatMap((r) => r.rows),
-    (r) => `${r.acq_date}T${r.acq_time}|${r.file}|${r.latitude.toFixed(5)}|${r.longitude.toFixed(5)}`,
+  const { kept: firmsRows, hazeDayTotals } = capHazeRows(
+    areas,
+    sortRows(
+      firmsResults.flatMap((r) => r.rows),
+      (r) => `${r.acq_date}T${r.acq_time}|${r.file}|${r.latitude.toFixed(5)}|${r.longitude.toFixed(5)}`,
+    ),
   );
+  for (const { source } of firmsResults) {
+    const collected = source.rowsKept;
+    source.rowsKept = firmsRows.filter((r) => `firms-${r.file}` === source.id).length;
+    source.rowsCountedNotKept = collected - source.rowsKept;
+  }
   const quakeRows = sortRows([...usgs.rows, ...bmkg.rows], (r) => `${r.time}|${r.source}|${r.product}|${r.eventId ?? ''}`);
   const sources = [...firmsResults.map((r) => r.source), usgs.source, ...bmkg.sources];
 
@@ -536,16 +611,19 @@ export async function buildWatchData({ watches, fetchImpl = fetch, now = Date.no
     collection: {
       thermalRadiusKm: COLLECT_THERMAL_RADIUS_KM,
       seismicRadiusKm: COLLECT_SEISMIC_RADIUS_KM,
+      hazeKeepPerSatelliteDay: HAZE_KEEP_PER_SATELLITE_DAY,
       note:
         'Rows were kept within these distances of each volcano summit point, or inside each haze box, and inside the window. ' +
-        'The watch rules use smaller radii and drop the rest.',
+        'The watch rules use smaller radii and drop the rest. Inside a haze box at most hazeKeepPerSatelliteDay rows per ' +
+        'satellite per UTC day are kept, highest fire radiative power first; firms.json hazeDayTotals counts every row of a ' +
+        'satellite-day over that limit (rowsCountedNotKept per FIRMS file).',
     },
     sources,
     checks: bmkg.check,
   };
 
   const files = {
-    firms: rowsFile(FIRMS_ABOUT, firmsRows),
+    firms: rowsFile(FIRMS_ABOUT, firmsRows, { hazeDayTotals }),
     quakes: rowsFile(QUAKES_ABOUT, quakeRows),
     meta: `${JSON.stringify(meta, null, 2)}\n`,
   };
@@ -557,7 +635,7 @@ export async function buildWatchData({ watches, fetchImpl = fetch, now = Date.no
   const updatedWatches = watches.map((w) => ({ ...w, scenarioWindow }));
   return {
     files,
-    firms: { about: FIRMS_ABOUT, rows: firmsRows },
+    firms: { about: FIRMS_ABOUT, rows: firmsRows, hazeDayTotals },
     quakes: { about: QUAKES_ABOUT, rows: quakeRows },
     meta,
     scenarioWindow,

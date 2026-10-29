@@ -100,7 +100,7 @@ export default function MapCards(p: MapCardsProps) {
     return card ?? <LoadingCard title="Fires" onClose={close} what="this fire cluster (it is not in the current snapshot)" />;
   }
 
-  // A watch area: a volcano, or the Riau haze watch box.
+  // A watch area: a volcano, or a haze watch box (Riau, Central Kalimantan).
   const incident = p.incidents.find((i) => i.id === sel.id) ?? null;
   if (!incident) return <LoadingCard title="Watch area" onClose={close} what={`a watch area called "${sel.id}"`} />;
   const name = p.placeNames[incident.id] ?? incident.title;
@@ -121,7 +121,7 @@ export default function MapCards(p: MapCardsProps) {
       />
     );
   }
-  // The haze watch box (Riau): the fire cluster there, else its province, from the whole-region snapshot.
+  // A haze watch box: the fire cluster at its marker, else its province, from the whole-region snapshot.
   const snap = p.fireSnapshot;
   if (snap) {
     const cluster = clusterAt(snap, incident.lat, incident.lon);

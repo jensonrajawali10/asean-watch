@@ -107,17 +107,17 @@ describe('GET /api/open-meteo (cached Open-Meteo relay)', () => {
     expect(up.calls).toHaveLength(1);
   });
 
-  it('after a 429 it leaves that host alone for 5 minutes and answers 503 when it has no copy', async () => {
+  it('after a 429 it leaves that host alone for 5 minutes and answers 200 { available: false } when it has no copy', async () => {
     const up = upstream(() => new Response('{"error":true,"reason":"Minutely API request limit exceeded"}', { status: 429 }));
     const res = await handleOpenMeteoRequest(req('/api/open-meteo?feed=wind'), ctx(up.fn));
-    expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'upstream_unavailable', message: OPEN_METEO_UNAVAILABLE_MESSAGE });
-    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ available: false, feed: 'wind', error: 'upstream_unavailable', message: OPEN_METEO_UNAVAILABLE_MESSAGE, retryAfterSeconds: 300 });
+    expect(res.headers.get('cache-control')).toBe('public, max-age=30, s-maxage=30');
     expect(res.headers.get('retry-after')).toBe('300');
     expect(logs.join('\n')).toContain('upstream HTTP 429');
     // Same host (api.open-meteo.com): the ash feed waits too; the other hosts do not.
     clock = T0 + OPEN_METEO_BACKOFF_MS - 1000;
-    expect((await handleOpenMeteoRequest(req('/api/open-meteo?feed=ash'), ctx(up.fn))).status).toBe(503);
+    expect(await (await handleOpenMeteoRequest(req('/api/open-meteo?feed=ash'), ctx(up.fn))).json()).toMatchObject({ available: false, feed: 'ash' });
     expect(up.calls).toHaveLength(1);
     const other = upstream(okFor);
     expect((await handleOpenMeteoRequest(req('/api/open-meteo?feed=aq'), ctx(other.fn))).status).toBe(200);
@@ -149,7 +149,9 @@ describe('GET /api/open-meteo (cached Open-Meteo relay)', () => {
     await handleOpenMeteoRequest(req('/api/open-meteo?feed=aq'), ctx(down.fn));
     expect(down.calls).toHaveLength(1);
     clock = T0 + OPEN_METEO_STALE_MAX_MS;
-    expect((await handleOpenMeteoRequest(req('/api/open-meteo?feed=aq'), ctx(down.fn))).status).toBe(503);
+    const gone = await handleOpenMeteoRequest(req('/api/open-meteo?feed=aq'), ctx(down.fn));
+    expect(gone.status).toBe(200);
+    expect(await gone.json()).toMatchObject({ available: false, feed: 'aq' });
   });
 
   it('never caches an answer of the wrong shape, and keeps upstream detail out of the response', async () => {
@@ -162,8 +164,9 @@ describe('GET /api/open-meteo (cached Open-Meteo relay)', () => {
     for (const reply of cases) {
       resetOpenMeteoProxyState();
       const res = await handleOpenMeteoRequest(req('/api/open-meteo?feed=wind'), ctx(upstream(() => reply).fn));
-      expect(res.status).toBe(503);
+      expect(res.status).toBe(200);
       const text = await res.text();
+      expect(JSON.parse(text)).toMatchObject({ available: false, feed: 'wind' });
       expect(text).not.toMatch(/WeatherVariable|latitude|html|timeout/i);
     }
     expect(logs.some((l) => l.includes('upstream HTTP 400'))).toBe(true);

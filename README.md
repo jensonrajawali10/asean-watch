@@ -70,7 +70,7 @@ Offline, the app runs entirely from the bundled snapshots. When it is online, th
 
 | Command | What it does |
 |---|---|
-| `npm run refresh:data` | Downloads the four FIRMS 7-day South East Asia CSVs (about 26 MB in total), the USGS query and the three BMKG lists. It keeps rows near the watch areas and writes `data/real/*.json`. All or nothing: if any source fails, nothing is written. |
+| `npm run refresh:data` | Downloads the four FIRMS 7-day South East Asia CSVs (about 26 MB in total), the USGS query and the three BMKG lists. It keeps rows near the watch areas (inside a haze box, the 10 strongest per satellite per day plus a daily total that counts them all) and writes `data/real/*.json`. All or nothing: if any source fails, nothing is written. |
 | `npm run refresh:warnings` | Captures the official-warning feeds to `data/warnings-snapshot.json`. If a feed fails, its previous entry is kept. If every feed fails, nothing is written and the command exits with an error. |
 | `npm run refresh:nea` | Captures NEA wind, PSI and PM2.5 to `data/nea-snapshot.json`. All or nothing. |
 | `npm run refresh:fires` | Downloads the same four FIRMS CSVs for the whole region and writes `data/fires-snapshot.json`: the 0.25° fire-power grid, country and province rollups, and the top clusters. Run it daily so week-over-week comparisons build up. |
@@ -138,7 +138,7 @@ Official warnings and NEA context never enter `deriveReview`. The app component 
 | File or module | Responsibility |
 |---|---|
 | `src/types.ts` | Shared data contract |
-| `data/watches.json` | The five watch areas: centre, summit radius or haze box, reference links |
+| `data/watches.json` | The six watch areas: centre, summit radius or haze box, reference links |
 | `data/volcanoes.json` | Smithsonian GVP catalog entries for the four volcanoes |
 | `data/real/firms.json`, `quakes.json`, `meta.json` | The snapshot: kept rows, and per-source URL, retrieval time, Last-Modified, row counts and attribution |
 | `data/warnings-snapshot.json`, `data/nea-snapshot.json` | Raw official-warning and NEA payloads, used as offline fallbacks |
@@ -158,7 +158,7 @@ Official warnings and NEA context never enter `deriveReview`. The app component 
 These illustrative watch rules mark a record as an anomaly. They are not official thresholds:
 
 - **Thermal, volcano:** a FIRMS hotspot within 5 km of the GVP summit point, with VIIRS confidence nominal or high, or MODIS confidence 50 or more.
-- **Thermal, haze box:** 10 or more confident hotspots from one sensor on one UTC day inside the Riau box.
+- **Thermal, haze box:** 10 or more confident hotspots from one sensor on one UTC day inside the Riau or Central Kalimantan box.
 - **Seismic:** a USGS or BMKG earthquake of M 3.0 or more within 30 km of the summit, or inside the box. USGS and BMKG reports of the same event are both shown and never merged.
 
 The workflow state counts distinct evidence categories among the flagged records visible up to the current day. None gives **Monitoring**, one gives **Check observation**, and two or more give **Review needed**. A repeat from the same category is shown but not counted as independent corroboration. These states tell an analyst where to look. They say nothing about the likelihood of an eruption or a fire, and they are never worded as "evacuate".

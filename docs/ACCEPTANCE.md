@@ -4,7 +4,7 @@ The single scope list. If a request is not on this list, it waits until after th
 
 ## Workflow (what the demo must show)
 
-- [ ] Open the APAC view: map, five watch areas (Merapi, Semeru, Anak Krakatau, Sinabung, Riau peatlands), the data-recency banner ("Data as of <time> UTC"), and the official warnings panel.
+- [ ] Open the APAC view: map, six watch areas (Merapi, Semeru, Anak Krakatau, Sinabung, Riau peatlands, Central Kalimantan peatlands), the data-recency banner ("Data as of <time> UTC"), and the official warnings panel.
 - [ ] Select Merapi from the map or the watch list: both selections show the same watch, and nearby markers (Semeru, Krakatau) never steal the click.
 - [ ] Step through the real 7 days with Next step (or Play): FIRMS overpass records appear day by day with real UTC times and sources; the workflow state matches the data (currently Check observation, thermal only).
 - [ ] Open "Why this state?": it states the watch rule (illustrative, not an official threshold) and why each record was or was not counted.

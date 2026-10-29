@@ -152,8 +152,14 @@ function TransportBlock({ t, onFlyTo }: { t: TransportSummary; onFlyTo?: (lat: n
                     {r.endReason !== 'complete' && ` · stopped after ${Math.round(r.hours)} h (${r.endReason === 'grid-edge' ? 'left the wind grid' : 'end of wind data'})`}
                   </span>
                 </td>
-                <td className="an-num">{r.hotspots.toLocaleString('en-US')}</td>
-                <td className="an-num">{Math.round(r.frpSumMW).toLocaleString('en-US')}</td>
+                <td className="an-num">
+                  {r.countIsLowerBound && 'at least '}
+                  {r.hotspots.toLocaleString('en-US')}
+                </td>
+                <td className="an-num">
+                  {r.countIsLowerBound && 'at least '}
+                  {Math.round(r.frpSumMW).toLocaleString('en-US')}
+                </td>
                 <td>{r.reaches ? `Yes, after about ${Math.round(r.arrivalHours ?? r.hoursToClosest)} h` : 'No'}</td>
                 <td className="an-num">
                   {r.closestKm.toLocaleString('en-US')} km

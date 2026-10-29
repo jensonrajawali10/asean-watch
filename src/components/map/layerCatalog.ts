@@ -73,7 +73,7 @@ export const LAYER_CATALOG: readonly LayerDef[] = [
     key: 'watch',
     label: 'Volcanoes and watch areas',
     chipLabel: 'Volcanoes',
-    explanation: 'The watched volcanoes as triangles, ringed in the colour of the official MAGMA level (shown verbatim on hover), plus the Riau haze watch box.',
+    explanation: 'The watched volcanoes as triangles, ringed in the colour of the official MAGMA level (shown verbatim on hover), plus the Riau and Central Kalimantan haze watch boxes.',
     kind: 'official',
     group: 'Fires and volcanoes',
     chip: true,
