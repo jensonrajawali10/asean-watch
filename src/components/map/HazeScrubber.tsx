@@ -7,6 +7,8 @@ import { useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { PM25_BANDS, pm25Band, worstPlaceByStep } from '../../lib/airQuality';
 import type { AirQualityData, ForecastSteps } from '../../lib/airQuality';
+import { checkAge, intervalById } from '../../lib/staleness';
+import { useNowMs } from '../../lib/useNowMs';
 import './HazeScrubber.css';
 
 export interface HazeScrubberProps {
@@ -43,9 +45,12 @@ function longHour(iso: string): string {
   return `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })} ${iso.slice(11, 16)} UTC`;
 }
 
-/** "now", "now +6 h", "saved run −3 h". A snapshot's anchor is its capture time: never "now". */
-function offsetLabel(offsetH: number, snapshot: boolean): string {
-  const base = snapshot ? 'saved run' : 'now';
+/**
+ * "now", "now +6 h", "saved run −3 h", "older run +3 h". A snapshot's anchor is its capture time, and a live run
+ * past its expected update interval (src/lib/staleness.ts) is an older copy: neither is ever "now".
+ */
+function offsetLabel(offsetH: number, snapshot: boolean, older = false): string {
+  const base = snapshot ? 'saved run' : older ? 'older run' : 'now';
   return offsetH === 0 ? base : `${base} ${signed(offsetH)} h`;
 }
 
@@ -62,6 +67,8 @@ export default function HazeScrubber({ steps, index, onIndexChange, playing, onP
   const n = steps.times.length;
   const last = Math.max(0, n - 1);
   const snapshot = airQuality?.dataMode === 'historical';
+  const nowMs = useNowMs();
+  const older = !snapshot && checkAge(intervalById('cams-pm25'), airQuality?.retrievedAt, nowMs)?.state === 'older';
 
   const worst = useMemo(() => worstPlaceByStep(airQuality, steps.times), [airQuality, steps]);
   // Heights on a log scale between the series' own min and max (floor 15 µg/m³), so hour-to-hour change reads.
@@ -77,7 +84,7 @@ export default function HazeScrubber({ steps, index, onIndexChange, playing, onP
   const time = steps.times[index] ?? '';
   const shown = peek ?? index;
   const readout = worstLine(worst[shown]);
-  const runText = airQuality ? `${snapshot ? 'Saved run' : 'Model run'} ${longHour(airQuality.retrievedAt).replace(/^\w+ /, '')}` : 'Loading the model…';
+  const runText = airQuality ? `${snapshot ? 'Saved run' : older ? 'Older run' : 'Model run'} ${longHour(airQuality.retrievedAt).replace(/^\w+ /, '')}` : 'Loading the model…';
 
   const onBarKey = (e: KeyboardEvent<HTMLButtonElement>, k: number) => {
     const to = e.key === 'ArrowRight' ? k + 1 : e.key === 'ArrowLeft' ? k - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? last : null;
@@ -116,7 +123,7 @@ export default function HazeScrubber({ steps, index, onIndexChange, playing, onP
           {snapshot && <span className="hscrub__tag is-saved">SAVED</span>}
         </h2>
         <p className="hscrub__time" aria-live="polite">
-          <time dateTime={time}>{time ? longHour(time) : '—'}</time> <span className="hscrub__offset">· {offsetLabel(offset, snapshot)}</span>
+          <time dateTime={time}>{time ? longHour(time) : '—'}</time> <span className="hscrub__offset">· {offsetLabel(offset, snapshot, older)}</span>
         </p>
         {!compact && <p className="hscrub__readout">{readout}</p>}
       </div>
@@ -169,7 +176,7 @@ export default function HazeScrubber({ steps, index, onIndexChange, playing, onP
           value={index}
           onChange={(e) => onIndexChange(Number(e.currentTarget.value))}
           aria-label="Forecast hour, 3-hourly steps"
-          aria-valuetext={`${offsetLabel(offset, snapshot)}, ${time ? longHour(time) : ''}`}
+          aria-valuetext={`${offsetLabel(offset, snapshot, older)}, ${time ? longHour(time) : ''}`}
           disabled={n < 2}
           style={{ '--fill': `${n > 1 ? (index / last) * 100 : 0}%` } as CSSProperties}
         />
@@ -177,10 +184,10 @@ export default function HazeScrubber({ steps, index, onIndexChange, playing, onP
           <span>{signed(steps.offsetsH[0] ?? 0)} h</span>
           {index !== steps.nowIndex ? (
             <button type="button" className="hscrub__jump" onClick={() => onIndexChange(steps.nowIndex)}>
-              {snapshot ? 'Back to the run' : 'Back to now'}
+              {snapshot || older ? 'Back to the run' : 'Back to now'}
             </button>
           ) : (
-            <span className="hscrub__nowword">{snapshot ? 'saved run' : 'now'}</span>
+            <span className="hscrub__nowword">{snapshot ? 'saved run' : older ? 'older run' : 'now'}</span>
           )}
           <span>{signed(steps.offsetsH[last] ?? 0)} h</span>
         </div>

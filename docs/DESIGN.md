@@ -264,6 +264,7 @@ Decided 15 October 2026. Overlay colours are not CSS tokens: every colour the ma
 | Official | `OFFICIAL · <issuer>` label; verbatim level chip; ENDED | **square** chip, uppercase verbatim, 4 px red-ink rail | `--official` only | issuer name, issued time, "Follow <issuer> ↗" |
 | Impact estimate | `IMPACT ESTIMATE · GDACS (aggregator)` | dashed grey rail, no chip fill | `--estimate` | "not a warning" in the label |
 | Context | NEA Singapore readings | plain card with a neutral 3 px rail | neutral | "Context only; does not change the review state" |
+| Age (2026-10-30) | OLDER THAN EXPECTED · FEED QUIET | rounded 4 px, **dashed** outline, ink text (the "Not counted" cue) | none of its own: `--text` and `--border-strong` | the sentence with the age and the usual interval; for feeds, "Check <issuer> directly" (`src/lib/staleness.ts`) |
 
 Test for confusion: cover the colours. Each family is still identifiable by shape (rounded vs square), case (sentence vs uppercase vs verbatim) and the words next to it.
 

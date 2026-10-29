@@ -102,3 +102,32 @@ describe('AppHeader alerts pill on phones', () => {
     expect(html).toContain('<span class="alerts-pill__count">47</span><span class="alerts-pill__short" aria-hidden="true">messages</span>');
   });
 });
+
+describe('AppHeader older-than-expected chip', () => {
+  const render = (older: { text: string; short: string } | null) =>
+    renderToStaticMarkup(
+      createElement(AppHeader, {
+        headline: 'Older model run, Thu 29 Oct, 18:00 UTC: x.',
+        timeLabel: 'Thu 29 Oct 18:00 UTC',
+        timeISO: '2026-10-29T18:00:00Z',
+        freshness: { mode: 'LIVE', run: '29 Oct 20:16 UTC', older },
+        alerts: { count: 0, urgent: false, label: 'official messages in force' },
+        onAlerts: () => {},
+        workspaceOpen: false,
+        onWorkspace: () => {},
+      }),
+    );
+
+  it('shows the sentence in a dashed chip beside the forecast chip, with a short form for phones', () => {
+    const html = render({ text: 'Older than expected: last update 20 h ago, usually every 12 h.', short: 'Older than expected · 20 h' });
+    expect(html).toContain('class="fresh-chip is-older" title="Older than expected: last update 20 h ago, usually every 12 h."');
+    expect(html).toContain('<span class="fresh-chip__older-long">Older than expected: last update 20 h ago, usually every 12 h.</span>');
+    expect(html).toContain('<span class="fresh-chip__older-short" aria-hidden="true">Older than expected · 20 h</span>');
+    // The run chip itself is unchanged.
+    expect(html).toContain('fresh-chip is-live');
+  });
+
+  it('shows nothing extra while the forecast is within its interval', () => {
+    expect(render(null)).not.toContain('is-older');
+  });
+});

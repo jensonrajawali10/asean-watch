@@ -109,6 +109,12 @@ Jenson: "make it all real data". Simulated fixtures are retired. Everything show
 - **Snapshot and live.** `npm run refresh:data` (`scripts/refresh-data.mjs`) downloads, filters and writes `data/real/*.json` with `retrievedAt`. The app uses that snapshot (`dataMode: "historical"`, "Data as of <time> UTC") and works offline. In the app, NEA and the official warning feeds (warnings.ts) also refresh live when online; The whole-region fire view (`data/fires-snapshot.json`) is replaced by the `/api/fires` relay build when it answers (labelled LIVE with its fetch time; the bundled copy stays SNAPSHOT); the watch-area evidence (`data/real/*.json`) is likewise replaced by the `/api/watch` relay build (`src/lib/watchLive.ts`): every record from it is LIVE, with the build's fetch time and its own 7-day window; the bundled copy stays HISTORICAL. Snapshots are bundled at build time, so rebuild after `npm run refresh:all`.
 - **Banner:** "DEMO REPLAY" becomes a data-recency banner, e.g. "Real data · satellite snapshot <time> UTC · official warnings relayed verbatim · not an official warning service".
 
+## Stale data (2026-10-30)
+
+- Every source with a time has an expected update interval and an allowance in one table, `UPDATE_INTERVALS` in `src/lib/staleness.ts`, mirrored in `docs/DATA_AND_LIMITATIONS.md` ("Expected update intervals"). Ages are measured only against the page clock the caller passes in (`useNowMs`); without it nothing is judged.
+- Data past its interval reads "Older than expected: last update <age> ago, usually <interval>." An official feed with no answer for an hour reads "Feed quiet for <age>: no update has reached this page, so messages may be missing. Check <issuer> directly." Quiet is counted from the feed's last live answer on the page (`WarningFeedStatus.lastAnswerAt`). It is never called while the feed is being asked again. An unavailable feed keeps "Official feed unavailable: check <issuer> directly".
+- Neither flag is ever an all-clear or an alert level. Both use words in a dashed neutral outline, never the official red or a review-state colour. A forecast run past its interval is not described as "now", just like a snapshot.
+
 ## Map v2 (2026-10-14)
 
 - **Map engine:** MapLibre GL + deck.gl (`src/components/map/MapView.tsx`). Basemaps: CARTO Dark Matter (default; CARTO's free basemaps are for non-commercial use within their view limits, attribution "© CARTO © OpenStreetMap contributors"), OpenFreeMap positron (light option). Offline: a local outline style from `data/region.geojson`.
