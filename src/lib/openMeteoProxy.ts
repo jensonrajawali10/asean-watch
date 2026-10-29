@@ -12,8 +12,9 @@
 //   so TTLs are 2 h (6 h for river flow).
 // - After a 429 from an Open-Meteo host, that host is not asked again for 5 minutes (or its Retry-After,
 //   up to an hour). Meanwhile, and on any upstream failure, the last good answer up to 24 h old is
-//   served with stale: true; without one the answer is 503 and the browser shows its bundled snapshot,
-//   labelled HISTORICAL.
+//   served with stale: true; without one the answer is a 200 { available: false } (with Retry-After) and the
+//   browser shows its bundled snapshot, labelled HISTORICAL. Never a non-2xx for an upstream problem, so a
+//   throttled Open-Meteo never prints a console error (as the data.gov.sg relay, src/lib/sgProxy.ts).
 import { AQ_PLACES, buildAqUrl } from './airQuality';
 import { ashWindPoints, buildAshWindUrl } from './ashDrift';
 import { floodApiUrl, NEIGHBOURHOOD, RIVER_POINTS } from './floodModel';
@@ -188,7 +189,11 @@ export async function handleOpenMeteoRequest(request: Request, ctx: OpenMeteoCon
       return answer(relayBody(feed, entry.at, true, entry.text), 'public, max-age=60, s-maxage=60');
     }
     const wait = Math.max(60, Math.ceil((Math.max(hostBackoff.get(host) ?? 0, feedRetryAt.get(feed) ?? 0) - now()) / 1000));
-    return json(503, { error: 'upstream_unavailable', message: OPEN_METEO_UNAVAILABLE_MESSAGE }, { 'cache-control': 'no-store', 'retry-after': String(wait) });
+    return json(
+      200,
+      { available: false, feed, error: 'upstream_unavailable', message: OPEN_METEO_UNAVAILABLE_MESSAGE, retryAfterSeconds: wait },
+      { 'cache-control': 'public, max-age=30, s-maxage=30', 'retry-after': String(wait) },
+    );
   } catch (err) {
     log(`open-meteo: internal error: ${err instanceof Error ? err.message : String(err)}`);
     return json(500, { error: 'internal_error' }, { 'cache-control': 'no-store' });

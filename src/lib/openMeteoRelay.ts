@@ -41,7 +41,10 @@ export function parseOpenMeteoRelay(json: unknown, feed: OpenMeteoFeed): OpenMet
   return { feed, retrievedAt: r.retrievedAt, stale: r.stale === true, raw: r.raw };
 }
 
-/** A non-2xx answer from the relay (429 or 503 carry Retry-After when the relay knows it). */
+/**
+ * The relay could not answer with data: a 200 { available: false } (Open-Meteo is failing and there is no
+ * good copy; read as status 503), or a non-2xx answer (429 or 503 carry Retry-After when the relay knows it).
+ */
 export class OpenMeteoRelayError extends Error {
   status: number;
   retryAfterMs: number | null;
@@ -52,14 +55,19 @@ export class OpenMeteoRelayError extends Error {
   }
 }
 
-/** GET one feed from the relay. Throws OpenMeteoRelayError on a non-2xx answer, Error on a bad one. */
+/** GET one feed from the relay. Throws OpenMeteoRelayError when it has no data (see above), Error on a bad answer. */
 export async function fetchOpenMeteoRelay(feed: OpenMeteoFeed, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<OpenMeteoRelayPayload> {
   const res = await fetchImpl(openMeteoRelayUrl(feed), { signal, headers: { accept: 'application/json' } });
   if (!res.ok) {
     const s = Number(res.headers?.get?.('retry-after'));
     throw new OpenMeteoRelayError(res.status, Number.isFinite(s) && s > 0 ? s * 1000 : null);
   }
-  const payload = parseOpenMeteoRelay(await res.json(), feed);
+  const body: unknown = await res.json();
+  if (typeof body === 'object' && body !== null && (body as { available?: unknown }).available === false) {
+    const s = Number((body as { retryAfterSeconds?: unknown }).retryAfterSeconds);
+    throw new OpenMeteoRelayError(503, Number.isFinite(s) && s > 0 ? s * 1000 : null);
+  }
+  const payload = parseOpenMeteoRelay(body, feed);
   if (!payload) throw new Error('the relay answer was not in the expected shape');
   return payload;
 }
