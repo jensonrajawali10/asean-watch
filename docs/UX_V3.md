@@ -86,7 +86,7 @@ The drawer is 480–560 px on desktop and a full-height sheet on mobile. It has 
    - The FIRMS sensor mix and a methods note: FRP is a proxy for emissions, and CAMS GFAS converts FRP to emissions.
    - A deep link to Fire Emissions Watch.
 4. **Volcanoes.**
-   - The five watch areas.
+   - The watch areas (four volcanoes, two haze boxes).
    - The existing seven-day evidence replay: queue, detail, evidence timeline, replay bar, record inspector, and "Why this state?".
    - Ash-drift numbers for each pressure level.
    - The official level, verbatim.

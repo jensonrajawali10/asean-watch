@@ -27,7 +27,7 @@ import {
   haversineKm,
   utcDayIndex,
 } from './watchRules';
-import type { FirmsRow, Watch } from './watchRules';
+import type { FirmsRow, HazeDayTotal, Watch } from './watchRules';
 
 const fx = loadFixtures();
 const DAY_MS = 86_400_000;
@@ -80,8 +80,8 @@ describe('real snapshot loads cleanly', () => {
 });
 
 describe('watch areas', () => {
-  it('lists the four MAGMA Level III volcanoes and the Riau haze box', () => {
-    expect(fx.watches.map((w) => w.id)).toEqual([...VOLCANO_WATCHES.map(([id]) => id), 'watch-riau-haze']);
+  it('lists the four MAGMA Level III volcanoes and the Riau and Central Kalimantan haze boxes', () => {
+    expect(fx.watches.map((w) => w.id)).toEqual([...VOLCANO_WATCHES.map(([id]) => id), 'watch-riau-haze', 'watch-kalteng-haze']);
     expect(fx.watches.every((w) => w.replayable && w.title.length <= 30)).toBe(true);
   });
 
@@ -116,6 +116,33 @@ describe('watch areas', () => {
     expect(riau.lat).toBeLessThan(riau.area.maxLat);
     expect(riau.lon).toBeGreaterThan(riau.area.minLon);
     expect(riau.lon).toBeLessThan(riau.area.maxLon);
+  });
+
+  it("gives Central Kalimantan the cited study box, about the size of Riau's, with its marker inside", () => {
+    const kalteng = watch('watch-kalteng-haze');
+    const riau = watch('watch-riau-haze');
+    expect(kalteng).toMatchObject({ key: 'kalteng', hazard: 'wildfire', volcanoId: null, replayable: true });
+    // Usup and Hayasaka (2023), Fire 6(5) 182: 1.5 to 3.5 deg S, 113 to 115 deg E.
+    expect(kalteng.area).toEqual({ kind: 'bbox', minLat: -3.5, maxLat: -1.5, minLon: 113, maxLon: 115 });
+    expect(kalteng.references.map((r) => r.url)).toEqual([
+      'https://asmc.asean.org/',
+      'https://www.bmkg.go.id/cuaca/karhutla',
+      'https://www.bmkg.go.id/kualitas-udara/pm25',
+      'https://doi.org/10.3390/fire6050182',
+    ]);
+    if (kalteng.area.kind !== 'bbox' || riau.area.kind !== 'bbox') throw new Error('unreachable');
+    const k = kalteng.area;
+    const r = riau.area;
+    expect(kalteng.lat > k.minLat && kalteng.lat < k.maxLat && kalteng.lon > k.minLon && kalteng.lon < k.maxLon).toBe(true);
+    // Palangka Raya (2.21 deg S, 113.92 deg E) is inside.
+    expect(-2.21 > k.minLat && -2.21 < k.maxLat && 113.92 > k.minLon && 113.92 < k.maxLon).toBe(true);
+    const km2 = (a: typeof k) =>
+      haversineKm(a.minLat, a.minLon, a.maxLat, a.minLon) * haversineKm((a.minLat + a.maxLat) / 2, a.minLon, (a.minLat + a.maxLat) / 2, a.maxLon);
+    expect(km2(k)).toBeGreaterThan(49_000);
+    expect(km2(k)).toBeLessThan(50_000);
+    expect(km2(k) / km2(r)).toBeGreaterThan(0.75);
+    expect(km2(k) / km2(r)).toBeLessThan(1.25);
+    expect(fx.watchMeta['watch-kalteng-haze'].areaText).toBe('Box: latitude -3.5 to -1.5, longitude 113 to 115');
   });
 
   it('shares one scenario window, equal to the snapshot window', () => {
@@ -227,6 +254,42 @@ describe('records', () => {
     expect(riau.every((o) => o.unit === 'detections' && Number.isInteger(o.value))).toBe(true);
     const keys = riau.map((o) => `${o.sourceName}|${o.replayStep}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('Central Kalimantan records count every confident hotspot in the box, kept as a row or only in a daily total', () => {
+    const kalteng = watch('watch-kalteng-haze');
+    if (kalteng.area.kind !== 'bbox') throw new Error('unreachable');
+    const box = kalteng.area;
+    const raw = firmsJson as unknown as { rows: FirmsRow[]; hazeDayTotals: HazeDayTotal[] };
+    const inBox = (r: FirmsRow) => r.latitude >= box.minLat && r.latitude <= box.maxLat && r.longitude >= box.minLon && r.longitude <= box.maxLon;
+    const thermal = fx.observations.filter((o) => o.incidentId === kalteng.id && o.category === 'thermal');
+    // The committed snapshot (29 Oct 2026) is from a heavy fire week there. A later refresh with no
+    // hotspots is possible (rain, cloud): then update this line, not the rule.
+    expect(thermal.length).toBeGreaterThan(0);
+    const keys = thermal.map((o) => `${o.sourceName}|${o.replayStep}`);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const o of thermal) {
+      const list = membersOf(fx, o.id);
+      const { satellite } = list[0];
+      const date = list[0].observedAt.slice(0, 10);
+      const rows = raw.rows.filter((r) => r.satellite === satellite && r.acq_date === date && inBox(r));
+      const total = raw.hazeDayTotals.find((t) => t.watchId === kalteng.id && t.satellite === satellite && t.date === date);
+      const confident = total
+        ? Object.entries(total.confidence)
+            .filter(([confidence]) => firmsConfidence({ satellite, confidence })?.passes)
+            .reduce((n, [, [count]]) => n + count, 0)
+        : rows.filter((r) => firmsConfidence(r)?.passes).length;
+      expect(o.unit, o.id).toBe('detections');
+      expect(o.value, o.id).toBe(confident);
+      expect(list, o.id).toHaveLength(rows.length);
+      if (total) {
+        expect(list.length, o.id).toBe(total.kept);
+        expect(total.rows, o.id).toBeGreaterThan(total.kept);
+        expect(o.summary, o.id).toContain(`All ${total.rows} hotspots are counted; the ${total.kept} with the highest fire radiative power are kept for review.`);
+      } else {
+        expect(o.summary, o.id).not.toContain('kept for review');
+      }
+    }
   });
 });
 

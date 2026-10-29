@@ -81,6 +81,26 @@ export interface FirmsRow {
   brightness?: number | null;
 }
 
+/**
+ * Every FIRMS hotspot of one satellite on one UTC day inside a haze box, when there were more than the
+ * snapshot keeps as rows (scripts/lib/watchDataBuild.mjs, data/real/firms.json "hazeDayTotals").
+ */
+export interface HazeDayTotal {
+  watchId: string;
+  /** FIRMS satellite code, as in FirmsRow. */
+  satellite: string;
+  /** UTC date, "2026-10-09". */
+  date: string;
+  /** Hotspots in the box that day, kept or not. */
+  rows: number;
+  /** How many of them are kept as rows. */
+  kept: number;
+  /** Per confidence value as given ("nominal", "62"): [hotspots, summed FRP in MW]. */
+  confidence: Record<string, [number, number]>;
+  /** Detection times, HHMM UTC. */
+  times: string[];
+}
+
 /** One earthquake report from one product, as kept by scripts/refresh-data.mjs. */
 export interface QuakeRow {
   source: 'usgs' | 'bmkg';
@@ -535,11 +555,46 @@ function insideBox(area: Extract<WatchArea, { kind: 'bbox' }>, lat: number, lon:
   return lat >= area.minLat && lat <= area.maxLat && lon >= area.minLon && lon <= area.maxLon;
 }
 
-/** One Observation per sensor per UTC day with any FIRMS hotspot inside the box. */
-export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[], ctx: RuleContext): RuleOutput {
+/** What a haze daily total counts: confident hotspots and their summed FRP, all hotspots, detection times. */
+interface DayCount {
+  count: number;
+  frpSum: number;
+  all: number;
+  times: string[];
+}
+
+/** The count from a daily total, so hotspots the snapshot did not keep as rows are counted too. */
+function countFromTotal(t: HazeDayTotal): DayCount {
+  let count = 0;
+  let frpSum = 0;
+  for (const [confidence, [n, frp]] of Object.entries(t.confidence)) {
+    if (!firmsConfidence({ satellite: t.satellite, confidence })?.passes) continue;
+    count += n;
+    frpSum += frp;
+  }
+  const times = t.times.map((hhmm) => hhmm.padStart(4, '0').replace(/^(\d\d)/, '$1:'));
+  return { count, frpSum, all: t.rows, times: [...new Set(times)].sort() };
+}
+
+/**
+ * One Observation per sensor per UTC day with any FIRMS hotspot inside the box. A daily total in
+ * `totals` (this watch, that satellite and day) replaces the count from the rows, which are then only
+ * the strongest hotspots of the day.
+ */
+export function hazeThermalObservations(
+  watch: Watch,
+  rows: readonly FirmsRow[],
+  ctx: RuleContext,
+  totals: readonly HazeDayTotal[] = [],
+): RuleOutput {
   const problems: RuleOutput['problems'] = [];
   const area = watch.area;
   if (area.kind !== 'bbox') return { observations: [], members: {}, problems };
+  const totalFor = new Map<string, HazeDayTotal>();
+  for (const t of totals) {
+    const sensor = t.watchId === watch.id ? firmsSensor(t) : null;
+    if (sensor) totalFor.set(`${sensor.short}|${t.date}`, t);
+  }
 
   interface Group {
     sensor: FirmsSensor;
@@ -573,13 +628,25 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
   const members: Record<string, HotspotMember[]> = {};
   for (const g of groups.values()) {
     const list = [...g.members].sort(compareMembers);
+    const total = totalFor.get(`${g.sensor.short}|${g.date}`) ?? null;
     const confident = list.filter((m) => m.meetsRule);
-    const low = list.length - confident.length;
-    const count = confident.length;
-    const frpSum = confident.reduce((sum, m) => sum + m.frp, 0);
+    const { count, frpSum, all, times }: DayCount = total
+      ? countFromTotal(total)
+      : {
+          count: confident.length,
+          frpSum: confident.reduce((sum, m) => sum + m.frp, 0),
+          all: list.length,
+          times: [...new Set(list.map((m) => m.observedAt.slice(11, 16)))].sort(),
+        };
+    const low = all - count;
     const anomaly = count >= HAZE_MIN_DETECTIONS_PER_DAY;
-    const times = [...new Set(list.map((m) => m.observedAt.slice(11, 16)))].sort();
-    const lastObservedAt = list[list.length - 1].observedAt;
+    const lastTime = times[times.length - 1]?.replace(':', '') ?? '';
+    const lastObservedAt = (total && firmsObservedAt(g.date, lastTime)) || list[list.length - 1].observedAt;
+    // Fewer rows than hotspots: the snapshot kept only the strongest of the day (scripts/lib/watchDataBuild.mjs).
+    const keptNote =
+      list.length < all
+        ? ` All ${all} hotspots are counted; the ${list.length} with the highest fire radiative power are kept for review.`
+        : '';
     const versions = [...new Set(list.map((m) => m.version || 'not given'))].join(', ');
     const sensorText = `${g.sensor.platform} ${g.sensor.instrument}`;
     const confidentWords = g.sensor.instrument === 'VIIRS' ? 'nominal- or high-confidence' : `confidence ${MODIS_MIN_CONFIDENCE}+`;
@@ -587,7 +654,7 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
     const base =
       `${sensorText}: ${count} ${confidentWords} ${count === 1 ? 'hotspot' : 'hotspots'} in the watch box on ` +
       `${dayLabel(g.date)} (UTC), summed fire radiative power ${mw(frpSum)}${lowText}. ` +
-      `Detection ${times.length === 1 ? 'time' : 'times'} (UTC): ${times.join(', ')}.`;
+      `Detection ${times.length === 1 ? 'time' : 'times'} (UTC): ${times.join(', ')}.${keptNote}`;
     const id = `${watch.key}-firms-${g.sensor.short}-${g.date.replace(/-/g, '')}`;
     members[id] = list;
     observations.push({
@@ -602,7 +669,9 @@ export function hazeThermalObservations(watch: Watch, rows: readonly FirmsRow[],
       sourceUrl: g.sensor.sourceUrl,
       dataMode: ctx.dataMode ?? 'historical',
       qualityNote: [
-        `Daily total for one sensor; the observed time is the last detection that day, and each hotspot is kept as a member of this record (FIRMS version ${versions}).`,
+        list.length < all
+          ? `Daily total for one sensor; the observed time is the last detection that day. All ${all} hotspots in the box that day are counted, but to keep the snapshot small only the ${list.length} with the highest fire radiative power are kept as members of this record (FIRMS version ${versions} for those).`
+          : `Daily total for one sensor; the observed time is the last detection that day, and each hotspot is kept as a member of this record (FIRMS version ${versions}).`,
         'Each satellite is totalled separately, so one fire seen by two satellites is in both totals.',
         ...thermalCaveats(false),
         'Cloud and thick smoke hide hotspots, so counts are a lower bound and days with different cloud cover are not comparable.',
@@ -739,7 +808,7 @@ export function rulesForWatch(watch: Pick<Watch, 'area'>): string[] {
  */
 export function observationsForWatch(
   watch: Watch,
-  snapshot: { firms: readonly FirmsRow[]; quakes: readonly QuakeRow[] },
+  snapshot: { firms: readonly FirmsRow[]; quakes: readonly QuakeRow[]; hazeDayTotals?: readonly HazeDayTotal[] },
   ctx: RuleContext,
 ): {
   observations: Observation[];
@@ -749,7 +818,7 @@ export function observationsForWatch(
 } {
   const thermal =
     watch.area.kind === 'bbox'
-      ? hazeThermalObservations(watch, snapshot.firms, ctx)
+      ? hazeThermalObservations(watch, snapshot.firms, ctx, snapshot.hazeDayTotals)
       : volcanoThermalObservations(watch, snapshot.firms, ctx);
   const seismic = seismicObservations(watch, snapshot.quakes, ctx);
   const observations = [...thermal.observations, ...seismic.observations].sort((a, b) =>

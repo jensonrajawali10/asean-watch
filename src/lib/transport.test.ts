@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { clusterHotspots, computeTrajectories, haversineKm, receptorAnalysis, sampleWind, SINGAPORE } from './transport';
+import { clusterHotspots, computeTrajectories, haversineKm, hazeSourcesFromFixtures, receptorAnalysis, sampleWind, SINGAPORE } from './transport';
 import type { HotspotSource } from './transport';
+import type { HotspotMember } from './watchRules';
+import type { Observation } from '../types';
 import type { WindGrid } from './windField';
 
 function uniformGrid(u: number, v: number): WindGrid {
@@ -107,5 +109,26 @@ describe('clusterHotspots', () => {
     expect(a.map((s) => s.count)).toEqual([3, 1]);
     expect(a[0].frpSum).toBe(41);
     expect(clusterHotspots('w', 'W', pts, { max: 1 })).toHaveLength(1);
+  });
+});
+
+describe('hazeSourcesFromFixtures', () => {
+  const member = (i: number, meetsRule = true) => ({ id: `m${i}`, latitude: -2.5 + i * 0.01, longitude: 114, frp: 10, meetsRule }) as HotspotMember;
+  const record = (id: string, value: number) =>
+    ({ id, incidentId: 'watch-box', category: 'thermal', observedAt: '2026-10-28T17:52:00Z', value }) as Observation;
+  const watches = [{ id: 'watch-box', title: 'Box peatlands', hazard: 'wildfire' as const }];
+
+  it('clusters the confident members of the latest day; counts are exact when every hotspot is a member', () => {
+    const [s] = hazeSourcesFromFixtures({ watches, observations: [record('r1', 2)], members: { r1: [member(0), member(1), member(2, false)] } });
+    expect(s).toMatchObject({ watchId: 'watch-box', count: 2, frpSum: 20 });
+    expect(s.countIsLowerBound).toBeUndefined();
+  });
+
+  it('marks counts as lower bounds when a record counts more hotspots than it keeps', () => {
+    const sources = hazeSourcesFromFixtures({ watches, observations: [record('r1', 1230)], members: { r1: [member(0), member(1)] } });
+    expect(sources.map((s) => [s.count, s.countIsLowerBound])).toEqual([[2, true]]);
+    const grid = uniformGrid(-5, 0);
+    const [t] = computeTrajectories(grid, sources, '2026-10-13T00:00:00Z', 6);
+    expect(t.summary).toContain('(at least 2 hotspots)');
   });
 });

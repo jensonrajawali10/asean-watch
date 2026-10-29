@@ -20,7 +20,7 @@ import {
   utcDayIndex,
   volcanoThermalObservations,
 } from './watchRules';
-import type { FirmsRow, QuakeRow, RuleContext, Watch } from './watchRules';
+import type { FirmsRow, HazeDayTotal, QuakeRow, RuleContext, Watch } from './watchRules';
 
 const KM_PER_DEG_LAT = (2 * Math.PI * 6371.0088) / 360;
 
@@ -386,6 +386,51 @@ describe('thermal rule: haze box, one record per sensor per UTC day', () => {
     expect(hazeThermalObservations(VOLCANO, [firms()], CTX).observations).toEqual([]);
     const box = observationsForWatch(BOX, { firms: [inBox(0)], quakes: [] }, CTX).observations;
     expect(box.map((o) => o.unit)).toEqual(['detections']);
+  });
+
+  it('counts every hotspot of a daily total, while the rows are only the strongest kept', () => {
+    // 3 kept rows stand for 1,250 hotspots: 1,200 nominal, 30 high, 20 low.
+    const kept = [inBox(0, { frp: 40 }), inBox(1, { frp: 30, acq_time: '1830' }), inBox(2, { frp: 20, confidence: 'high' })];
+    const total: HazeDayTotal = {
+      watchId: BOX.id,
+      satellite: 'N20',
+      date: '2026-10-08',
+      rows: 1250,
+      kept: 3,
+      confidence: { nominal: [1200, 3000.5], high: [30, 400.25], low: [20, 15] },
+      times: ['0612', '0655', '1830'],
+    };
+    const elsewhere: HazeDayTotal = { ...total, watchId: 'watch-other-box', rows: 5, confidence: { nominal: [5, 1] } };
+    const { observations, members } = observationsForWatch(BOX, { firms: kept, quakes: [], hazeDayTotals: [elsewhere, total] }, CTX);
+    expect(observations).toHaveLength(1);
+    const o = observations[0];
+    expect(o).toMatchObject({ id: 'testbox-firms-n20-20261008', value: 1230, unit: 'detections', anomaly: true, observedAt: '2026-10-08T18:30:00Z' });
+    expect(members[o.id].map((m) => m.frp)).toEqual([40, 20, 30]);
+    expect(o.summary).toBe(
+      'NOAA-20 VIIRS: 1230 nominal- or high-confidence hotspots in the watch box on 8 Oct (UTC), summed fire radiative ' +
+        'power 3400.75 MW; 20 low-confidence hotspots not counted. Detection times (UTC): 06:12, 06:55, 18:30. ' +
+        'All 1250 hotspots are counted; the 3 with the highest fire radiative power are kept for review.',
+    );
+    expect(o.qualityNote).toMatch(/^Daily total for one sensor; .* All 1250 hotspots in the box that day are counted, but .* only the 3 /);
+    // Without its total the same rows count only themselves.
+    expect(hazeThermalObservations(BOX, kept, CTX).observations[0]).toMatchObject({ value: 3, anomaly: false });
+    expect(hazeThermalObservations(BOX, kept, CTX).observations[0].summary).not.toContain('kept for review');
+  });
+
+  it('a daily total for MODIS reads its numeric confidence values with the MODIS threshold', () => {
+    const row = inBox(0, { satellite: 'A', file: 'modis', confidence: 80 });
+    const total: HazeDayTotal = {
+      watchId: BOX.id,
+      satellite: 'A',
+      date: '2026-10-08',
+      rows: 30,
+      kept: 1,
+      confidence: { '49': [12, 10], '50': [8, 20], '80': [10, 30] },
+      times: ['0612'],
+    };
+    const [o] = hazeThermalObservations(BOX, [row], CTX, [total]).observations;
+    expect(o).toMatchObject({ id: 'testbox-firms-aqua-20261008', value: 18, anomaly: true });
+    expect(o.summary).toContain('12 low-confidence hotspots not counted');
   });
 });
 

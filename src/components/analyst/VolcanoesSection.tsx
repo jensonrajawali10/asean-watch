@@ -86,7 +86,7 @@ export default function VolcanoesSection(p: VolcanoesSectionProps) {
     <AnalystSection
       id="volcanoes"
       title="Volcanoes"
-      lede="The five watch areas and what the last seven days of satellite heat and nearby earthquakes say about each. Our workflow states come from stated watch rules and are never official alert levels; the official level is relayed verbatim beside them."
+      lede="The watch areas, four volcanoes and two peatland haze boxes, and what the last seven days of satellite heat and nearby earthquakes say about each. Our workflow states come from stated watch rules and are never official alert levels; the official level is relayed verbatim beside them."
       meta={p.dataAsOf ? `${p.dataLive ? 'live, fetched' : 'snapshot'} ${p.dataAsOf.replace('T', ' ').slice(0, 16)} UTC` : undefined}
       sources={SOURCES}
     >

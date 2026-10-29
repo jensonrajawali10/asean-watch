@@ -487,6 +487,8 @@ export interface TransportRow {
   lon: number;
   hotspots: number;
   frpSumMW: number;
+  /** True when `hotspots` and `frpSumMW` are lower bounds (HotspotSource.countIsLowerBound). */
+  countIsLowerBound: boolean;
   reaches: boolean;
   closestKm: number;
   hoursToClosest: number;
@@ -583,6 +585,7 @@ export function singaporeTransport(
     lon: t.source.lon,
     hotspots: t.source.count,
     frpSumMW: t.source.frpSum,
+    countIsLowerBound: t.source.countIsLowerBound === true,
     reaches: t.receptor.reaches,
     closestKm: t.receptor.closestKm,
     hoursToClosest: t.receptor.hoursToClosest,
@@ -1306,8 +1309,8 @@ export function situationReport(input: SituationInput): SituationReport {
       numeric: [false, true, true, false, true, true],
       rows: t.rows.map((r) => [
         r.label.includes('°') ? r.label : `${r.label} (${Math.abs(r.lat).toFixed(2)}°${r.lat >= 0 ? 'N' : 'S'} ${r.lon.toFixed(2)}°E)`,
-        intText(r.hotspots),
-        intText(r.frpSumMW),
+        `${r.countIsLowerBound ? 'at least ' : ''}${intText(r.hotspots)}`,
+        `${r.countIsLowerBound ? 'at least ' : ''}${intText(r.frpSumMW)}`,
         r.reaches ? `yes, ~${hoursText(r.arrivalHours ?? r.hoursToClosest)}` : 'no',
         intText(r.closestKm),
         String(Math.round(r.hoursToClosest)),
@@ -1391,7 +1394,8 @@ export function situationReport(input: SituationInput): SituationReport {
       const fid = book.add(firmsCitation(input.hotspotSnapshot));
       const total = sources.reduce((s, c) => s + c.count, 0);
       const labels = [...new Set(sources.map((s) => s.label))];
-      fireSummary = `Only the watch-area FIRMS snapshot is loaded: ${plural(total, 'confident hotspot', 'confident hotspots')} in the largest clusters of ${joinList(labels)}.`;
+      const atLeast = sources.some((s) => s.countIsLowerBound) ? 'at least ' : '';
+      fireSummary = `Only the watch-area FIRMS snapshot is loaded: ${atLeast}${plural(total, 'confident hotspot', 'confident hotspots')} in the largest clusters of ${joinList(labels)}.`;
       fireBlocks.push({
         kind: 'paragraph',
         text:

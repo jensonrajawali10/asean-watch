@@ -12,7 +12,9 @@
 // Keeps rows inside the 7-day window (the last 7 UTC days, today included up to the retrieval time)
 // and near a watch in data/watches.json: within COLLECT_*_RADIUS_KM of a volcano summit, or inside a
 // haze box. The collection radii are wider than the watch rules in src/lib/watchRules.ts, which
-// decide what is shown and what is an anomaly. This script makes no anomaly decisions.
+// decide what is shown and what is an anomaly. This script makes no anomaly decisions. Inside a haze
+// box only the strongest few rows per satellite per UTC day are kept; every row there is still counted,
+// in the hazeDayTotals of data/real/firms.json, so the snapshot stays small in a heavy fire season.
 //
 // Writes data/real/firms.json, data/real/quakes.json, data/real/meta.json and the scenarioWindow of
 // every watch in data/watches.json. All or nothing: if any download or parse fails, nothing is

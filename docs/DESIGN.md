@@ -277,7 +277,7 @@ Three columns between a one-row header and a bottom timeline. Nothing on the dem
 ```
 ┌ Header 40 px: ASEAN Watch │ Environment      Real data · satellite snapshot 2026-10-13 06:00 UTC · official warnings relayed verbatim · not an official warning service ┐
 ├─ Rail 248 px ─────┬─ Map (fills) ─────────────────────────────┬─ Review column 488 px ────────────┤
-│ WATCH AREAS (5)   │ Layers ☑ Watch areas ☑ Official ☑ NEA     │ Merapi                           │
+│ WATCH AREAS (6)   │ Layers ☑ Watch areas ☑ Official ☑ NEA     │ Merapi                           │
 │ ▌Merapi  Check    │ legend          ┌ zoomed inset ┐          │ Central Java, Indonesia · 7.54° S… │
 │  Semeru  Check    │                 └──────────────┘          │ OFFICIAL · PVMBG MAGMA  [LEVEL III (SIAGA)] Follow ↗ │
 │  Anak Krakatau …  │   markers with always-visible name·state   │ ┌ Check observation · Thermal ┐   │
@@ -293,14 +293,14 @@ Three columns between a one-row header and a bottom timeline. Nothing on the dem
 
 - Grid: `grid-template-columns: 248px minmax(0, 1fr) minmax(440px, 488px)`; `gap: 12px; padding: 12px`. Main area at 1366×650 is 1342×534 (650 − 40 header − 52 timeline − 24 padding); the map is about 570×534 (46 % of the area, the largest element; it was 43 % and only 405 px tall before).
 - The bottom timeline is the replay bar: dark ink surface like the header (the "dark frame"), seven day cells (done = filled muted, current = filled white with ink text, todo = outlined), the status in words, and the three controls at the right end. It is `position: sticky; bottom: 0` at narrow widths so Next step stays on screen while the page scrolls.
-- Rail = two stacked panels: **Watch areas** (five 34 px rows: name, hazard glyph, state badge; selected row has the 3 px bar) and **Official warnings** (fills the rest, scrolls internally, feed footer pinned).
+- Rail = two stacked panels: **Watch areas** (six 34 px rows: name, hazard glyph, state badge; selected row has the 3 px bar) and **Official warnings** (fills the rest, scrolls internally, feed footer pinned).
 - Review column = one internal scroll region (title, official cross-reference line, state block, Why, context card for Riau, evidence timeline, Details disclosure) with the brief bar pinned at the bottom.
 - DOM order = rail, map, review column, so Tab order follows the path; map markers are buttons inside the map.
 - At 1240–1100 px the rail narrows to 216 px and the review column to 420 px.
 
 ### 900–1100 px
 
-Two rows: rail becomes a horizontal strip (watch areas as a row of 5 compact chips; official warnings collapse to a one-line summary that expands), the map takes 340 px of height, the review column goes full width below. Page scrolls; the top chrome stays sticky.
+Two rows: rail becomes a horizontal strip (watch areas as a row of 6 compact chips; official warnings collapse to a one-line summary that expands), the map takes 340 px of height, the review column goes full width below. Page scrolls; the top chrome stays sticky.
 
 ### Below 900 px, down to 375 px
 
@@ -332,7 +332,7 @@ Fixed control labels stay: **Next step**, **Play** (Pause while playing), **Rese
 |---|---|
 | Header recency line | `Real data · satellite snapshot <YYYY-MM-DD HH:MM> UTC · official warnings relayed verbatim · not an official warning service` (narrow: `Real data · as of <HH:MM> UTC · not an official warning service`) |
 | Replay status | `Day 3 of 7 · 9 Oct 2026 (UTC)`; disabled: `Select a watch area to replay the last 7 days.` |
-| Rail headings | `Watch areas (5)` · `Official warnings near Merapi (1)` / `Official warnings · APAC (12)` |
+| Rail headings | `Watch areas (6)` · `Official warnings near Merapi (1)` / `Official warnings · APAC (12)` |
 | Official empty state | `No official warnings retrieved from the feeds below. This is not an all-clear.` |
 | Feed unavailable | `Official feed unavailable: check <issuer> directly` |
 | Feed footer summary | `Feeds: 5 live · 1 snapshot · 1 unavailable` (expands to one line per feed with its retrieved time) |
@@ -392,7 +392,7 @@ Deviations from the plan above, with the reason:
 - **Stale brief instead of a cleared brief.** Clearing the brief when the NEA reading or the official feeds arrive unmounted an open preview mid-demo (the live feeds can land seconds after page load). The brief now carries the context key it was built from; when the context changes, the bar says "Context data updated since this brief; generate it again" and disables Download .txt, while an open preview stays readable with the same notice. The downloadable brief is therefore never silently stale.
 - **"All APAC" and Esc** clear the selection (the Ayutthaya C.35 gauge warning is only in the APAC-wide list).
 - **Reference links** are labelled "Also see" with "(official)" or "(not official)" per link, because the list mixes the official MAGMA page with independent monitoring (MOUNTS, ASMC).
-- **Control and panel names (for the demo script):** header "ASEAN Watch · Environment"; rail panels "Watch areas (5)" and "Official warnings near <name> (n)" / "Official warnings · APAC (n)" with "All APAC", "Elsewhere in APAC (n)", "Feeds: …", "Details", "Follow <issuer>"; map "Layers" (Watch areas · Official warnings · NEA wind and haze) and the legend; review column: the watch title, "Also see", the OFFICIAL block, the state badge, "Why this state?", "Context: NEA Singapore (real readings)", "Evidence · n records, newest first", "Details"; brief bar "Generate brief" / "Download .txt" with "Brief preview"; bottom timeline "Step n of 7 · <day> · <clock> · n records so far" with "Next step" / "Play" (Pause) / "Reset"; drawers "Record" and the warning inspector.
+- **Control and panel names (for the demo script):** header "ASEAN Watch · Environment"; rail panels "Watch areas (6)" and "Official warnings near <name> (n)" / "Official warnings · APAC (n)" with "All APAC", "Elsewhere in APAC (n)", "Feeds: …", "Details", "Follow <issuer>"; map "Layers" (Watch areas · Official warnings · NEA wind and haze) and the legend; review column: the watch title, "Also see", the OFFICIAL block, the state badge, "Why this state?", "Context: NEA Singapore (real readings)", "Evidence · n records, newest first", "Details"; brief bar "Generate brief" / "Download .txt" with "Brief preview"; bottom timeline "Step n of 7 · <day> · <clock> · n records so far" with "Next step" / "Play" (Pause) / "Reset"; drawers "Record" and the warning inspector.
 
 ## 8b. Map zoom and pan (13 October 2026, late)
 
@@ -400,7 +400,7 @@ Jenson: "I can't zoom in to the map." The main map now has free zoom and pan; th
 
 - **Controls (on the map, bottom-left):** `+` (Zoom in), `−` (Zoom out), **All APAC** (clears the selection and returns to the regional view). Mouse wheel / trackpad zooms around the cursor; drag pans; double-click zooms in (Shift + double-click zooms out); two-finger pinch zooms and one-finger drag pans on touch. With the map focused (it is a tab stop): `+` / `−` zoom, arrow keys pan.
 - **Range:** from the regional view (scale 1) to about 0.2° of longitude across the frame; the view centre stays over the APAC frame (±160 viewBox units).
-- **Selection zooms:** selecting a watch area (map, list or `#incident=` link) animates to ±1.5° around a summit, or the watch box plus 0.3° for Riau; clicking the selected marker again re-fits; Esc and All APAC return to APAC. 360 ms log-zoom, instant under `prefers-reduced-motion`.
+- **Selection zooms:** selecting a watch area (map, list or `#incident=` link) animates to ±1.5° around a summit, or the watch box plus 0.3° for a haze box; clicking the selected marker again re-fits; Esc and All APAC return to APAC. 360 ms log-zoom, instant under `prefers-reduced-motion`.
 - **Constant pixel size:** only the basemap group is transformed (non-scaling strokes); markers, tags, callouts, labels, warning and gauge symbols are HTML overlays positioned from transformed coordinates, so text and hit areas keep their size at any zoom. A press that moves less than 4 px (mouse) or 8 px (touch) stays a click, so dragging never selects a marker and clicking still does.
 - **Known limits:** Natural Earth 1:50m coastlines look coarse at deep zoom (no 10m swap yet); the corner locator inset is kept; the map takes touch gestures, so on phones the page scrolls from outside the map.
 
