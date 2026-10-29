@@ -224,6 +224,15 @@ describe('loadAirQuality', () => {
     await loadAirQuality({ fetchImpl: busy, now: () => t0 + 119_000 });
     expect(calls).toBe(1);
     await loadAirQuality({ fetchImpl: busy, now: () => t0 + 120_000 });
+    // The relay now says so with a 200 { available: false } (no console error): read the same way.
+    resetAqCache();
+    const quiet = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ available: false, feed: 'aq', error: 'upstream_unavailable', message: 'x', retryAfterSeconds: 120 }), { status: 200 }),
+      )) as unknown as typeof fetch;
+    const q1 = await loadAirQuality({ fetchImpl: quiet, now: () => t0 + 500_000 });
+    expect(q1.status).toBe('snapshot');
+    expect(q1.message).toMatch(/^Open-Meteo air quality is busy \(HTTP 503\)\. Showing the bundled air-quality snapshot\.$/);
     expect(calls).toBe(2);
   });
 });
