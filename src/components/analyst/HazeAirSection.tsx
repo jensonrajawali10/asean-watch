@@ -253,7 +253,7 @@ export default function HazeAirSection({
       label: 'NASA FIRMS active fire hotspots (fire clusters for the paths)',
       url: FIRMS_PAGE,
       retrievedAt: hotspotSnapshot.satelliteAsOf ?? hotspotSnapshot.retrievedAt,
-      mode: 'MEASURED · SNAPSHOT',
+      mode: `MEASURED · ${hotspotSnapshot.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT'}`,
       licence: 'NASA open data; FIRMS acknowledgement in Sources & methods.',
     });
   }

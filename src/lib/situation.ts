@@ -150,6 +150,8 @@ export function firesSummaryFromSnapshot(
 export interface HotspotSnapshotInfo {
   retrievedAt: string;
   satelliteAsOf?: string | null;
+  /** 'live' when the watch-area rows came from the /api/watch relay this visit; else the bundled snapshot. */
+  dataMode?: 'live' | 'historical';
   sources?: ReadonlyArray<{
     id: string;
     name: string;
@@ -953,12 +955,12 @@ function neaCitation(nea: NeaContext): Citation {
 function firmsCitation(snap: HotspotSnapshotInfo): Citation {
   return {
     id: 'firms',
-    label: 'NASA FIRMS active fire hotspots (VIIRS 375 m and MODIS 1 km NRT), bundled snapshot for the watch areas',
+    label: `NASA FIRMS active fire hotspots (VIIRS 375 m and MODIS 1 km NRT), ${snap.dataMode === 'live' ? 'fetched live' : 'bundled snapshot'} for the watch areas`,
     url: FIRMS_PAGE,
     basis: 'MEASURED',
-    mode: 'SNAPSHOT',
+    mode: snap.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT',
     time: snap.satelliteAsOf ?? snap.retrievedAt,
-    timeKind: 'captured',
+    timeKind: snap.dataMode === 'live' ? 'retrieved' : 'captured',
     licence: 'NASA open data; FIRMS acknowledgement requested (see Sources).',
   };
 }
@@ -1708,7 +1710,10 @@ export function situationReport(input: SituationInput): SituationReport {
   }
   if (nea) pushFresh('NEA Singapore PSI and PM2.5', 'MEASURED', modeOf(nea.haze?.dataMode ?? nea.dataMode), nea.haze?.observedAt ?? nea.observedAt, 'reading');
   else pushFresh('NEA Singapore PSI and PM2.5', 'MEASURED', 'UNAVAILABLE', null, '');
-  if (input.hotspotSnapshot) pushFresh('NASA FIRMS hotspots (watch areas)', 'MEASURED', 'SNAPSHOT', input.hotspotSnapshot.satelliteAsOf ?? input.hotspotSnapshot.retrievedAt, 'newest file');
+  if (input.hotspotSnapshot) {
+    const snap = input.hotspotSnapshot;
+    pushFresh('NASA FIRMS hotspots (watch areas)', 'MEASURED', snap.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT', snap.satelliteAsOf ?? snap.retrievedAt, 'newest file');
+  }
   if (fires) pushFresh(fires.source, 'MEASURED', fires.dataMode === 'live' ? 'LIVE' : 'SNAPSHOT', fires.asOf, 'as of');
   if (ash) pushFresh('Ash-drift winds (Open-Meteo)', 'MODELLED', modeOf(ash.dataMode), ash.retrievedAt, ash.dataMode === 'live' ? 'retrieved' : 'captured');
   if (river?.series[0]) pushFresh('GloFAS river discharge', 'MODELLED', modeOf(river.series[0].dataMode), river.series[0].retrievedAt, river.series[0].dataMode === 'live' ? 'retrieved' : 'captured');

@@ -1,7 +1,8 @@
 // Loads the real-data snapshot and turns it into incidents, replay days and validated observations.
 // Owned by the real-data builder. Nothing here is simulated: watch areas come from data/watches.json,
 // raw rows from data/real/*.json (written by scripts/refresh-data.mjs), and anomalies from the stated
-// rules in ./watchRules. No runtime network call.
+// rules in ./watchRules. No network call here: src/lib/watchLive.ts fetches a fresh build from /api/watch
+// and passes it to buildLiveFixtures.
 import volcanoesRaw from '../../data/volcanoes.json';
 import watchesRaw from '../../data/watches.json';
 import firmsRaw from '../../data/real/firms.json';
@@ -81,6 +82,8 @@ export interface Snapshot {
   sources: SnapshotSource[];
   /** One attribution line per provider (FIRMS, USGS, BMKG), for the footer and the brief. BMKG requires its credit. */
   attributions: string[];
+  /** 'live' when built from the /api/watch relay this visit (src/lib/watchLive.ts); the bundled snapshot is 'historical'. */
+  dataMode: 'live' | 'historical';
 }
 
 /** Per-watch metadata for the detail panel and the brief. */
@@ -167,6 +170,7 @@ interface MetaShape {
   retrievedAt: string;
   window: { start: string; end: string };
   sources: SnapshotSource[];
+  dataMode: 'live' | 'historical';
 }
 
 function readMeta(raw: unknown, issues: ValidationIssue[]): MetaShape | null {
@@ -188,7 +192,7 @@ function readMeta(raw: unknown, issues: ValidationIssue[]): MetaShape | null {
   const sources = raw.sources.filter(
     (s): s is SnapshotSource => isRecord(s) && typeof s.id === 'string' && typeof s.name === 'string',
   );
-  return { retrievedAt: raw.retrievedAt as string, window: raw.window as MetaShape['window'], sources };
+  return { retrievedAt: raw.retrievedAt as string, window: raw.window as MetaShape['window'], sources, dataMode: raw.dataMode === 'live' ? 'live' : 'historical' };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +263,7 @@ export function buildFixtures(raw: {
       window: meta ? { start: meta.window.start, end: meta.window.end } : { start: '', end: '' },
       sources: meta?.sources ?? [],
       attributions: [...providers.values()],
+      dataMode: meta?.dataMode ?? 'historical',
     },
     watchMeta: Object.fromEntries(
       watches.map((w): [string, WatchMeta] => [
@@ -277,6 +282,18 @@ export function membersOf(fixtures: Pick<RealFixtures, 'members'>, observationId
 
 export function loadFixtures(): RealFixtures {
   return buildFixtures({ volcanoes: volcanoesRaw, watches: watchesRaw, firms: firmsRaw, quakes: quakesRaw, meta: metaRaw });
+}
+
+/**
+ * Fixtures from a /api/watch build (src/lib/watchRelay.ts): the bundled watch areas with the build's
+ * window, and every record marked live. Same rules and validation as the bundled snapshot.
+ */
+export function buildLiveFixtures(data: { firms: unknown; quakes: unknown; meta: unknown; scenarioWindow: { start: string; end: string } }): RealFixtures {
+  const watches = Array.isArray(watchesRaw)
+    ? (watchesRaw as unknown[]).map((w) => (isRecord(w) ? { ...w, scenarioWindow: data.scenarioWindow, dataMode: 'live' } : w))
+    : watchesRaw;
+  const meta = isRecord(data.meta) ? { ...data.meta, dataMode: 'live' } : data.meta;
+  return buildFixtures({ volcanoes: volcanoesRaw, watches, firms: data.firms, quakes: data.quakes, meta });
 }
 
 /** The volcano with this id, or null (also null for a null/undefined id). */

@@ -11,7 +11,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { DriftAssessment, Incident, OfficialWarning, ReplayStep, ReviewResult, ReviewState, SourceRef } from './types';
-import { findVolcano, loadFixtures } from './lib/fixtures';
+import { findVolcano } from './lib/fixtures';
+import { WATCH_REFRESH_MS, bundledWatchFixtures, refreshLiveWatch, useWatchFixtures } from './lib/watchLive';
 import type { HotspotMember, RealFixtures } from './lib/fixtures';
 import { deriveReview, visibleObservations } from './lib/reviewRules';
 import { buildBriefing, briefingFilename, downloadText } from './lib/briefing';
@@ -106,30 +107,56 @@ const EMPTY_FIXTURES = {
   duplicatesIgnored: 0,
   watches: [],
   replaySteps: [],
-  snapshot: { retrievedAt: '', satelliteAsOf: null, window: { start: '', end: '' }, sources: [], attributions: [] },
+  snapshot: { retrievedAt: '', satelliteAsOf: null, window: { start: '', end: '' }, sources: [], attributions: [], dataMode: 'historical' },
 } as unknown as RealFixtures;
 
-function load(): { fixtures: RealFixtures; error: string | null } {
-  try {
-    return { fixtures: loadFixtures(), error: null };
-  } catch (err) {
-    return { fixtures: EMPTY_FIXTURES, error: err instanceof Error ? err.message : String(err) };
-  }
+const { fixtures: BUNDLED_FIXTURES, error: LOAD_ERROR } = bundledWatchFixtures();
+const PLAY_INTERVAL_MS = 1500;
+
+/** Everything App reads from one set of watch fixtures: the bundled snapshot, or a live /api/watch build. */
+interface WatchView {
+  fixtures: RealFixtures;
+  incidents: Incident[];
+  /** The shared replay days (oldest first); every watch area replays over them. */
+  steps: ReplayStep[];
+  firstStep: number;
+  /** The replay opens on the newest day (audit fix 3): the state a reader expects is today's. */
+  lastStep: number;
+  firstIncident: Incident | null;
+  dataAsOf: string | null;
+  attributions: string[];
+  members: Record<string, HotspotMember[]>;
+  /** The watch-area FIRMS clusters the haze paths start from. */
+  hazeSources: ReturnType<typeof hazeSourcesFromFixtures>;
 }
 
-const { fixtures: FIXTURES, error: LOAD_ERROR } = load();
-const INCIDENTS: Incident[] = Array.isArray(FIXTURES.incidents) ? FIXTURES.incidents : [];
-/** The shared replay days (oldest first); every watch area replays over them. */
-const STEPS: ReplayStep[] = Array.isArray(FIXTURES.replaySteps) ? FIXTURES.replaySteps : [];
-const FIRST_STEP = STEPS[0]?.index ?? 0;
-/** The replay opens on the newest day (audit fix 3): the state a reader expects is today's. */
-const LAST_STEP = STEPS[STEPS.length - 1]?.index ?? 0;
-const PLAY_INTERVAL_MS = 1500;
-const FIRST_INCIDENT: Incident | null = INCIDENTS[0] ?? null;
+function watchViewOf(fixtures: RealFixtures): WatchView {
+  const incidents: Incident[] = Array.isArray(fixtures.incidents) ? fixtures.incidents : [];
+  const steps: ReplayStep[] = Array.isArray(fixtures.replaySteps) ? fixtures.replaySteps : [];
+  let hazeSources: WatchView['hazeSources'] = [];
+  try {
+    hazeSources = hazeSourcesFromFixtures(fixtures);
+  } catch (err) {
+    console.error('Haze sources could not be derived:', err);
+  }
+  return {
+    fixtures,
+    incidents,
+    steps,
+    firstStep: steps[0]?.index ?? 0,
+    lastStep: steps[steps.length - 1]?.index ?? 0,
+    firstIncident: incidents[0] ?? null,
+    dataAsOf: fixtures.snapshot?.retrievedAt || null,
+    attributions: Array.isArray(fixtures.snapshot?.attributions) ? fixtures.snapshot.attributions : [],
+    members: (fixtures as Partial<{ members: Record<string, HotspotMember[]> }>).members ?? {},
+    hazeSources,
+  };
+}
 
-const DATA_AS_OF: string | null = FIXTURES.snapshot?.retrievedAt || null;
-const ATTRIBUTIONS: string[] = Array.isArray(FIXTURES.snapshot?.attributions) ? FIXTURES.snapshot.attributions : [];
-const MEMBERS: Record<string, HotspotMember[]> = (FIXTURES as Partial<{ members: Record<string, HotspotMember[]> }>).members ?? {};
+/** The bundled snapshot's view: the first render, and the watch names, links and rules (the same live). */
+const BUNDLED_VIEW = watchViewOf(BUNDLED_FIXTURES ?? EMPTY_FIXTURES);
+const INCIDENTS = BUNDLED_VIEW.incidents;
+const FIXTURES = BUNDLED_VIEW.fixtures;
 
 /**
  * Short place names for the map and the lists. A short watch title ("Anak Krakatau") is used as is; a long
@@ -206,21 +233,11 @@ function fireBadgesOf(snap: FireSnapshot | null) {
   }
 }
 
-/** The watch-area FIRMS clusters the haze paths start from. */
-const HAZE_SOURCES = (() => {
-  try {
-    return hazeSourcesFromFixtures(FIXTURES);
-  } catch (err) {
-    console.error('Haze sources could not be derived:', err);
-    return [];
-  }
-})();
-
 /** Fallback for the Fires chip when the whole-region snapshot is missing: the hotspots behind the watch areas. */
 const WATCH_HOTSPOTS: MapHotspot[] = (() => {
   if (FIRE_SNAP) return [];
   try {
-    return INCIDENTS.flatMap((i) => hotspotsUpToDay(FIXTURES.observations, MEMBERS, i.id, LAST_STEP));
+    return INCIDENTS.flatMap((i) => hotspotsUpToDay(FIXTURES.observations, BUNDLED_VIEW.members, i.id, BUNDLED_VIEW.lastStep));
   } catch {
     return [];
   }
@@ -249,7 +266,7 @@ function nearestTime(times: string[], now: number): string {
 }
 
 /** Modelled wind arrows and 48 h haze paths; null when the wind field is unavailable. */
-function buildTransport(result: WindLoadResult | null): HazeTransportView | null {
+function buildTransport(result: WindLoadResult | null, hazeSources: WatchView['hazeSources']): HazeTransportView | null {
   const grid = result?.grid;
   if (!result || result.status === 'unavailable' || !grid || grid.times.length === 0) return null;
   try {
@@ -261,7 +278,7 @@ function buildTransport(result: WindLoadResult | null): HazeTransportView | null
         if (w && Number.isFinite(w.u) && Number.isFinite(w.v)) arrows.push({ lat, lon, u: w.u, v: w.v });
       }
     }
-    const trajectories = computeTrajectories(grid, HAZE_SOURCES, time, 48, 30);
+    const trajectories = computeTrajectories(grid, hazeSources, time, 48, 30);
     const closest = trajectories.reduce<(typeof trajectories)[number] | null>(
       (best, t) => (best === null || t.receptor.closestKm < best.receptor.closestKm ? t : best),
       null,
@@ -281,9 +298,9 @@ function buildTransport(result: WindLoadResult | null): HazeTransportView | null
   }
 }
 
-function reviewFor(incident: Incident, replayIndex: number): ReviewResult | null {
+function reviewFor(incident: Incident, replayIndex: number, observations: RealFixtures['observations']): ReviewResult | null {
   try {
-    return deriveReview(visibleObservations(FIXTURES.observations, incident.id, replayIndex), incident.scenarioWindow);
+    return deriveReview(visibleObservations(observations, incident.id, replayIndex), incident.scenarioWindow);
   } catch (err) {
     console.error(`Review could not be derived for ${incident.id}:`, err);
     return null;
@@ -291,9 +308,9 @@ function reviewFor(incident: Incident, replayIndex: number): ReviewResult | null
 }
 
 /** Records per replay day for one watch area (for the day cells). */
-function countsByStep(incidentId: string): Record<number, number> {
+function countsByStep(incidentId: string, observations: RealFixtures['observations']): Record<number, number> {
   const out: Record<number, number> = {};
-  for (const o of FIXTURES.observations) {
+  for (const o of observations) {
     if (o.incidentId !== incidentId) continue;
     out[o.replayStep] = (out[o.replayStep] ?? 0) + 1;
   }
@@ -344,7 +361,22 @@ export default function App() {
   /** The last section open, so the Workspace button reopens it. */
   const lastWs = useRef<SectionId>(initial.ws ?? 'situation');
   const [layers, setLayers] = useState<MapLayerState>(DEFAULT_LAYERS);
-  const [replayIndex, setReplayIndex] = useState<number>(LAST_STEP);
+  /** The watch-area evidence on screen: bundled first, then the live /api/watch build (refreshed every 30 min). */
+  const watchFixtures = useWatchFixtures();
+  const wv = useMemo(() => watchViewOf(watchFixtures ?? EMPTY_FIXTURES), [watchFixtures]);
+  useEffect(() => {
+    void refreshLiveWatch();
+    const timer = window.setInterval(() => void refreshLiveWatch(), WATCH_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+  const [replayIndex, setReplayIndex] = useState<number>(BUNDLED_VIEW.lastStep);
+  // A newer build can bring new replay days: a reader on the newest day stays on the newest day (adjusted
+  // while rendering, the React pattern for state that follows a changed input).
+  const [viewSeen, setViewSeen] = useState(wv);
+  if (viewSeen !== wv) {
+    setViewSeen(wv);
+    setReplayIndex((i) => (i === viewSeen.lastStep || !wv.steps.some((s) => s.index === i) ? wv.lastStep : i));
+  }
   const [brief, setBrief] = useState<GeneratedBrief | null>(null);
   const [playing, setPlaying] = useState(false);
   const [inspectedId, setInspectedId] = useState<string | null>(null);
@@ -375,7 +407,7 @@ export default function App() {
   }, []);
   /** Modelled 10 m wind field (Open-Meteo, live or snapshot) for the haze paths; null until loaded. */
   const [windResult, setWindResult] = useState<WindLoadResult | null>(null);
-  const transport = useMemo(() => buildTransport(windResult), [windResult]);
+  const transport = useMemo(() => buildTransport(windResult, wv.hazeSources), [windResult, wv]);
   /** Modelled haze inputs (CAMS PM2.5 and 925 hPa wind via Open-Meteo, live or snapshot); null until loaded. */
   const [airQuality, setAirQuality] = useState<AirQualityData | null>(null);
   const [wind925, setWind925] = useState<WindGrid | null>(null);
@@ -460,12 +492,12 @@ export default function App() {
 
   const reviews = useMemo(() => {
     const out: Record<string, ReviewResult> = {};
-    for (const incident of INCIDENTS) {
-      const r = reviewFor(incident, replayIndex);
+    for (const incident of wv.incidents) {
+      const r = reviewFor(incident, replayIndex, wv.fixtures.observations);
       if (r) out[incident.id] = r;
     }
     return out;
-  }, [replayIndex]);
+  }, [replayIndex, wv]);
 
   const states = useMemo(() => {
     const out: Record<string, ReviewState> = {};
@@ -474,17 +506,17 @@ export default function App() {
   }, [reviews]);
 
   const incident = useMemo(
-    () => (selectedIncidentId === null ? null : (INCIDENTS.find((i) => i.id === selectedIncidentId) ?? null)),
-    [selectedIncidentId],
+    () => (selectedIncidentId === null ? null : (wv.incidents.find((i) => i.id === selectedIncidentId) ?? null)),
+    [selectedIncidentId, wv],
   );
   const missingId = selectedIncidentId !== null && incident === null ? selectedIncidentId : null;
   const review = incident ? (reviews[incident.id] ?? null) : null;
-  const volcano = useMemo(() => (incident ? findVolcano(FIXTURES.volcanoes, incident.volcanoId) : null), [incident]);
-  const replayEnabled = incident !== null && STEPS.length > 0;
+  const volcano = useMemo(() => (incident ? findVolcano(wv.fixtures.volcanoes, incident.volcanoId) : null), [incident, wv]);
+  const replayEnabled = incident !== null && wv.steps.length > 0;
 
-  const stepPos = STEPS.findIndex((s) => s.index === replayIndex);
-  const currentStep = stepPos >= 0 ? STEPS[stepPos] : null;
-  const dayCounts = useMemo(() => (incident ? countsByStep(incident.id) : null), [incident]);
+  const stepPos = wv.steps.findIndex((s) => s.index === replayIndex);
+  const currentStep = stepPos >= 0 ? wv.steps[stepPos] : null;
+  const dayCounts = useMemo(() => (incident ? countsByStep(incident.id, wv.fixtures.observations) : null), [incident, wv]);
 
   const inspected = useMemo(
     () => (inspectedId && review ? (review.evidence.find((e) => e.observation.id === inspectedId) ?? null) : null),
@@ -542,17 +574,17 @@ export default function App() {
    */
   const levels = useMemo<Record<string, OfficialVolcanoLevel | null>>(() => {
     const out: Record<string, OfficialVolcanoLevel | null> = {};
-    for (const i of INCIDENTS) {
+    for (const i of wv.incidents) {
       if (i.hazard !== 'volcano') continue;
       try {
-        const v = findVolcano(FIXTURES.volcanoes, i.volcanoId);
+        const v = findVolcano(wv.fixtures.volcanoes, i.volcanoId);
         out[i.id] = officialVolcanoLevel({ title: i.title, volcanoId: i.volcanoId, lat: v?.lat ?? i.lat, lon: v?.lon ?? i.lon }, allWarnings, nowMs);
       } catch {
         out[i.id] = null;
       }
     }
     return out;
-  }, [allWarnings, nowMs]);
+  }, [allWarnings, nowMs, wv]);
 
   const alerts = useMemo(() => alertsPill(allWarnings, nowMs), [allWarnings, nowMs]);
 
@@ -562,8 +594,8 @@ export default function App() {
       airQuality,
       wind10m: windResult?.grid ?? null,
       wind925,
-      hazeSources: HAZE_SOURCES,
-      hotspotSnapshot: FIXTURES.snapshot ?? null,
+      hazeSources: wv.hazeSources,
+      hotspotSnapshot: wv.fixtures.snapshot ?? null,
       transportStartISO: transport?.time ?? null,
       nea,
       neaError: neaResult?.error ?? null,
@@ -575,7 +607,7 @@ export default function App() {
       quakes,
       nowMs,
     }),
-    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, firesSummary, ashWind, riverFlow, quakes, nowMs],
+    [airQuality, windResult, wind925, transport, nea, neaResult, allWarnings, allFeeds, firesSummary, ashWind, riverFlow, quakes, nowMs, wv],
   );
   /** One live sentence that follows the scrubber; a snapshot never says "now". */
   const head = useMemo(() => situationHeadline(situationInput, { atISO: hazeHour.timeISO || null }), [situationInput, hazeHour.timeISO]);
@@ -616,7 +648,7 @@ export default function App() {
 
   const nextStep = () => {
     setPlaying(false);
-    const next = STEPS[stepPos + 1];
+    const next = wv.steps[stepPos + 1];
     if (next) goToStep(next.index);
   };
 
@@ -626,16 +658,16 @@ export default function App() {
       return;
     }
     // From the last day, Play starts again at day 1.
-    const startPos = stepPos >= STEPS.length - 1 ? -1 : stepPos;
-    const next = STEPS[startPos + 1];
+    const startPos = stepPos >= wv.steps.length - 1 ? -1 : stepPos;
+    const next = wv.steps[startPos + 1];
     if (!next) return;
     goToStep(next.index);
-    setPlaying(startPos + 2 < STEPS.length);
+    setPlaying(startPos + 2 < wv.steps.length);
   };
 
   const reset = () => {
     setPlaying(false);
-    setReplayIndex(FIRST_STEP);
+    setReplayIndex(wv.firstStep);
     setBrief(null);
   };
 
@@ -663,14 +695,14 @@ export default function App() {
       volcano,
       step: currentStep,
       review,
-      issues: FIXTURES.issues,
+      issues: wv.fixtures.issues,
       nea,
       drift,
       warnings: nearWarnings,
       otherTsunami: elsewhereWarnings.filter((w) => w.authority === 'official' && w.hazard === 'tsunami' && !isExpired(w, nowMs)),
       warningFeeds: allFeeds,
-      dataAsOf: DATA_AS_OF,
-      stepCount: STEPS.length || undefined,
+      dataAsOf: wv.dataAsOf,
+      stepCount: wv.steps.length || undefined,
     };
     let text: string;
     try {
@@ -745,18 +777,18 @@ export default function App() {
   useEffect(() => {
     if (!playing) return;
     const timer = window.setTimeout(() => {
-      const pos = STEPS.findIndex((s) => s.index === replayIndex);
-      const next = STEPS[pos + 1];
+      const pos = wv.steps.findIndex((s) => s.index === replayIndex);
+      const next = wv.steps[pos + 1];
       if (!next) {
         setPlaying(false);
         return;
       }
       setReplayIndex(next.index);
       setBrief(null);
-      if (pos + 2 >= STEPS.length) setPlaying(false);
+      if (pos + 2 >= wv.steps.length) setPlaying(false);
     }, PLAY_INTERVAL_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, replayIndex]);
+  }, [playing, replayIndex, wv]);
 
   // Esc outside the drawer and with no dialog open: close the card first, then the workspace.
   useEffect(() => {
@@ -826,25 +858,25 @@ export default function App() {
 
   // --- Render --------------------------------------------------------------
 
-  const firstName = FIRST_INCIDENT ? (PLACE_NAMES[FIRST_INCIDENT.id] ?? FIRST_INCIDENT.title) : null;
+  const firstName = wv.firstIncident ? (PLACE_NAMES[wv.firstIncident.id] ?? wv.firstIncident.title) : null;
   const disabledNote =
-    STEPS.length === 0 ? 'No replay days are loaded.' : incident ? null : `Pick an area to step through the last ${STEPS.length} days.`;
-  const contextLabel = incident && currentStep ? `${currentStep.label}, day ${stepPos + 1} of ${STEPS.length}` : incident ? 'all records' : null;
+    wv.steps.length === 0 ? 'No replay days are loaded.' : incident ? null : `Pick an area to step through the last ${wv.steps.length} days.`;
+  const contextLabel = incident && currentStep ? `${currentStep.label}, day ${stepPos + 1} of ${wv.steps.length}` : incident ? 'all records' : null;
   const neaLoading = neaResult === null && incident !== null && isNearSingapore(incident.lat, incident.lon);
   const selectedName = incident ? (PLACE_NAMES[incident.id] ?? incident.title) : null;
   const cityName = selectedCityId ? (airQuality?.places.find((p) => p.id === selectedCityId)?.name ?? null) : null;
 
   /** Snapshot data acknowledgements (FIRMS, USGS, "Sumber data: BMKG"): in the Volcanoes and Sources sections. */
   const attribution =
-    ATTRIBUTIONS.length > 0 ? (
+    wv.attributions.length > 0 ? (
       <div className="data-attribution">
-        {ATTRIBUTIONS.filter((line) => line.length <= 120).map((line) => (
+        {wv.attributions.filter((line) => line.length <= 120).map((line) => (
           <p key={line}>{line}</p>
         ))}
-        {ATTRIBUTIONS.some((line) => line.length > 120) && (
+        {wv.attributions.some((line) => line.length > 120) && (
           <details className="data-attribution-more">
             <summary>Data acknowledgements</summary>
-            {ATTRIBUTIONS.filter((line) => line.length > 120).map((line) => (
+            {wv.attributions.filter((line) => line.length > 120).map((line) => (
               <p key={line}>{line}</p>
             ))}
           </details>
@@ -918,8 +950,8 @@ export default function App() {
           neaLoading={neaResult === null}
           wind10m={windResult?.grid ?? null}
           wind925={wind925}
-          hazeSources={HAZE_SOURCES}
-          hotspotSnapshot={FIXTURES.snapshot ?? null}
+          hazeSources={wv.hazeSources}
+          hotspotSnapshot={wv.fixtures.snapshot ?? null}
           fires={firesSummary}
           transportStartISO={transport?.time ?? null}
           scrubberISO={hazeHour.timeISO || null}
@@ -944,7 +976,7 @@ export default function App() {
     case 'volcanoes':
       section = (
         <VolcanoesSection
-          incidents={INCIDENTS}
+          incidents={wv.incidents}
           reviews={reviews}
           placeNames={PLACE_NAMES}
           selectedId={incident?.id ?? null}
@@ -954,7 +986,7 @@ export default function App() {
           missingId={missingId}
           review={review}
           volcano={volcano}
-          firstIncident={FIRST_INCIDENT}
+          firstIncident={wv.firstIncident}
           firstName={firstName}
           onInspect={openInspector}
           nearWarnings={nearWarnings}
@@ -963,7 +995,7 @@ export default function App() {
           watchRules={incident ? RULES_BY_WATCH[incident.id] : undefined}
           nea={{ loading: neaLoading, context: nea, drift, fellBack: neaResult?.fellBack ?? false, error: neaResult?.error ?? null }}
           replay={{
-            steps: STEPS,
+            steps: wv.steps,
             index: replayIndex,
             enabled: replayEnabled,
             playing,
@@ -984,10 +1016,11 @@ export default function App() {
             onDownload: downloadBrief,
           }}
           attribution={attribution}
-          dataAsOf={DATA_AS_OF}
+          dataAsOf={wv.dataAsOf}
+          dataLive={wv.fixtures.snapshot?.dataMode === 'live'}
           scenarioPanel={
             <EruptionScenarioPanel
-              watches={FIXTURES.watches ?? []}
+              watches={wv.fixtures.watches ?? []}
               ashWind={ashWind}
               nowMs={anchorMs}
               warnings={allWarnings}
@@ -1068,7 +1101,7 @@ export default function App() {
       hazeHour={hazeHour}
       wind925={wind925}
       neaHaze={nea?.haze ?? null}
-      incidents={INCIDENTS}
+      incidents={wv.incidents}
       placeNames={PLACE_NAMES}
       levels={levels}
       ashWind={ashWind}
@@ -1082,7 +1115,7 @@ export default function App() {
   );
 
   const mapProps: MapViewProps = {
-    incidents: INCIDENTS,
+    incidents: wv.incidents,
     states,
     placeNames: PLACE_NAMES,
     selection,
@@ -1156,7 +1189,7 @@ export default function App() {
         workspaceOpen={ws !== null}
         onWorkspace={() => (ws ? closeWorkspace() : openSection(lastWs.current))}
       >
-        <DataCheckNotice issues={FIXTURES.issues} duplicatesIgnored={FIXTURES.duplicatesIgnored} loadError={LOAD_ERROR} />
+        <DataCheckNotice issues={wv.fixtures.issues} duplicatesIgnored={wv.fixtures.duplicatesIgnored} loadError={LOAD_ERROR} />
       </AppHeader>
 
       <Taskbar active={ws} onOpen={(s) => (ws === s ? closeWorkspace() : openSection(s))} onMap={closeWorkspace} alerts={alerts} />
@@ -1176,8 +1209,8 @@ export default function App() {
       <RecordInspector
         item={inspected}
         incidentTitle={incident?.title ?? null}
-        steps={STEPS}
-        members={inspected ? (MEMBERS[inspected.observation.id] ?? []) : []}
+        steps={wv.steps}
+        members={inspected ? (wv.members[inspected.observation.id] ?? []) : []}
         onClose={() => setInspectedId(null)}
       />
       <WarningInspector warning={inspectedWarning} gauge={inspectedGauge} feed={inspectedFeed} onClose={() => setInspectedWarningId(null)} />
