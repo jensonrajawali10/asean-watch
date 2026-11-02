@@ -25,11 +25,21 @@ function clockOf(iso: string): string {
   return Number.isNaN(d.getTime()) ? iso : `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
-function MembersTable({ members }: { members: HotspotMember[] }) {
+/**
+ * The hotspots kept with a record. A haze daily total with more hotspots than the snapshot keeps (scripts/lib/
+ * watchDataBuild.mjs keeps the strongest per satellite per day) counts them all but lists only these, so the
+ * heading says so rather than suggesting the list is every hotspot.
+ */
+export function MembersTable({ members, counted }: { members: HotspotMember[]; counted: number | null }) {
   const hasDistance = members.some((m) => m.distanceKm !== null);
+  const partial = counted !== null && counted > members.length;
   return (
     <div className="members">
-      <h3 className="mini-title">Hotspots in this record ({members.length})</h3>
+      <h3 className="mini-title">
+        {partial
+          ? `The ${members.length} strongest hotspots, kept for review (the record counts ${counted.toLocaleString('en-GB')} confident detections)`
+          : `Hotspots in this record (${members.length})`}
+      </h3>
       <table className="members-table">
         <thead>
           <tr>
@@ -156,7 +166,12 @@ export default function RecordInspector({ item, incidentTitle, steps, members = 
               </Field>
             </dl>
 
-            {members.length > 0 && <MembersTable members={members} />}
+            {members.length > 0 && (
+              <MembersTable
+                members={members}
+                counted={o.category === 'thermal' && o.unit === 'detections' && typeof o.value === 'number' ? o.value : null}
+              />
+            )}
 
             <details className="disclosure all-fields">
               <summary>All fields</summary>
