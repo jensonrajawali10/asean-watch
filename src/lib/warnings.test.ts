@@ -7,6 +7,7 @@ import { MAGMA_WATCHED, parseMagmaLevelList, selectMagmaVolcanoes } from './magm
 import * as warningsModule from './warnings';
 import { DSDA_RELAY_PATH, DSDA_XML_URL } from './dsdaRelay';
 import { sgRelayUrl } from './sgRelay';
+import { THAIWATER_RELAY_PATH } from './thaiwaterRelay';
 import warningsSource from './warnings.ts?raw';
 import mapViewSource from '../components/map/MapView.tsx?raw';
 import {
@@ -21,6 +22,7 @@ import {
   loadOfficialWarnings,
   loadWarningsSnapshot,
   magmaRecords,
+  newestReadingAt,
   parseBmkgGempa,
   parseBmkgTsunami,
   bmkgObservations,
@@ -791,7 +793,7 @@ function replies(): Map<string, Reply> {
     [FEEDS.geonet.url, { body: GEONET }],
     [FEEDS.nws.url, { body: NWS_EMPTY }],
     [FEEDS.gdacs.url, { body: GDACS }],
-    [FEEDS.thaiwater.url, { body: THAIWATER }],
+    [THAIWATER_RELAY_PATH, { body: { available: true, retrievedAt: '2026-10-13T07:10:00Z', stale: false, raw: THAIWATER } }],
     [DSDA_RELAY_PATH, { body: { available: true, url: DSDA_XML_URL, retrievedAt: '2026-10-13T07:15:00Z', xml: DSDA_XML } }],
     [sgRelayUrl('flood-alerts'), { body: { available: true, feed: 'flood-alerts', retrievedAt: '2026-10-13T07:30:00Z', stale: false, raw: PUB_EMPTY } }],
   ]);
@@ -820,6 +822,35 @@ function fakeFetch(overrides: Record<string, Reply> = {}) {
 }
 
 const statusOf = (feeds: WarningFeedStatus[], id: string) => feeds.find((f) => f.feedId === id) as WarningFeedStatus;
+
+describe('newestReadingAt (the time a gauge feed is judged by)', () => {
+  const gauge = (observedAt: string) => ({ ...parseThaiWater(THAIWATER, LIVE).gauges[0], observedAt });
+  const result = (...times: string[]) => ({ warnings: [], gauges: times.map(gauge), note: null });
+
+  it('is the newest reading, compared as times (not text), and null without gauges', () => {
+    expect(newestReadingAt(result(), '2026-10-13T08:00:00Z')).toBeNull();
+    expect(newestReadingAt(result('2026-10-13T06:00:00Z', '2026-10-13T07:00:00.500Z', '2026-10-13T07:00:00Z'), '2026-10-13T08:00:00Z')).toBe(
+      '2026-10-13T07:00:00.500Z',
+    );
+  });
+
+  it('skips a reading stamped more than 5 minutes after the feed was retrieved (a wrong gauge clock)', () => {
+    const at = '2026-10-13T08:00:00Z';
+    expect(newestReadingAt(result('2026-10-13T06:00:00Z', '2026-10-13T08:05:00Z'), at)).toBe('2026-10-13T08:05:00Z');
+    expect(newestReadingAt(result('2026-10-13T06:00:00Z', '2026-10-13T08:05:01Z'), at)).toBe('2026-10-13T06:00:00Z');
+    expect(newestReadingAt(result('2026-10-14T00:00:00Z'), at)).toBeNull();
+    // No retrieval time: nothing to check against, so every reading counts.
+    expect(newestReadingAt(result('2026-10-14T00:00:00Z'), null)).toBe('2026-10-14T00:00:00Z');
+  });
+
+  it('feeds without gauges carry no reading time', () => {
+    const r = loadWarningsSnapshot();
+    for (const f of r.feeds) {
+      if (f.feedId === 'thaiwater' || f.feedId === 'dsda-jakarta') expect(f.newestReadingAt, f.feedId).toMatch(/Z$/);
+      else expect(f.newestReadingAt, f.feedId).toBeUndefined();
+    }
+  });
+});
 
 describe('loadOfficialWarnings', () => {
   it('loads every feed live, MAGMA as its bundled record, sorted', async () => {
@@ -948,6 +979,40 @@ describe('loadOfficialWarnings', () => {
       /^Live feed unavailable \(DSDA's website shows a security certificate that cannot be verified, so its data cannot be trusted in transit\); showing the bundled snapshot captured \S+Z\. Check Dinas Sumber Daya Air DKI Jakarta \(Posko Banjir DSDA\) directly for current messages\.$/,
     );
     expect(r.gauges.filter((g) => g.id.startsWith('dsda-jakarta:')).every((g) => g.dataMode === 'historical')).toBe(true);
+  });
+
+  it('reads ThaiWater through the same-origin relay, never from the browser directly; items still cite ThaiWater', async () => {
+    const { fn, calls } = fakeFetch();
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    expect(calls).toContain(THAIWATER_RELAY_PATH);
+    expect(calls.some((u) => u.includes('thaiwater.net'))).toBe(false);
+    const s = statusOf(r.feeds, 'thaiwater');
+    expect(s.status).toBe('live');
+    // The time the relay fetched the list upstream, and the newest gauge reading in it.
+    expect(s.retrievedAt).toBe('2026-10-13T07:10:00Z');
+    const tw = r.gauges.filter((g) => g.id.startsWith('thaiwater:'));
+    expect(s.newestReadingAt).toBe(tw.map((g) => g.observedAt).sort().at(-1));
+    expect(tw.every((g) => g.retrievedAt === '2026-10-13T07:10:00Z' && g.sourceUrl === FEEDS.thaiwater.url)).toBe(true);
+    // Level 5 is still relayed verbatim, as a gauge category, never an evacuation order.
+    const w = r.warnings.find((x) => x.id === 'thaiwater:C.35:2026-10-13T06:00:00Z');
+    expect(w).toMatchObject({ level: 'น้ำล้นตลิ่ง', sourceUrl: FEEDS.thaiwater.url, dataMode: 'live' });
+  });
+
+  it('a throttled ThaiWater shows the relay reason beside the HISTORICAL snapshot, with no browser backoff error', async () => {
+    const { fn } = fakeFetch({
+      [THAIWATER_RELAY_PATH]: { body: { available: false, checkedAt: '2026-10-13T07:10:00Z', reason: 'rate_limited', message: 'x' } },
+    });
+    const r = await loadOfficialWarnings({ fetchImpl: fn });
+    const s = statusOf(r.feeds, 'thaiwater');
+    expect(s.status).toBe('snapshot');
+    expect(s.message).toMatch(
+      /^Live feed unavailable \(ThaiWater rate limited\); showing the bundled snapshot captured \S+Z\. Check ThaiWater \(Hydro-Informatics Institute\) directly for current messages\.$/,
+    );
+    const tw = r.gauges.filter((g) => g.id.startsWith('thaiwater:'));
+    expect(tw.length).toBeGreaterThan(0);
+    expect(tw.every((g) => g.dataMode === 'historical')).toBe(true);
+    // The snapshot's own newest reading, so its age is judged too (src/lib/staleness.ts).
+    expect(s.newestReadingAt).toBe(tw.map((g) => g.observedAt).sort().at(-1));
   });
 
   it('relayedDsda: only the fixed reasons reach the visitor', () => {

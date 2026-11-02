@@ -11,6 +11,7 @@ The first screen: a full-screen map of the region with the haze forecast, wind s
 - `map-fit` the page never scrolls sideways at desktop or phone width.
 - `map-fires-live` `/api/fires` answers, and the map key's fire line matches the data's age: "in the last 24 hours" for data under 12 hours old, otherwise a named day ("in the 24 h to 24 Oct"). A failed relay is never read as "no fires".
 - `map-vaac-live` `/api/vaac` answers, and every advisory it relays says `VAAC: TOKYO` (VAAC Darwin's text is never relayed). Ash advisories are aviation products and are never drawn as warning pins.
+- `map-thaiwater-live` `/api/thaiwater` answers HTTP 200 (a throttled ThaiWater is `{ available: false }` beside the saved copy, never a console error), and the page never asks ThaiWater directly.
 
 ## How to get to it (user POV)
 
@@ -30,6 +31,7 @@ Preconditions:
 - **Fit.** Same step. `saw.layout.scrollWidth` equals `saw.layout.innerWidth` at both viewports.
 - **Live fires.** Same run, step `fires-live`: `GET /api/fires` must answer HTTP 200. `saw.available`, `saw.reference` (the data's time) and `saw.keyShouldSay` say what the key must read. The step opens the key if folded, reads the fire line (`saw.keyFires`) and fails if it claims "the last 24 hours" for older data, or misses it for fresh data. Screenshot `<viewport>-<nn>-map-key-fires.png`.
 - **Ash advisories.** Same run, step `vaac-live`: `GET /api/vaac` must answer HTTP 200. `saw.advisories` lists what it relays (often empty: the last 24 hours only). It fails on any text not issued by Tokyo, and reports `skip` when the relay answers `{ "available": false }` (the page then shows its saved copy).
+- **River gauges.** Same run, step `thaiwater-live`: `GET /api/thaiwater` must answer HTTP 200. `saw.gauges`, `saw.newestReadingIct` (ThaiWater's own ICT time) and `saw.level5` describe the list. It fails if the page asked a `thaiwater.net` host itself (`saw.pageAskedThaiWaterDirectly`), and reports `skip` when the relay answers `{ "available": false }`.
 - **Proof.** Screenshot `<viewport>-01-map.png`, plus `open` for an ARIA snapshot: `npm run verify -- open --viewport phone`.
 
 ## Gotchas

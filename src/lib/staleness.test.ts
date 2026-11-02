@@ -24,6 +24,7 @@ import {
   intervalForSource,
   okSentence,
   olderSentence,
+  readingIntervalForFeed,
   staleAfterMs,
   trackFeedAnswers,
 } from './staleness';
@@ -54,7 +55,7 @@ describe('UPDATE_INTERVALS (the documented table)', () => {
       expect(r.clock.length, r.id).toBeGreaterThan(5);
       expect(r.why.length, r.id).toBeGreaterThan(20);
       if (r.docUrl !== null) expect(r.docUrl, r.id).toMatch(/^https:\/\//);
-      expect(['data', 'feed', 'copy']).toContain(r.kind);
+      expect(['data', 'feed', 'copy', 'reading']).toContain(r.kind);
     }
   });
 
@@ -67,6 +68,10 @@ describe('UPDATE_INTERVALS (the documented table)', () => {
     expect(staleAfterMs(rule('magma-copy'))).toBe(12 * H);
     expect(staleAfterMs(rule('vaac-tokyo'))).toBe(H);
     expect(rule('vaac-tokyo').kind).toBe('feed');
+    expect(staleAfterMs(rule('thaiwater-gauges'))).toBe(2 * H);
+    expect(staleAfterMs(rule('dsda-gauges'))).toBe(2 * H);
+    expect(rule('thaiwater-gauges').kind).toBe('reading');
+    expect(rule('dsda-gauges').kind).toBe('reading');
   });
 
   it('is mirrored row for row in docs/DATA_AND_LIMITATIONS.md', () => {
@@ -231,6 +236,103 @@ describe('trackFeedAnswers and feedAge', () => {
 
   it('leaves an unavailable feed to its own "Official feed unavailable" sentence', () => {
     expect(feedAge({ ...base, status: 'unavailable', retrievedAt: null }, now)).toBeNull();
+  });
+});
+
+describe('gauge feeds: judged by their newest reading too', () => {
+  const now = Date.parse('2026-11-02T18:00:00Z');
+  const issuer = 'ThaiWater (Hydro-Informatics Institute)';
+  // The feed answered 5 minutes ago; only the newest reading's age varies.
+  const tw = (readingAgeMs: number | null, extra: Partial<WarningFeedStatus> = {}): WarningFeedStatus => ({
+    feedId: 'thaiwater',
+    issuer,
+    issuerUrl: 'https://www.thaiwater.net/',
+    status: 'live',
+    retrievedAt: iso(now - 5 * MIN),
+    lastAnswerAt: iso(now - 5 * MIN),
+    message: null,
+    ...(readingAgeMs === null ? {} : { newestReadingAt: iso(now - readingAgeMs) }),
+    ...extra,
+  });
+
+  it('only ThaiWater and Jakarta DSDA have a reading interval', () => {
+    expect(readingIntervalForFeed('thaiwater')?.id).toBe('thaiwater-gauges');
+    expect(readingIntervalForFeed('dsda-jakarta')?.id).toBe('dsda-gauges');
+    for (const id of ['bmkg-inatews', 'pub-flood', 'gdacs', 'magma-level-list', 'vaac-tokyo', 'ptwc']) expect(readingIntervalForFeed(id), id).toBeNull();
+  });
+
+  it('is fine up to and including 2 h, "Older than expected" one millisecond after, although the feed answered', () => {
+    const fine = feedAge(tw(2 * H), now);
+    expect(fine?.state).toBe('ok');
+    expect(fine?.interval.id).toBe('official-feed');
+    const old = feedAge(tw(2 * H + 1), now);
+    expect(old?.state).toBe('older');
+    expect(old?.interval.id).toBe('thaiwater-gauges');
+    expect(old?.at).toBe(iso(now - 2 * H - 1));
+    expect(old?.text).toBe(`Older than expected: newest gauge reading 2 h ago, usually hourly. Check ${issuer} directly.`);
+    expect(old?.short).toBe('Older than expected · 2 h');
+    expect(old?.text).not.toMatch(BANNED);
+  });
+
+  it('applies the same rule to Jakarta DSDA', () => {
+    const dsda = (readingAgeMs: number) => tw(readingAgeMs, { feedId: 'dsda-jakarta', issuer: 'Posko Banjir DSDA' });
+    expect(feedAge(dsda(2 * H), now)?.state).toBe('ok');
+    const old = feedAge(dsda(26 * H), now);
+    expect(old?.interval.id).toBe('dsda-gauges');
+    expect(old?.text).toBe('Older than expected: newest gauge reading 26 h ago, usually hourly. Check Posko Banjir DSDA directly.');
+  });
+
+  it('a quiet feed keeps "Feed quiet" (which already says data may be missing), and "checking" while it is asked again', () => {
+    const quiet = tw(30 * H, { lastAnswerAt: iso(now - H - 1) });
+    expect(feedAge(quiet, now)?.interval.kind).toBe('feed');
+    expect(feedAge(quiet, now)?.text).toMatch(/^Feed quiet for 1 h: /);
+    expect(feedAge(quiet, now, true)?.state).toBe('checking');
+  });
+
+  it('an answered feed with old readings stays flagged while the page asks it again (no flicker)', () => {
+    expect(feedAge(tw(3 * H), now, true)?.state).toBe('older');
+    expect(feedAge(tw(3 * H), now, true)?.interval.id).toBe('thaiwater-gauges');
+  });
+
+  it('judges no reading without a reading time, without a page clock, or one well ahead of the page clock', () => {
+    expect(feedAge(tw(null), now)?.interval.id).toBe('official-feed');
+    expect(feedAge(tw(3 * H), null)).toBeNull();
+    expect(feedAge(tw(-FUTURE_TOLERANCE_MS - 1), now)?.interval.id).toBe('official-feed');
+    // A feed without gauges ignores a stray reading time.
+    expect(feedAge(tw(30 * H, { feedId: 'bmkg-inatews' }), now)?.state).toBe('ok');
+    expect(feedAge(tw(30 * H, { status: 'unavailable' }), now)).toBeNull();
+  });
+
+  it('a saved copy shown after one failed refresh is judged by its own, older readings', () => {
+    const afterFailure = tw(6 * 24 * H, { status: 'snapshot', retrievedAt: '2026-10-27T07:10:00Z' });
+    expect(feedAge(afterFailure, now)).toMatchObject({ state: 'older', interval: { id: 'thaiwater-gauges' } });
+    expect(feedAge(afterFailure, now)?.text).toMatch(/^Older than expected: newest gauge reading 6 days ago/);
+  });
+
+  it('shows in the Sources catalogue and its summary list, and in the Overview freshness lines', () => {
+    const feed = tw(5 * H);
+    const cat = buildSourceCatalogue({ airQuality: null, warningFeeds: [feed], nowMs: now });
+    const e = cat.find((x) => x.id === 'feed:thaiwater');
+    expect(e?.age).toMatchObject({ state: 'older', interval: { id: 'thaiwater-gauges', kind: 'reading' } });
+    expect(olderThanExpected(cat).map((x) => x.id)).toEqual(['feed:thaiwater']);
+    expect(buildSourceCatalogue({ airQuality: null, warningFeeds: [tw(H)], nowMs: now }).find((x) => x.id === 'feed:thaiwater')?.age?.state).toBe('ok');
+
+    const r = situationReport({ airQuality: null, warningFeeds: [feed], nowMs: now });
+    expect(r.freshness.find((f) => f.source === 'Official warning feeds')?.text).toMatch(/1 feed is quiet or older than expected \(below\)\.$/);
+    const line = r.freshness.find((f) => f.source === issuer);
+    expect(line?.time).toBe(feed.newestReadingAt);
+    expect(line?.text).toBe(`${issuer} (OFFICIAL): older than expected: newest gauge reading 5 h ago, usually hourly. Check ${issuer} directly.`);
+    expect(line?.text).not.toMatch(BANNED);
+  });
+
+  it('the bundled snapshot carries each gauge feed its newest reading', () => {
+    const ws = loadWarningsSnapshot();
+    for (const id of ['thaiwater', 'dsda-jakarta']) {
+      const f = ws.feeds.find((x) => x.feedId === id);
+      expect(f?.newestReadingAt, id).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+      // Never after the copy was captured.
+      expect(Date.parse(f?.newestReadingAt ?? '')).toBeLessThanOrEqual(Date.parse(f?.retrievedAt ?? ''));
+    }
   });
 });
 

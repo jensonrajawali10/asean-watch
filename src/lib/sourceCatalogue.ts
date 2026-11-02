@@ -15,7 +15,7 @@ import { QUAKE_SOURCES, USGS_TSUNAMI_FLAG_NOTE } from './quakesLive';
 import { BUNDLED_SEA_LEVEL_SNAPSHOT, SEA_LEVEL_ATTRIBUTION, SEA_LEVEL_NOTE } from './seaLevel';
 import { ASMC, FIRMS_PAGE, NUS_CRISP } from './situation';
 import type { SituationInput } from './situation';
-import { checkAge, intervalForSource } from './staleness';
+import { checkAge, feedAge, intervalForSource } from './staleness';
 import type { AgeCheck } from './staleness';
 import { GEOBOUNDARIES_ATTRIBUTION } from './tsunamiAreas';
 import { VAA_AVIATION_NOTE, VAAC_TOKYO_ATTRIBUTION, VAAC_WINDOW_NOTE } from './vaac';
@@ -131,7 +131,11 @@ const FEED_FACTS: Record<string, { name: string; licence: string; usedFor: strin
     name: 'ThaiWater water levels (Hydro-Informatics Institute; RID gauges)',
     licence: 'Attributed on screen; terms not found.',
     usedFor: 'Gauges at situation level 5 ("overflowing bank") relayed as flood messages; every gauge kept as a reading.',
-    limitations: ['A ThaiWater situation level is a gauge category, not an evacuation order.', 'Times are ICT (UTC+7), converted to UTC.'],
+    limitations: [
+      'A ThaiWater situation level is a gauge category, not an evacuation order.',
+      'Times are ICT (UTC+7), converted to UTC.',
+      "Read through this site's relay /api/thaiwater, which keeps ThaiWater's list for 10 minutes.",
+    ],
   },
   'dsda-jakarta': {
     name: 'Jakarta DSDA Posko Banjir floodgate levels',
@@ -523,12 +527,15 @@ export function buildSourceCatalogue(input: SituationInput): SourceEntry[] {
       limitations: [],
     },
   );
-  return out.map((e) => ({ ...e, age: entryAge(e, input) }));
+  const feeds = new Map((input.warningFeeds ?? []).map((f) => [`feed:${f.feedId}`, f]));
+  return out.map((e) => ({ ...e, age: entryAge(e, input, feeds.get(e.id)) }));
 }
 
 /** An unavailable feed already says "Official feed unavailable: check <issuer> directly"; it has no age. */
-function entryAge(e: SourceEntry, input: SituationInput): AgeCheck | null {
+function entryAge(e: SourceEntry, input: SituationInput, feed: WarningFeedStatus | undefined): AgeCheck | null {
   if (e.mode === 'UNAVAILABLE' || e.mode === 'NOT LOADED') return null;
+  // An official feed is judged as everywhere else (feedAge): its answers, and a gauge feed's newest reading.
+  if (feed) return feedAge(feed, input.nowMs, input.warningFeedsChecking === true);
   return checkAge(intervalForSource(e.id), e.updatedAt ?? e.retrievedAt, input.nowMs, {
     issuer: e.issuer,
     checking: e.id.startsWith('feed:') && input.warningFeedsChecking === true,

@@ -296,7 +296,12 @@ class Session {
     this.steps = [];
     this.errors = [];
     this.network = [];
+    // Requests the page makes straight to ThaiWater (it must use the relay /api/thaiwater instead).
+    this.thaiwaterDirect = [];
     this.shotN = 0;
+    page.on('request', (r) => {
+      if (/(^|\.)thaiwater\.net$/.test(new URL(r.url()).hostname)) this.thaiwaterDirect.push(r.url());
+    });
     page.on('console', (m) => {
       if (m.type() !== 'error') return;
       const text = m.text();
@@ -564,6 +569,30 @@ async function journeyMap(s) {
     const foreign = advisories.filter((a) => !/^VAAC: TOKYO$/m.test(a.text ?? ''));
     if (foreign.length > 0) throw new Error(`/api/vaac relayed text not issued by Tokyo VAAC: ${foreign.map((a) => a.url).join(', ')}`);
   });
+
+  // The ThaiWater relay answers HTTP 200 whatever ThaiWater does (a 429 becomes { available: false } beside the
+  // saved copy, never a console error), and the page never asks ThaiWater directly.
+  await s.step('thaiwater-live', async (rec) => {
+    const res = await fetch(new URL('api/thaiwater', s.baseUrl), { signal: AbortSignal.timeout(30_000) });
+    rec.did.push('GET /api/thaiwater');
+    rec.saw.status = res.status;
+    if (res.status !== 200) throw new Error(`/api/thaiwater answered HTTP ${res.status}`);
+    const body = await res.json();
+    rec.saw.available = body.available === true;
+    rec.saw.pageAskedThaiWaterDirectly = [...new Set(s.thaiwaterDirect)];
+    if (rec.saw.pageAskedThaiWaterDirectly.length > 0) throw new Error(`the page asked ThaiWater directly: ${rec.saw.pageAskedThaiWaterDirectly.join(', ')}`);
+    if (!rec.saw.available) {
+      rec.saw.reason = body.reason ?? null;
+      throw new Skip(`/api/thaiwater is unavailable (${body.reason}: ${body.message}); the page shows its saved copy`);
+    }
+    const rows = Array.isArray(body.raw?.waterlevel_data?.data) ? body.raw.waterlevel_data.data : null;
+    if (!rows) throw new Error('/api/thaiwater answered without a waterlevel_data list');
+    rec.saw.retrievedAt = body.retrievedAt;
+    rec.saw.stale = body.stale === true;
+    rec.saw.gauges = rows.length;
+    rec.saw.newestReadingIct = rows.map((r) => r.waterlevel_datetime).filter((t) => typeof t === 'string').sort().at(-1) ?? null;
+    rec.saw.level5 = rows.filter((r) => Number(r.situation_level) === 5).length;
+  });
 }
 
 async function journeyLayers(s) {
@@ -828,7 +857,7 @@ async function acquireServer(args) {
     return { url: state.url, started: null };
   }
   log('Starting a private dev server ...');
-  const started = await startServer(DEFAULT_PORT);
+  const started = await startServer(args.port && args.port !== true ? Number(args.port) : DEFAULT_PORT);
   log(`Dev server up: ${started.url} (pid ${started.pid})`);
   return { url: started.url, started };
 }
