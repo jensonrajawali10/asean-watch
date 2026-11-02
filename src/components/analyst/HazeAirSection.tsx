@@ -28,6 +28,8 @@ import type { WindGrid } from '../../lib/windField';
 import { AnalystSection, AnalystSubhead, KeyFigure } from './AnalystSection';
 import type { SectionSource } from './AnalystSection';
 import { BasisTag, ExtLink, FreshnessChip } from './reportParts';
+import { checkAge, intervalById } from '../../lib/staleness';
+import { useNowMs } from '../../lib/useNowMs';
 import './workspaceSections.css';
 
 export interface HazeAirSectionProps {
@@ -207,7 +209,12 @@ export default function HazeAirSection({
   }, [table, sortKey, citiesOnly]);
 
   const live = airQuality?.dataMode === 'live';
-  const nowWord = live ? 'Now' : 'Snapshot hour';
+  // A live run past CAMS' expected update interval is not "now" either (the same check as the headline,
+  // src/lib/situation.ts): it reads "model hour" and says why.
+  const nowMs = useNowMs();
+  const runAge = live ? checkAge(intervalById('cams-pm25'), airQuality?.retrievedAt, nowMs) : null;
+  const oldRun = runAge?.state === 'older';
+  const nowWord = !live ? 'Snapshot hour' : oldRun ? 'Model hour' : 'Now';
   const sgPlace = airQuality?.places.find((p) => p.id === 'singapore') ?? null;
   const sgRow = table?.rows.find((r) => r.id === 'singapore') ?? null;
   const haze = nea?.haze ?? null;
@@ -314,7 +321,13 @@ export default function HazeAirSection({
 
           <AnalystSubhead>Every tracked place</AnalystSubhead>
           <p className="an-muted">
-            Model hour {utcStamp(anchorISO)} ({live ? 'the live run, fetched this session' : `the bundled snapshot run captured ${utcStamp(table.retrievedAt)}; not current conditions`}).
+            Model hour {utcStamp(anchorISO)} (
+            {!live
+              ? `the bundled snapshot run captured ${utcStamp(table.retrievedAt)}; not current conditions`
+              : oldRun && runAge
+                ? `a live run fetched ${utcStamp(table.retrievedAt)}; not current conditions. ${runAge.text}`
+                : 'the live run, fetched this session'}
+            ).
             Peaks use the run's {table.stepHours === 1 ? 'hourly' : `${table.stepHours}-hourly`} values to {utcStamp(table.forecastEndISO)}
             {table.covers48h ? '' : `, which is short of +${HAZE_FUTURE_H} h`}. "× WHO" is the 24 h mean up to the model hour divided by the WHO
             24-hour guideline of {WHO_PM25_24H_UGM3} µg/m³. Towns marked as fire areas sit in peatland districts with recurrent fires.
@@ -323,7 +336,7 @@ export default function HazeAirSection({
             <span>Sort:</span>
             {SORTS.map((s) => (
               <button key={s.key} type="button" className="anx-sort" aria-pressed={sortKey === s.key} onClick={() => setSortKey(s.key)}>
-                {s.key === 'now' && !live ? 'Worst at snapshot hour' : s.label}
+                {s.key === 'now' && !live ? 'Worst at snapshot hour' : s.key === 'now' && oldRun ? 'Worst at model hour' : s.label}
               </button>
             ))}
             <label>
