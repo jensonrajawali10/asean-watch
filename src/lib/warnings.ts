@@ -14,7 +14,9 @@
 // - MAGMA Indonesia (PVMBG): API is token-only. The capture script parses the public level list
 //   https://magma.esdm.go.id/v1/gunung-api/tingkat-aktivitas (src/lib/magmaLevels.ts) into snapshot records,
 //   with the capture time as retrievedAt (Level III/IV plus the watched volcanoes). Coordinates: Smithsonian GVP WFS.
-// - ThaiWater waterlevel_load (HII; RID gauges). Times are ICT (UTC+7) with no offset.
+// - ThaiWater waterlevel_load (HII; RID gauges). Times are ICT (UTC+7) with no offset. Read through the
+//   same-origin cached relay /api/thaiwater (src/lib/thaiwaterProxy.ts): ThaiWater sometimes answers
+//   browsers with HTTP 429, which printed a console error. Items still cite ThaiWater's own URL.
 // - Jakarta DSDA Posko Banjir xmldata.xml. Units: the XML is in millimetres. Evidence: DSDA's own page
 //   https://poskobanjir.dsdadki.web.id/ renders every value as `value / 10 + " cm"` (thresholds and
 //   water level, e.g. label_siaga1 " > " + vSiaga1 / 10 + " cm (BAHAYA)"), and Katulampa's 2000/1500/800
@@ -27,6 +29,7 @@ import snapshotJson from '../../data/warnings-snapshot.json';
 import type { OfficialWarning, OfficialWarningArea, TsunamiObservation, WarningFeedStatus, WarningHazard } from '../types';
 import { DSDA_REASON_TEXT, DSDA_RELAY_PATH, type DsdaUnavailableReason } from './dsdaRelay';
 import { SgUnavailable, sgRelayUrl, unwrapSgRelay } from './sgRelay';
+import { THAIWATER_REASON_TEXT, THAIWATER_RELAY_PATH, type ThaiWaterUnavailableReason } from './thaiwaterRelay';
 import { dataGovSgBackoffUntil, haversineKm, markDataGovSgRateLimited, toUtcIso } from './nea';
 import { idnDistrictIndex, placeTsunamiAreas } from './tsunamiAreas';
 import { isExpired } from './warningExpiry';
@@ -1286,6 +1289,19 @@ export function relayedDsda(payload: unknown): Relayed {
   throw new Error(reason ? DSDA_REASON_TEXT[reason] : 'the DSDA relay did not return floodgate data');
 }
 
+/**
+ * The ThaiWater relay's answer (src/lib/thaiwaterRelay.ts) -> ThaiWater's water-level list, or an error
+ * carrying one of the relay's fixed reasons (shown as "Live feed unavailable (…)" beside the HISTORICAL snapshot).
+ */
+export function relayedThaiWater(payload: unknown): Relayed {
+  if (!isRecord(payload)) throw new Error('the ThaiWater relay answer was not in the expected shape');
+  const retrievedAt = toUtcIso(payload.retrievedAt);
+  if (payload.available === true && retrievedAt && 'raw' in payload) return new Relayed(payload.raw, retrievedAt);
+  const reason =
+    typeof payload.reason === 'string' && payload.reason in THAIWATER_REASON_TEXT ? (payload.reason as ThaiWaterUnavailableReason) : null;
+  throw new Error(reason ? THAIWATER_REASON_TEXT[reason] : 'the ThaiWater relay did not return its water-level list');
+}
+
 /** The data.gov.sg relay's answer (src/lib/sgRelay.ts) for PUB flood alerts -> data.gov.sg's body. */
 function relayedSg(payload: unknown): Relayed {
   const { raw, retrievedAt } = unwrapSgRelay(payload, 'flood-alerts');
@@ -1336,7 +1352,8 @@ const SPECS: FeedSpec[] = [
   { key: 'nws', parse: parseNwsAlerts, fetchRaw: (get) => get(FEEDS.nws.url, 'json') },
   { key: 'gdacs', parse: parseGdacs, fetchRaw: (get, nowMs) => get(gdacsSearchUrl(nowMs), 'json') },
   { key: 'magma', parse: parseMagmaSnapshot },
-  { key: 'thaiwater', parse: parseThaiWater, fetchRaw: (get) => get(FEEDS.thaiwater.url, 'json') },
+  // Through the same-origin relay (api/thaiwater.ts): ThaiWater sometimes answers browsers with HTTP 429.
+  { key: 'thaiwater', parse: parseThaiWater, fetchRaw: async (get) => relayedThaiWater(await get(THAIWATER_RELAY_PATH, 'json')) },
   // Through the same-origin relay (api/dsda.ts): DSDA's certificate is not trusted by browsers.
   { key: 'dsda', parse: parseDsda, fetchRaw: async (get) => relayedDsda(await get(DSDA_RELAY_PATH, 'json')) },
   // Through the same-origin relay (api/sg.ts): data.gov.sg's keyless limit is a few requests a second.
@@ -1525,9 +1542,38 @@ interface FeedOutcome {
   result: FeedParseResult;
 }
 
-function statusOf(spec: FeedSpec, status: WarningFeedStatus['status'], retrievedAt: string | null, message: string | null): WarningFeedStatus {
+/** A reading stamped this far after the feed was retrieved is a wrong gauge clock, not a newer reading. */
+const READING_CLOCK_TOLERANCE_MS = 5 * 60 * 1000;
+
+/**
+ * The newest gauge reading time (ISO 8601 UTC) in a parse result; null when it has no gauges. Readings
+ * stamped more than 5 minutes after `retrievedAt` are skipped, so one gauge with a wrong clock cannot make
+ * the whole feed look current.
+ */
+export function newestReadingAt(result: FeedParseResult, retrievedAt: string | null): string | null {
+  const fetched = retrievedAt ? Date.parse(retrievedAt) : NaN;
+  const limit = Number.isFinite(fetched) ? fetched + READING_CLOCK_TOLERANCE_MS : Infinity;
+  let newest: { at: string; ms: number } | null = null;
+  for (const g of result.gauges) {
+    const ms = Date.parse(g.observedAt);
+    if (Number.isFinite(ms) && ms <= limit && (newest === null || ms > newest.ms)) newest = { at: g.observedAt, ms };
+  }
+  return newest?.at ?? null;
+}
+
+function statusOf(
+  spec: FeedSpec,
+  status: WarningFeedStatus['status'],
+  retrievedAt: string | null,
+  message: string | null,
+  result?: FeedParseResult,
+): WarningFeedStatus {
   const feed = FEEDS[spec.key];
-  return { feedId: feed.id, issuer: feed.issuer, issuerUrl: feed.issuerUrl, status, retrievedAt, message };
+  const out: WarningFeedStatus = { feedId: feed.id, issuer: feed.issuer, issuerUrl: feed.issuerUrl, status, retrievedAt, message };
+  // Gauge feeds carry their newest reading, judged against the agency's cadence (src/lib/staleness.ts).
+  const newest = result ? newestReadingAt(result, retrievedAt) : null;
+  if (newest) out.newestReadingAt = newest;
+  return out;
 }
 
 const EMPTY: FeedParseResult = { warnings: [], gauges: [], note: null };
@@ -1548,6 +1594,7 @@ function fromSnapshot(spec: FeedSpec, reason: string | null, source: WarningsSna
             ? `Bundled snapshot captured ${snap.retrievedAt}; not yet refreshed live. `
             : `Live feed unavailable (${reason}); showing the bundled snapshot captured ${snap.retrievedAt}. `) +
             `Check ${feed.issuer} directly for current messages.`,
+          result,
         ),
         result,
       };
@@ -1565,7 +1612,7 @@ function fromBundled(spec: FeedSpec, source: WarningsSnapshot | null): FeedOutco
   if (snap) {
     try {
       const result = spec.parse(snap.raw, { dataMode: 'historical', retrievedAt: snap.retrievedAt as string });
-      return { status: statusOf(spec, 'snapshot', snap.retrievedAt, result.note), result };
+      return { status: statusOf(spec, 'snapshot', snap.retrievedAt, result.note, result), result };
     } catch {
       // fall through
     }
@@ -1583,7 +1630,7 @@ async function loadFeed(
   if (!spec.fetchRaw) return fromBundled(spec, source);
   const now = Date.now();
   const cached = readCache(feed.id, now);
-  if (cached) return { status: statusOf(spec, 'cached', cached.retrievedAt, cached.result.note), result: cached.result };
+  if (cached) return { status: statusOf(spec, 'cached', cached.retrievedAt, cached.result.note, cached.result), result: cached.result };
 
   const sharedUntil = spec.dataGovSg ? dataGovSgBackoffUntil(now) : null;
   const backoff = readBackoff(feed.id, now) ?? (sharedUntil ? { until: sharedUntil, reason: 'data.gov.sg rate limited' } : null);
@@ -1612,7 +1659,7 @@ async function loadFeed(
     const result = spec.parse(raw, { dataMode: 'live', retrievedAt });
     writeCache(feed.id, { storedAt: Date.now(), retrievedAt, result });
     clearBackoff(feed.id);
-    return { status: statusOf(spec, 'live', retrievedAt, result.note), result };
+    return { status: statusOf(spec, 'live', retrievedAt, result.note, result), result };
   } catch (err) {
     const { reason, transient } = classify(err, timeoutMs);
     let text = reason;

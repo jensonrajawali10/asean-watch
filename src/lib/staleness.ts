@@ -21,8 +21,10 @@ export const FUTURE_TOLERANCE_MS = 5 * MINUTE_MS;
  * - `feed`: an official (or aggregator) feed this page asks every 5 minutes; flagged "Feed quiet".
  * - `copy`: a copy recorded once from a public page that no refresh updates; flagged "Older than expected"
  *   and sent to the issuer.
+ * - `reading`: the newest gauge reading in an official gauge feed (ThaiWater, Jakarta DSDA), against the
+ *   agency's own cadence; flagged "Older than expected" and sent to the issuer, even when the feed answered.
  */
-export type IntervalKind = 'data' | 'feed' | 'copy';
+export type IntervalKind = 'data' | 'feed' | 'copy' | 'reading';
 
 export interface UpdateInterval {
   id: string;
@@ -160,6 +162,34 @@ export const UPDATE_INTERVALS: readonly UpdateInterval[] = [
     kind: 'feed',
   },
   {
+    id: 'thaiwater-gauges',
+    source: 'ThaiWater water-level gauges (newest reading, through /api/thaiwater)',
+    usually: 'hourly',
+    everyMs: HOUR_MS,
+    graceMs: HOUR_MS,
+    clock: "the newest gauge reading time in ThaiWater's list",
+    why:
+      'ThaiWater publishes no update interval for its water-level list, but its readings are hourly: in the list fetched on ' +
+      '2 Nov 2026 at 16:11 UTC, 751 of 768 gauges were stamped on the hour and the newest was 11 min old. The extra hour ' +
+      "covers a late hourly reading and the relay's 10 min cache. Whether the feed answers is checked separately (official-feed).",
+    docUrl: 'https://api-v3.thaiwater.net/api/v1/thaiwater30/public/waterlevel_load',
+    kind: 'reading',
+  },
+  {
+    id: 'dsda-gauges',
+    source: 'Jakarta DSDA floodgate levels (newest reading, through /api/dsda)',
+    usually: 'hourly',
+    everyMs: HOUR_MS,
+    graceMs: HOUR_MS,
+    clock: "the newest gate reading time in DSDA's floodgate list",
+    why:
+      "DSDA publishes no update interval, but its gate readings are hourly: 34 of the 35 gates' TANGGAL times were on the hour " +
+      "in the 27 Oct 2026 copy, and BPBD DKI Jakarta's water-level page, sourced from DSDA, lists them in hourly columns. The " +
+      "extra hour covers a late reading and the relay's 5 min cache. Whether the feed answers is checked separately (official-feed).",
+    docUrl: 'https://bpbd.jakarta.go.id/waterlevel',
+    kind: 'reading',
+  },
+  {
     id: 'vaac-tokyo',
     source: 'Tokyo VAAC volcanic ash advisories (through /api/vaac)',
     usually: 'every 5 min',
@@ -214,6 +244,13 @@ export function intervalForSource(sourceId: string): UpdateInterval | null {
   return null;
 }
 
+/** The interval for a gauge feed's newest reading (WarningFeedStatus.feedId); null for feeds without gauges. */
+export function readingIntervalForFeed(feedId: string): UpdateInterval | null {
+  if (feedId === 'thaiwater') return intervalById('thaiwater-gauges');
+  if (feedId === 'dsda-jakarta') return intervalById('dsda-gauges');
+  return null;
+}
+
 /** The age past which a source is flagged. */
 export function staleAfterMs(interval: Pick<UpdateInterval, 'everyMs' | 'graceMs'>): number {
   return interval.everyMs + interval.graceMs;
@@ -264,6 +301,9 @@ export function olderSentence(interval: UpdateInterval, ageMs: number, issuer?: 
   if (interval.kind === 'copy') {
     return `Older than expected: recorded ${age} ago, usually updated ${interval.usually}. Check ${who} directly.`;
   }
+  if (interval.kind === 'reading') {
+    return `Older than expected: newest gauge reading ${age} ago, usually ${interval.usually}. Check ${who} directly.`;
+  }
   return `Older than expected: last update ${age} ago, usually ${interval.usually}.`;
 }
 
@@ -272,6 +312,7 @@ export function okSentence(interval: UpdateInterval, ageMs: number): string {
   const age = ageWords(ageMs);
   if (interval.kind === 'feed') return `Feed answered ${age} ago; this page asks ${interval.usually}.`;
   if (interval.kind === 'copy') return `Recorded ${age} ago; usually updated ${interval.usually}.`;
+  if (interval.kind === 'reading') return `Newest gauge reading ${age} ago; usually ${interval.usually}.`;
   return `Last update ${age} ago; usually ${interval.usually}.`;
 }
 
@@ -305,10 +346,17 @@ export function checkAge(
  * An official feed's age, counted from its last live answer on this page, else from its retrieval or capture
  * time. Null when the feed is unavailable (it already says "Official feed unavailable: check <issuer>
  * directly") or there is no page clock.
+ *
+ * A gauge feed (readingIntervalForFeed) is also judged by its newest reading: when the feed answered in time
+ * but that reading is past the agency's cadence, the reading's check ("Older than expected") is returned. A
+ * quiet or re-asked feed keeps its own check, which already says the data may be missing.
  */
 export function feedAge(f: WarningFeedStatus, nowMs: number | null | undefined, checking = false): AgeCheck | null {
   if (f.status === 'unavailable') return null;
-  return checkAge(intervalForSource(`feed:${f.feedId}`), f.lastAnswerAt ?? f.retrievedAt, nowMs, { issuer: f.issuer, checking });
+  const answer = checkAge(intervalForSource(`feed:${f.feedId}`), f.lastAnswerAt ?? f.retrievedAt, nowMs, { issuer: f.issuer, checking });
+  if (answer && answer.state !== 'ok') return answer;
+  const reading = checkAge(readingIntervalForFeed(f.feedId), f.newestReadingAt, nowMs, { issuer: f.issuer });
+  return reading?.state === 'older' ? reading : answer;
 }
 
 /**

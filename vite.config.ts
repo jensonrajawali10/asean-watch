@@ -50,6 +50,7 @@ export default defineConfig({
     relayDevApi('/api/dsda', '/src/lib/dsdaProxy.ts', 'handleDsdaRequest'),
     relayDevApi('/api/open-meteo', '/src/lib/openMeteoProxy.ts', 'handleOpenMeteoRequest'),
     relayDevApi('/api/sg', '/src/lib/sgProxy.ts', 'handleSgRequest'),
+    relayDevApi('/api/thaiwater', '/src/lib/thaiwaterProxy.ts', 'handleThaiWaterRequest'),
     relayDevApi('/api/ptwc', '/src/server/ptwcHandler.ts', 'handlePtwcRequest'),
     relayDevApi('/api/fires', '/src/lib/firesProxy.ts', 'handleFiresRequest'),
     relayDevApi('/api/watch', '/src/lib/watchProxy.ts', 'handleWatchRequest'),

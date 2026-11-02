@@ -288,6 +288,12 @@ export interface WarningFeedStatus {
    * real answer. Absent when the feed has not answered live since the page loaded.
    */
   lastAnswerAt?: string | null;
+  /**
+   * ISO 8601 UTC: the newest gauge reading time in what this status shows (gauge feeds: ThaiWater, Jakarta
+   * DSDA). src/lib/staleness.ts judges it against the agency's own cadence, so a feed that answers with old
+   * readings still reads "Older than expected". Absent for feeds without gauges, or with none read.
+   */
+  newestReadingAt?: string | null;
   /** Readable status or error text. */
   message: string | null;
 }
